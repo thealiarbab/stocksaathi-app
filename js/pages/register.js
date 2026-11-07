@@ -11,6 +11,7 @@ import { navigate } from "../router.js";
 import { wirePasswordToggle, finishSignIn } from "./login.js";
 import { suggestEmail, checkEmailDomain, inboxLinkFor } from "../auth/emailCheck.js";
 import { googleButtonHtml, wireGoogleButton } from "../components/googleButton.js";
+import { triesBarHtml, runLockCountdown } from "../components/triesBar.js";
 
 export function renderRegister(main) {
   let stage = "form";    // "form" → "otp" → done
@@ -484,7 +485,13 @@ export function renderRegister(main) {
             : `That code didn't work. Check each digit against the email${newest ? ` sent at ${newest}` : ""}.`)
           : err.message;
         main.querySelector("#otp-input")?.select();
-        errBox.innerHTML = `<div class="error-msg">${escapeHtml(msg)}</div>`;
+        if (err.code === "locked") {
+          errBox.innerHTML = `<div class="error-msg"><strong>Too many wrong codes.</strong> Code entry is paused for this email. When the timer ends, press <strong>Resend email</strong> for a fresh code.${triesBarHtml(err, "wrong codes")}</div>`;
+          btn.textContent = "Verify and continue";
+          runLockCountdown(errBox, btn, () => { errBox.innerHTML = `<div class="dim text-sm">You can try again now. Press Resend email for a fresh code.</div>`; });
+          return;
+        }
+        errBox.innerHTML = `<div class="error-msg">${escapeHtml(msg)}${triesBarHtml(err, "tries")}</div>`;
         btn.disabled = false;
         btn.textContent = "Verify and continue";
       }

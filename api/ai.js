@@ -59,7 +59,7 @@ function recordUsage(row) {
 }
 import { liveGeminiModel, isGemini3 } from "./_models.js";
 import { lastSessionIst } from "./_session.js";
-import { handleAuthEmailHook } from "./_authEmail.js";
+import { handleAuthEmailHook, handleAuthEmailFromDb } from "./_authEmail.js";
 
 export const config = { runtime: "edge" };
 
@@ -1709,7 +1709,9 @@ async function route(req) {
       case "admin-auth-update-email": return await opAdminAuthUpdateEmail(req, origin);
       case "admin-auth-set-password": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminAuthSetPassword(req, origin);
       case "auth-resolve-username":   if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthResolveUsername(req, origin);
+      case "auth-email-send":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await handleAuthEmailFromDb(req, checkCronSecret(req));
       case "auth-email-hook":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await handleAuthEmailHook(req);
+      case "auth-code-attempt":       if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthCodeAttempt(req, origin);
       case "auth-login":              if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthLogin(req, origin);
       case "auth-login-hint":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthLoginHint(req, origin);
       case "admin-auth-force-confirm": return await opAdminAuthForceConfirm(req, origin);
@@ -3105,46 +3107,97 @@ async function opAuthResolveUsername(req, origin) {
   return j(410, { error: "gone" }, origin);
 }
 
-// Username + password -> a Supabase session, without the email ever leaving
-// the server. Supabase signs in by email only; this looks the email up with
-// the service key and runs the normal password grant. The grant is rate
-// limited by Supabase; username logins are ~5 a day, far inside it.
+// ---- Wrong-try lockout (8 Nov 2026) ----------------------------------------
+// 10 wrong sign-in codes or passwords in a row lock that account's check for
+// 15 minutes (public.auth_attempt). Keys are sha256("code|"/"pw|" + email),
+// so no address is stored. If the counter is unreachable we fail open: a
+// slow database must not stop real sign-ins. Supabase's own per-IP limits
+// (token verifications 30 / 5 min) still apply underneath.
+const TRY_MAX = 10;
+async function sha256hex(s) {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+  return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function authAttempt(kind, email, event) {
+  try {
+    const r = await sbAdminFetch("/rest/v1/rpc/auth_attempt", {
+      method: "POST",
+      body: JSON.stringify({ p_key: await sha256hex(`${kind}|${email}`), p_kind: kind, p_event: event, p_max: TRY_MAX, p_lock_minutes: 15 }),
+      signal: AbortSignal.timeout(3000),
+    });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+function lockedReply(st, origin) {
+  return j(429, { error_code: "locked", left: 0, max: TRY_MAX, locked_until: st.locked_until }, origin);
+}
+async function goTrue(path, body) {
+  const env = globalThis.process?.env || {};
+  const r = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/${path}`, {
+    method: "POST",
+    headers: { apikey: env.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+  return { status: r.status, ok: r.ok, data: await r.json().catch(() => ({})) };
+}
+
+// Email or username + password -> a Supabase session. The email never
+// leaves the server for a username login, and every wrong password counts
+// toward the account's 10-try lock.
 async function opAuthLogin(req, origin) {
   let body;
   try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
-  const username = String(body?.username || "").trim().toLowerCase().replace(/^@/, "");
+  const handle = String(body?.username || body?.email || "").trim().toLowerCase().replace(/^@/, "");
   const password = typeof body?.password === "string" ? body.password : "";
-  if (!username || !password) return j(400, { error: "missing_fields" }, origin);
-  if (!/^[a-z0-9_.-]{1,40}$/.test(username) || password.length > 200) {
-    return j(400, { error_code: "invalid_credentials" }, origin);
-  }
-  const env = globalThis.process?.env || {};
+  if (!handle || !password) return j(400, { error: "missing_fields" }, origin);
+  if (password.length > 200 || handle.length > 254) return j(400, { error_code: "invalid_credentials" }, origin);
   try {
-    const r = await sbAdminFetch(
-      `/rest/v1/profiles?select=email&username=ilike.${encodeURIComponent(username.replace(/[\\%_]/g, (m) => "\\" + m))}&limit=1`,
-      { signal: AbortSignal.timeout(4000) });
-    if (!r.ok) return j(502, { error: "lookup_failed" }, origin);
-    const rows = await r.json();
-    const email = Array.isArray(rows) && rows[0]?.email;
-    // Unknown username answers exactly like a wrong password.
-    if (!email) return j(400, { error_code: "invalid_credentials" }, origin);
-    const t = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: { apikey: env.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const data = await t.json().catch(() => ({}));
-    if (t.ok && data?.access_token && data?.refresh_token) {
-      return j(200, { access_token: data.access_token, refresh_token: data.refresh_token }, origin);
+    let email = handle;
+    if (!handle.includes("@")) {
+      if (!/^[a-z0-9_.-]{1,40}$/.test(handle)) return j(400, { error_code: "invalid_credentials" }, origin);
+      const r = await sbAdminFetch(
+        `/rest/v1/profiles?select=email&username=ilike.${encodeURIComponent(handle.replace(/[\\%_]/g, (m) => "\\" + m))}&limit=1`,
+        { signal: AbortSignal.timeout(4000) });
+      if (!r.ok) return j(502, { error: "lookup_failed" }, origin);
+      const rows = await r.json();
+      email = Array.isArray(rows) && rows[0]?.email ? String(rows[0].email).toLowerCase() : "";
+      // Unknown username answers exactly like a wrong password.
+      if (!email) return j(400, { error_code: "invalid_credentials", left: null, max: TRY_MAX }, origin);
     }
-    const code = data?.error_code || data?.code || "";
+    const st = await authAttempt("pw", email, "check");
+    if (st?.locked) return lockedReply(st, origin);
+    const t = await goTrue("token?grant_type=password", { email, password });
+    if (t.ok && t.data?.access_token && t.data?.refresh_token) {
+      if (st && st.left < TRY_MAX) await authAttempt("pw", email, "clear");
+      return j(200, { access_token: t.data.access_token, refresh_token: t.data.refresh_token }, origin);
+    }
+    const code = t.data?.error_code || t.data?.code || "";
     if (code === "email_not_confirmed") return j(400, { error_code: "email_not_confirmed" }, origin);
     if (t.status === 429) return j(429, { error_code: "rate_limited" }, origin);
-    return j(400, { error_code: "invalid_credentials" }, origin);
+    const f = await authAttempt("pw", email, "fail");
+    if (f?.locked) return lockedReply(f, origin);
+    return j(400, { error_code: "invalid_credentials", left: f ? f.left : null, max: TRY_MAX }, origin);
   } catch {
     return j(502, { error: "login_failed" }, origin);
   }
+}
+
+// Wrong-code counter for sign-up codes. The browser checks the code with
+// Supabase itself (so Supabase's per-IP limit is per student, not shared by
+// everyone behind Vercel's few addresses) and reports here: 'check' before a
+// try, 'fail' after a wrong code, 'clear' after a right one. 10 wrong in a
+// row pause code entry for that email for 15 minutes.
+async function opAuthCodeAttempt(req, origin) {
+  let body;
+  try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const email = String(body?.email || "").trim().toLowerCase();
+  const event = String(body?.event || "");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return j(400, { error: "bad_email" }, origin);
+  if (!["check", "fail", "clear"].includes(event)) return j(400, { error: "bad_event" }, origin);
+  const st = await authAttempt("code", email, event);
+  if (!st) return j(200, { left: null, max: TRY_MAX, locked: false }, origin);
+  return j(200, { left: st.left, max: TRY_MAX, locked: !!st.locked, locked_until: st.locked_until || null }, origin);
 }
 
 // After a failed password login: was this account made with Google and given

@@ -306,6 +306,41 @@ async function sendViaResend(msg, idemKey) {
   return r.json().catch(() => ({}));
 }
 
+// Sends every email one hook payload needs. One retry after a short pause:
+// on the Postgres path nobody retries for us.
+export async function sendAuthEmails(payload, idemBase) {
+  const msgs = buildAuthEmails(payload);
+  if (!msgs.length) return { ok: false, why: "unhandled_type", n: 0 };
+  const one = async (m, i) => {
+    try { return await sendViaResend(m, `${idemBase}-${i}`); }
+    catch (e) { await new Promise((r) => setTimeout(r, 700)); return sendViaResend(m, `${idemBase}-${i}`); }
+  };
+  await Promise.all(msgs.map(one));
+  return { ok: true, n: msgs.length };
+}
+
+// Postgres hook path: Supabase calls public.auth_send_email_hook(), which
+// queues this request through pg_net with the Vault cron_secret and returns
+// at once, so sign-up never waits for the email. `authorized` is the
+// caller's cron-secret check.
+export async function handleAuthEmailFromDb(req, authorized) {
+  const t0 = Date.now();
+  if (!authorized) return fail(401, "unauthorized");
+  let payload;
+  try { payload = await req.json(); } catch { return fail(400, "bad payload"); }
+  const d = payload?.email_data || {};
+  const type = d.email_action_type || "?";
+  const idem = `auth-${type}-${payload?.user?.id || "x"}-${d.token_hash || d.token || Date.now()}`.slice(0, 250);
+  try {
+    const r = await sendAuthEmails(payload, idem);
+    console.log(JSON.stringify({ evt: "auth_email", via: "db", type, ok: r.ok, n: r.n, why: r.why, ms: Date.now() - t0, queued_ms: payload?.queued_at ? Date.now() - Date.parse(payload.queued_at) : undefined }));
+    return r.ok ? json(200, {}) : fail(400, `unhandled email type ${type}`);
+  } catch (e) {
+    console.log(JSON.stringify({ evt: "auth_email", via: "db", type, ok: false, ms: Date.now() - t0, err: String(e.message || e).slice(0, 200) }));
+    return fail(502, "email send failed");
+  }
+}
+
 export async function handleAuthEmailHook(req) {
   const t0 = Date.now();
   const body = await req.text();

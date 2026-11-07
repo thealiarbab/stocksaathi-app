@@ -5546,3 +5546,13 @@ a.pill:hover, a.pill:focus-visible { text-decoration: underline; text-underline-
 @media (prefers-reduced-motion: reduce) { .otp-status-flash { animation: none; } }
 .auth-google-pulse { border-radius: 10px; animation: otp-flash 1.2s ease-out 2; }
 @media (prefers-reduced-motion: reduce) { .auth-google-pulse { animation: none; outline: 2px solid var(--warning); outline-offset: 4px; } }
+
+/* Tries-left bar: wrong passwords / codes before the 15-minute lock. */
+.tries { margin-top: 10px; }
+.tries-track { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); overflow: hidden; }
+.tries-fill { height: 100%; background: var(--brand, #00B386); transition: width .3s ease; }
+.tries-mid .tries-fill { background: var(--warning); }
+.tries-low .tries-fill, .tries-locked .tries-fill { background: var(--red); }
+.tries-text { margin-top: 6px; font-size: var(--text-xs); color: var(--text-muted); }
+.tries-low .tries-text, .tries-locked .tries-text { color: var(--red); }
+.tries-clock { font-variant-numeric: tabular-nums; }

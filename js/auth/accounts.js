@@ -188,17 +188,48 @@ export async function verifySignupOtp({ email, code }) {
   if (!/^\d{4,10}$/.test(cleanCode)) {
     throw new Error("Code should be 6 digits (check the latest email from us).");
   }
-  // Try all three Supabase OTP types in order: 'email' (newest, works for
-  // magic-link-style), 'signup' (classic), 'email_change'. Whichever matches
-  // Supabase's template wins.
-  const tries = ["email", "signup"];
+  // The code is checked straight against Supabase from this browser (its
+  // per-IP limit then applies per student). Our server keeps the count of
+  // wrong codes for this email: 10 in a row pause code entry for 15 min.
+  const pre = await codeAttempt(emailN, "check");
+  if (pre?.locked) throw triesError("Too many wrong codes.", { error_code: "locked", ...pre });
   let lastErr = null;
-  for (const type of tries) {
+  for (const type of ["email", "signup"]) {
     const r = await client.auth.verifyOtp({ email: emailN, token: cleanCode, type });
-    if (!r.error) return { ok: true, user: r.data?.user, session: r.data?.session };
+    if (!r.error) {
+      if (pre && pre.left !== null && pre.left < (pre.max || 10)) codeAttempt(emailN, "clear");
+      return { ok: true, user: r.data?.user, session: r.data?.session };
+    }
     lastErr = r.error;
+    if (r.error?.status === 429) throw new Error("Too many tries from this connection. Wait a few minutes, then try again.");
   }
-  throw new Error(prettifySbError(lastErr?.message || "Invalid or expired code."));
+  const after = await codeAttempt(emailN, "fail");
+  if (after?.locked) throw triesError("Too many wrong codes.", { error_code: "locked", ...after });
+  throw triesError(prettifySbError(lastErr?.message || "Invalid or expired code."), { error_code: "invalid_code", ...(after || {}) });
+}
+
+// Wrong-code counter on our server; null when it can't be reached (the
+// code check itself never depends on it).
+async function codeAttempt(email, event) {
+  try {
+    const r = await fetch("/api/ai?op=auth-code-attempt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, event }),
+      signal: AbortSignal.timeout(4000),
+    });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+// An error that carries the try counter for the tries-left bar.
+function triesError(message, body) {
+  const err = new Error(message);
+  err.code = body?.error_code || "invalid";
+  err.left = typeof body?.left === "number" ? body.left : null;
+  err.max = body?.max || 10;
+  err.lockedUntil = body?.locked_until ? Date.parse(body.locked_until) : null;
+  return err;
 }
 
 /**
@@ -370,46 +401,43 @@ export async function loginAccount({ emailOrUsername, password }) {
     throw new Error("Couldn't reach StockSaathi's servers. Check your connection, or open stocksaathi.co.in in Chrome instead of an in-app browser, then try again.");
   }
   if (client) {
-    // Resolve to email. If input contains '@', treat as email directly.
-    // Otherwise use the server-side resolver (service_role) — anon RLS on
-    // the profiles table blocks us from SELECTing another user's email
-    // column, which is why direct client queries were 100% returning
-    // "No account with that username" for any valid username. The
-    // resolver endpoint does the lookup safely.
-    // Username: the server signs in for us and returns only the session, so
-    // nobody can turn a username into an email address (the old resolver
-    // handed the email to anyone who asked, until 8 Nov 2026).
-    if (!q.includes("@")) {
-      let res, body = {};
-      try {
-        res = await fetch("/api/ai?op=auth-login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: q, password }),
-        });
-        body = await res.json().catch(() => ({}));
-      } catch {
-        throw new Error("Couldn't reach StockSaathi's servers. Check your connection, or log in with your email instead.");
-      }
-      if (res.ok && body.access_token) {
-        const { data, error } = await client.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
-        if (error || !data?.user) throw new Error("Couldn't start your session. Try again, or log in with your email.");
-        return { id: data.user.id, email: data.user.email };
-      }
+    // Every password login goes through the server (op=auth-login): it
+    // counts wrong passwords per account (10 in a row = 15-minute lock) and,
+    // for usernames, never hands the email to the browser (the old resolver
+    // gave it to anyone who asked, until 8 Nov 2026).
+    const isEmail = q.includes("@");
+    let res = null, body = {};
+    try {
+      res = await fetch("/api/ai?op=auth-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isEmail ? { email: q, password } : { username: q, password }),
+      });
+      body = await res.json().catch(() => ({}));
+    } catch { res = null; }
+    if (res && res.ok && body.access_token) {
+      const { data, error } = await client.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
+      if (error || !data?.user) throw new Error("Couldn't start your session. Try again.");
+      return { id: data.user.id, email: data.user.email };
+    }
+    if (res && (res.status === 400 || res.status === 429)) {
       if (body.error_code === "email_not_confirmed") {
-        const err = new Error("You haven't confirmed your email yet. Log in with your email address (not your username) and we'll send you a new code.");
+        const err = new Error(isEmail ? "You haven't confirmed this email yet."
+          : "You haven't confirmed your email yet. Log in with your email address (not your username) and we'll send you a new code.");
         err.code = "email_not_confirmed";
+        if (isEmail) err.email = q;
         throw err;
       }
-      if (body.error_code === "rate_limited") throw new Error("Too many login attempts. Wait a few minutes, or log in with your email.");
-      if (body.error_code === "invalid_credentials") throw new Error(prettifySbError("Invalid login credentials"));
-      throw new Error("Couldn't log you in right now. Try again, or log in with your email.");
+      if (body.error_code === "locked") throw triesError("Too many wrong passwords.", body);
+      if (body.error_code === "rate_limited") throw new Error("Too many login attempts from this connection. Wait a few minutes and try again.");
+      throw triesError(prettifySbError("Invalid login credentials"), body);
     }
+    // Our server is unreachable: email logins still work straight against
+    // Supabase (no try counter then); username logins need the server.
+    if (!isEmail) throw new Error("Couldn't reach StockSaathi's servers. Check your connection, or log in with your email instead.");
     const email = q;
     const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) {
-      // Never confirmed: the login page offers a fresh code for this email
-      // instead of a dead end.
       if (/not confirmed/i.test(error.message || "") || error.code === "email_not_confirmed") {
         const err = new Error("You haven't confirmed this email yet.");
         err.code = "email_not_confirmed";

@@ -6,6 +6,7 @@ import { loginAccount, readEmailLinkParams, verifyEmailLink } from "../auth/acco
 import { switchUser } from "../state.js";
 import { navigate } from "../router.js";
 import { googleButtonHtml, wireGoogleButton } from "../components/googleButton.js";
+import { triesBarHtml, runLockCountdown } from "../components/triesBar.js";
 
 // Shared by password login, Google sign-in (which returns to /login with the
 // session in the URL fragment) and the signup page.
@@ -143,7 +144,7 @@ export function renderLogin(main) {
       } catch (err) {
         lastErr = err;
         const trimmed = pwRaw.trim();
-        if (trimmed && trimmed !== pwRaw) {
+        if (trimmed && trimmed !== pwRaw && err.code !== "locked") {
           try {
             await loginAccount({ emailOrUsername: handle, password: trimmed });
             lastErr = null;
@@ -173,6 +174,18 @@ export function renderLogin(main) {
       const reset = /incorrect email or password/i.test(err.message || "")
         ? `<a class="btn btn-ghost btn-sm" style="margin-top:8px;" href="/reset-password-request${handle.includes("@") ? "?email=" + encodeURIComponent(handle) : ""}">Forgot password? Reset it by email →</a>`
         : "";
+      if (err.code === "locked") {
+        errBox.innerHTML = `<div class="error-msg">
+          <strong>Too many wrong passwords.</strong> To keep your account safe, password login is paused for this account.
+          ${triesBarHtml(err, "wrong passwords")}
+          <a class="btn btn-ghost btn-sm" style="margin-top:8px;" href="/reset-password-request${handle.includes("@") ? "?email=" + encodeURIComponent(handle) : ""}">Forgot it? Reset by email →</a>
+        </div>`;
+        btn.textContent = "Log in";
+        runLockCountdown(errBox, btn, () => { errBox.innerHTML = `<div class="dim text-sm">You can try again now.</div>`; });
+        try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+        return;
+      }
+      const bar = triesBarHtml(err, "tries");
       // Accounts made with "Continue with Google" have no password, so no
       // password can ever work. Ask the server before blaming a typo.
       if (reset && handle && await usesGoogleOnly(handle)) {
@@ -180,6 +193,7 @@ export function renderLogin(main) {
           <strong>This account was created with Google, so it has no password.</strong>
           Tap <strong>Continue with Google</strong> above and pick the same Gmail.
           <br><a class="btn btn-ghost btn-sm" style="margin-top:8px;" href="/reset-password-request${handle.includes("@") ? "?email=" + encodeURIComponent(handle) : ""}">Or set a password by email →</a>
+          ${bar}
         </div>`;
         const g = main.querySelector("#auth-google");
         if (g && !g.hidden) {
@@ -192,7 +206,7 @@ export function renderLogin(main) {
         btn.textContent = "Log in";
         return;
       }
-      errBox.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}${reset ? "<br>" + reset : ""}</div>`;
+      errBox.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}${reset ? "<br>" + reset : ""}${bar}</div>`;
       try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
       btn.disabled = false;
       btn.textContent = "Log in";
