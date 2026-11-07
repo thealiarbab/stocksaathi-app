@@ -44,7 +44,7 @@ export function renderLogin(main) {
         <form class="auth-form" id="login-form" autocomplete="on">
           <div class="field">
             <label class="label" for="l-handle">Email or username</label>
-            <input class="input" id="l-handle" name="username" type="text" required autocomplete="username" placeholder="you@example.com or yourname" value="${escapeAttr(prefilledEmail)}" />
+            <input class="input" id="l-handle" name="username" type="text" required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="you@example.com or yourname" value="${escapeAttr(prefilledEmail)}" />
           </div>
           <div class="field">
             <label class="label" for="l-pw" style="display:flex; justify-content:space-between; align-items:baseline;">
@@ -52,7 +52,7 @@ export function renderLogin(main) {
               <a href="/reset-password-request" class="dim text-xs" style="font-weight:500;">Forgot password?</a>
             </label>
             <div class="auth-pw-wrap">
-              <input class="input" id="l-pw" name="password" type="password" required autocomplete="current-password" placeholder="Your password" />
+              <input class="input" id="l-pw" name="password" type="password" required autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Your password" />
               <button type="button" class="auth-pw-toggle" id="l-pw-toggle" aria-label="Show password" aria-pressed="false" tabindex="0">👁</button>
             </div>
           </div>

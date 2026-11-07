@@ -74,7 +74,7 @@ export function renderRegister(main) {
           <p class="sub">Your ₹1,00,000 virtual portfolio is one minute away.</p>
           ${googleButtonHtml("Sign up with Google")}
 
-          <form class="auth-form" id="reg-form" autocomplete="on">
+          <form class="auth-form" id="reg-form" autocomplete="on" novalidate>
             <div class="field">
               <label class="label" for="r-name">Your full name</label>
               <input class="input" id="r-name" name="name" type="text" required autocomplete="name" placeholder="e.g. Ananya Sharma" />
@@ -89,21 +89,22 @@ export function renderRegister(main) {
             </div>
             <div class="field">
               <label class="label" for="r-email">Email</label>
-              <input class="input" id="r-email" name="email" type="email" required autocomplete="email" placeholder="you@gmail.com" autocapitalize="off" spellcheck="false" />
+              <input class="input" id="r-email" name="email" type="email" required autocomplete="email" placeholder="you@gmail.com" autocapitalize="off" autocorrect="off" spellcheck="false" />
               <div class="email-hint" id="r-email-hint" role="status" aria-live="polite" hidden></div>
             </div>
             <div class="field">
               <label class="label" for="r-pw">Password</label>
               <div class="auth-pw-wrap">
-                <input class="input" id="r-pw" name="password" type="password" required autocomplete="new-password" placeholder="At least 8 characters" minlength="8" />
+                <input class="input" id="r-pw" name="password" type="password" required autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="At least 8 characters" minlength="8" />
                 <button type="button" class="auth-pw-toggle" id="r-pw-toggle" aria-label="Show password" aria-pressed="false" tabindex="0">👁</button>
               </div>
               <div class="muted text-xs" style="margin-top: 4px;">At least 8 characters. Tip: tap the eye icon to check what you typed.</div>
             </div>
 
-            <label class="flex items-start gap-2" style="font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; margin-top: var(--sp-2);">
-              <input type="checkbox" class="checkbox" id="r-terms" required style="margin-top: 2px;" />
-              <span>I understand StockSaathi is an <strong>educational paper-trading
+            <label class="reg-terms flex items-start gap-2" id="r-terms-box">
+              <input type="checkbox" class="checkbox" id="r-terms" />
+              <span><strong class="reg-terms-lead">Tick to agree to the Terms of Use and Privacy Policy.</strong>
+              <span class="reg-terms-small">I understand StockSaathi is an <strong>educational paper-trading
               simulator</strong> with <strong>virtual money only</strong> &mdash; no real
               securities are bought or held. StockSaathi is not a SEBI-registered broker,
               investment adviser, or research analyst, and nothing here is investment advice
@@ -111,7 +112,7 @@ export function renderRegister(main) {
               this app are not covered by SEBI's investor-protection or grievance-redressal
               mechanisms. I have read and agree to the
               <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and
-              <a href="/terms" target="_blank" rel="noopener">Terms of Use</a>.</span>
+              <a href="/terms" target="_blank" rel="noopener">Terms of Use</a>.</span></span>
             </label>
 
             <div id="reg-error" role="alert"></div>
@@ -130,6 +131,9 @@ export function renderRegister(main) {
     const btn = main.querySelector("#reg-btn");
     const emailInput = main.querySelector("#r-email");
     const hint = main.querySelector("#r-email-hint");
+    const termsBox = main.querySelector("#r-terms-box");
+    main.querySelector("#r-terms").addEventListener("change", () => termsBox.classList.remove("reg-terms-missing"));
+    form.addEventListener("input", (e) => e.target.classList?.remove("input-missing"));
     // Show / hide password toggle. Critical on mobile where users can't
     // see what swipe-input / autocorrect actually typed.
     wirePasswordToggle(main, "#r-pw", "#r-pw-toggle");
@@ -214,12 +218,21 @@ export function renderRegister(main) {
       // trailing spaces that the user can't see.
       const pw = main.querySelector("#r-pw").value.trim();
 
-      if (!name || name.length < 2) return showErr("Please enter your full name.");
-      const uerr = validateUsername(username); if (uerr) return showErr(uerr);
+      main.querySelectorAll(".input-missing").forEach((el) => el.classList.remove("input-missing"));
+      termsBox.classList.remove("reg-terms-missing");
+      if (!name || name.length < 2) return showErr("Please enter your full name.", "#r-name");
+      if (!username) return showErr("Pick a username.", "#r-username");
+      if (!email) return showErr("Enter your email address. Your sign-up code goes there.", "#r-email");
+      if (!pw) return showErr("Choose a password (at least 8 characters).", "#r-pw");
+      const uerr = validateUsername(username); if (uerr) return showErr(uerr, "#r-username");
       // A likely typo stops the submit once; the user picks the fix or keeps it.
       if (showSuggestion(true)) { hint.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
-      if (!validateEmail(email)) return showErr("Enter a valid email address.");
-      const perr = validatePassword(pw); if (perr) return showErr(perr);
+      if (!validateEmail(email)) return showErr("Enter a valid email address.", "#r-email");
+      const perr = validatePassword(pw); if (perr) return showErr(perr, "#r-pw");
+      if (!main.querySelector("#r-terms").checked) {
+        termsBox.classList.add("reg-terms-missing");
+        return showErr("Tick the box above to agree to the Terms, then press Create account.");
+      }
 
       btn.disabled = true;
       btn.textContent = "Creating account…";
@@ -285,9 +298,13 @@ export function renderRegister(main) {
     // On a phone the error box can sit below the keyboard or off screen; a
     // student who sees nothing happen taps again (92 rapid repeat taps on
     // Create account, 18 Oct). Bring it into view.
-    function showErr(msg) {
+    // field: the input to mark and focus. The message sits right above the
+    // button, where the eye already is.
+    function showErr(msg, field) {
       errBox.innerHTML = `<div class="error-msg">${escapeHtml(msg)}</div>`;
-      try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+      const el = field ? main.querySelector(field) : null;
+      if (el) { el.classList.add("input-missing"); try { el.focus({ preventScroll: true }); } catch {} }
+      try { (el || errBox).scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
     }
   }
 

@@ -5513,3 +5513,24 @@ a.feature-card h3 { color: var(--text); }
   .nav-link { padding: 8px 6px; }
   .nav-cmdk-label, .nav-cmdk-kbd { display: none; }
 }
+
+/* Register: terms box + inline missing-field marks (Nov 2026). The browser's
+   own "please tick this box" bubble was the #1 sign-up blocker (89 errors in
+   3 days) and often sat under the phone keyboard. */
+.reg-terms {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.reg-terms .checkbox { width: 22px; height: 22px; flex: 0 0 22px; margin-top: 1px; }
+.reg-terms-lead { display: block; color: var(--text); font-size: var(--text-base); margin-bottom: 4px; }
+.reg-terms-small { display: block; font-size: var(--text-xs); }
+.reg-terms-missing { border-color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.input-missing, .input-prefix:has(.input-missing) { border-color: var(--red) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 20%, transparent); }
+.landing-mid-cta { margin-top: var(--sp-5); }
+.cta-row[hidden] { display: none; }
