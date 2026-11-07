@@ -41,6 +41,16 @@ async function loadSdk() {
 // values are public and rarely change, so after the first visit the stored
 // copy is used at once and refreshed in the background.
 const CONFIG_KEY = "ss_public_config";
+// Written into every page at build time (build/bundle.mjs), so even a first
+// visit has it with no request.
+function pageConfig() {
+  try {
+    const m = document.querySelector('meta[name="ss-config"]');
+    const supabaseUrl = m?.dataset.url, supabaseAnonKey = m?.dataset.key;
+    if (!supabaseUrl || !supabaseAnonKey) return null;
+    return { supabaseUrl, supabaseAnonKey, appName: "StockSaathi", supportEmail: m.dataset.support || "accounts@stocksaathi.co.in" };
+  } catch { return null; }
+}
 function storedConfig() {
   try {
     const c = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null");
@@ -61,6 +71,8 @@ function fetchConfig() {
 
 async function loadConfig() {
   if (_config) return _config;
+  const inPage = pageConfig();
+  if (inPage) { _config = inPage; return inPage; }
   const stored = storedConfig();
   if (stored) { _config = stored; fetchConfig(); return stored; }
   if (_configPromise) return _configPromise;

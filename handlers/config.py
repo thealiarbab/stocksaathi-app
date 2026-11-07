@@ -18,7 +18,9 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "public, max-age=30")
+        # CDN-cached: the values only change with an env var edit, and a cold
+        # Python start from India measured p90 20 s (Nov 2026).
+        self.send_header("Cache-Control", "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)

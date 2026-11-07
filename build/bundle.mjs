@@ -234,6 +234,17 @@ function* htmlFiles(dir) {
   }
 }
 const preloads = coreChunks.map((u) => `<link rel="modulepreload" href="${u}" />`).join("\n  ");
+// Public Supabase config (URL + anon key, both public by design) written into
+// every page so a first visit can sign up without waiting on /api/config, a
+// Python function whose p90 from India was 20 s (Nov 2026). js/db/supabase.js
+// reads it first and still falls back to /api/config when it is absent
+// (local builds, or env vars missing at build time).
+const attr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+const SB_URL = (process.env.SUPABASE_URL || "").trim();
+const SB_ANON = (process.env.SUPABASE_ANON_KEY || "").trim();
+const configMeta = SB_URL && SB_ANON
+  ? `<meta name="ss-config" data-url="${attr(SB_URL)}" data-key="${attr(SB_ANON)}" data-support="${attr((process.env.SUPPORT_EMAIL || "accounts@stocksaathi.co.in").trim())}" />`
+  : "";
 let pages = 0;
 for (const file of htmlFiles(ROOT)) {
   const before = readFileSync(file, "utf8");
@@ -249,6 +260,9 @@ for (const file of htmlFiles(ROOT)) {
     .replace(/<link rel="preload" href="\/js\/app\.js" as="script" crossorigin \/>/,
       `<link rel="modulepreload" href="${appJs}" />` + (preloads ? "\n  " + preloads : ""))
     .replaceAll('"/js/app.js"', `"${appJs}"`);
+  if (configMeta && !html.includes('name="ss-config"')) {
+    html = html.replace(/(<meta name="viewport"[^>]*>)/, `$1\n  ${configMeta}`);
+  }
   const leftover = html.match(/"\/(?:js\/(?:app|va|ga)\.js|css\/(?:main|components|coach)\.css)"/);
   if (leftover) throw new Error(`${urlOf(file)} still references ${leftover[0]}`);
   writeFileSync(file, html);
