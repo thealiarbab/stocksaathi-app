@@ -336,6 +336,10 @@ export async function setNewPassword(newPassword) {
   }
   const { error } = await client.auth.updateUser({ password: newPassword });
   if (error) throw new Error(prettifySbError(error.message));
+  // Anyone else signed in to this account (an old phone, or whoever caused
+  // the reset) is signed out; this device stays in. Supabase also emails the
+  // owner that the password changed.
+  try { await client.auth.signOut({ scope: "others" }); } catch {}
   return { ok: true };
 }
 
@@ -719,6 +723,8 @@ export async function changePassword({ currentPassword, newPassword }) {
     }
     const { error } = await client.auth.updateUser({ password: newPassword });
     if (error) throw new Error(error.message);
+    // Same as a reset: other signed-in devices are signed out.
+    try { await client.auth.signOut({ scope: "others" }); } catch {}
     return true;
   }
   // Local
