@@ -372,24 +372,36 @@ export async function loginAccount({ emailOrUsername, password }) {
     // column, which is why direct client queries were 100% returning
     // "No account with that username" for any valid username. The
     // resolver endpoint does the lookup safely.
-    let email = q;
+    // Username: the server signs in for us and returns only the session, so
+    // nobody can turn a username into an email address (the old resolver
+    // handed the email to anyone who asked, until 8 Nov 2026).
     if (!q.includes("@")) {
+      let res, body = {};
       try {
-        const res = await fetch("/api/ai?op=auth-resolve-username", {
+        res = await fetch("/api/ai?op=auth-login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: q }),
+          body: JSON.stringify({ username: q, password }),
         });
-        if (res.status === 404) throw new Error("No account with that username.");
-        if (!res.ok) throw new Error("Couldn't look up that username. Try your email instead.");
-        const data = await res.json();
-        if (!data?.email) throw new Error("No account with that username.");
-        email = data.email;
-      } catch (e) {
-        if (e.message) throw e;
-        throw new Error("Couldn't look up that username. Try your email instead.");
+        body = await res.json().catch(() => ({}));
+      } catch {
+        throw new Error("Couldn't reach StockSaathi's servers. Check your connection, or log in with your email instead.");
       }
+      if (res.ok && body.access_token) {
+        const { data, error } = await client.auth.setSession({ access_token: body.access_token, refresh_token: body.refresh_token });
+        if (error || !data?.user) throw new Error("Couldn't start your session. Try again, or log in with your email.");
+        return { id: data.user.id, email: data.user.email };
+      }
+      if (body.error_code === "email_not_confirmed") {
+        const err = new Error("You haven't confirmed your email yet. Log in with your email address (not your username) and we'll send you a new code.");
+        err.code = "email_not_confirmed";
+        throw err;
+      }
+      if (body.error_code === "rate_limited") throw new Error("Too many login attempts. Wait a few minutes, or log in with your email.");
+      if (body.error_code === "invalid_credentials") throw new Error(prettifySbError("Invalid login credentials"));
+      throw new Error("Couldn't log you in right now. Try again, or log in with your email.");
     }
+    const email = q;
     const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) {
       // Never confirmed: the login page offers a fresh code for this email

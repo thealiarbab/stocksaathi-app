@@ -59,6 +59,7 @@ function recordUsage(row) {
 }
 import { liveGeminiModel, isGemini3 } from "./_models.js";
 import { lastSessionIst } from "./_session.js";
+import { handleAuthEmailHook } from "./_authEmail.js";
 
 export const config = { runtime: "edge" };
 
@@ -1708,6 +1709,8 @@ async function route(req) {
       case "admin-auth-update-email": return await opAdminAuthUpdateEmail(req, origin);
       case "admin-auth-set-password": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminAuthSetPassword(req, origin);
       case "auth-resolve-username":   if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthResolveUsername(req, origin);
+      case "auth-email-hook":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await handleAuthEmailHook(req);
+      case "auth-login":              if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthLogin(req, origin);
       case "auth-login-hint":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthLoginHint(req, origin);
       case "admin-auth-force-confirm": return await opAdminAuthForceConfirm(req, origin);
       case "admin-vercel-deployments": return await opAdminVercelDeployments(req, origin, url);
@@ -3092,26 +3095,55 @@ async function opAdminAuthSetPassword(req, origin) {
 // email — never username/display_name/age/etc. Any attacker can already
 // enumerate usernames from leaderboards, so leaking email-existence for a
 // username isn't a new attack surface.
+// Retired 8 Nov 2026: it returned the account's email for any username, to
+// anyone, with no password (usernames are visible to other users). Username
+// logins now go through op=auth-login, which only answers with a session
+// after the password checks out. Old cached pages get 410 and ask for the
+// email instead.
 async function opAuthResolveUsername(req, origin) {
+  try { await req.arrayBuffer(); } catch {}
+  return j(410, { error: "gone" }, origin);
+}
+
+// Username + password -> a Supabase session, without the email ever leaving
+// the server. Supabase signs in by email only; this looks the email up with
+// the service key and runs the normal password grant. The grant is rate
+// limited by Supabase; username logins are ~5 a day, far inside it.
+async function opAuthLogin(req, origin) {
   let body;
   try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
   const username = String(body?.username || "").trim().toLowerCase().replace(/^@/, "");
-  if (!username) return j(400, { error: "missing_username" }, origin);
-  if (!/^[a-z0-9_.-]{1,40}$/.test(username)) return j(400, { error: "bad_username" }, origin);
+  const password = typeof body?.password === "string" ? body.password : "";
+  if (!username || !password) return j(400, { error: "missing_fields" }, origin);
+  if (!/^[a-z0-9_.-]{1,40}$/.test(username) || password.length > 200) {
+    return j(400, { error_code: "invalid_credentials" }, origin);
+  }
+  const env = globalThis.process?.env || {};
   try {
     const r = await sbAdminFetch(
-      // Escape "_" and "%": unescaped, "komal00__" also matched "komal00ab",
-      // so a username with underscores could resolve to another user's email.
-      `/rest/v1/profiles?select=email&username=ilike.${encodeURIComponent(username.replace(/[\\%_]/g, (m) => "\\" + m))}&limit=1`
-    );
+      `/rest/v1/profiles?select=email&username=ilike.${encodeURIComponent(username.replace(/[\\%_]/g, (m) => "\\" + m))}&limit=1`,
+      { signal: AbortSignal.timeout(4000) });
     if (!r.ok) return j(502, { error: "lookup_failed" }, origin);
     const rows = await r.json();
-    if (!Array.isArray(rows) || !rows.length || !rows[0].email) {
-      return j(404, { error: "not_found" }, origin);
+    const email = Array.isArray(rows) && rows[0]?.email;
+    // Unknown username answers exactly like a wrong password.
+    if (!email) return j(400, { error_code: "invalid_credentials" }, origin);
+    const t = await fetch(`${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { apikey: env.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await t.json().catch(() => ({}));
+    if (t.ok && data?.access_token && data?.refresh_token) {
+      return j(200, { access_token: data.access_token, refresh_token: data.refresh_token }, origin);
     }
-    return j(200, { email: rows[0].email }, origin);
-  } catch (e) {
-    return j(502, { error: "resolve_failed", detail: String(e.message).slice(0, 120) }, origin);
+    const code = data?.error_code || data?.code || "";
+    if (code === "email_not_confirmed") return j(400, { error_code: "email_not_confirmed" }, origin);
+    if (t.status === 429) return j(429, { error_code: "rate_limited" }, origin);
+    return j(400, { error_code: "invalid_credentials" }, origin);
+  } catch {
+    return j(502, { error: "login_failed" }, origin);
   }
 }
 
