@@ -452,6 +452,20 @@ function apiLabel(u) {
   } catch {}
   return null;
 }
+// A request that dies because the visitor left (closed the tab, switched
+// app, followed a link) looks exactly like a network failure: "Failed to
+// fetch", status 0. 40 of 59 such login-refresh failures (5-7 Nov 2026) came
+// within 3 s of the visitor leaving. Label them apart so a real outage
+// stands out. `leftAt` is set when the page is hidden or unloads.
+let leftAt = 0;
+addEventListener("pagehide", () => { leftAt = Date.now(); });
+addEventListener("beforeunload", () => { leftAt = Date.now(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") leftAt = Date.now(); });
+function failReason() {
+  if (document.visibilityState === "hidden" || Date.now() - leftAt < 3000) return "left page";
+  if (navigator.onLine === false) return "offline";
+  return "network error";
+}
 function wrapFetch() {
   window.fetch = function (input, init) {
     const url = typeof input === "string" ? input : input?.url;
@@ -463,7 +477,7 @@ function wrapFetch() {
       if (!r.ok || ms > 2500) logApi(label, { st: r.status, ms, m: (init?.method || "GET").toUpperCase() });
       return r;
     }, (err) => {
-      if (err?.name !== "AbortError") logApi(label, { st: 0, ms: Math.round(performance.now() - t0), err: String(err?.message || err).slice(0, 80) });
+      if (err?.name !== "AbortError") logApi(label, { st: failReason(), ms: Math.round(performance.now() - t0), err: String(err?.message || err).slice(0, 80) });
       throw err;
     });
   };
@@ -472,7 +486,7 @@ function wrapFetch() {
 // /api/live-quote rows from 244 people on 25 Oct). Keep one row per call and
 // outcome a minute; `rep` is how many more it stood for, `repMaxMs` the worst.
 function logApi(label, props) {
-  const key = `${label}|${props.st === 0 ? "fail" : props.st >= 400 ? props.st : "slow"}`;
+  const key = `${label}|${typeof props.st === "string" ? props.st : props.st >= 400 ? props.st : "slow"}`;
   const now = Date.now();
   const s = apiSeen.get(key);
   if (s && now - s.at < 60_000) { s.rep++; s.maxMs = Math.max(s.maxMs, props.ms); return; }

@@ -166,7 +166,7 @@ function paint() {
       (d.errors || []).map(([m, n, s, last, p, src, br]) => [`<code>${e(m)}</code>`, fmtInt(n), fmtInt(s), e(ist(last)), e(p || "/"), `<span class="dim text-xs">${e(src || "")}</span>`, e(br || "")]), "No errors recorded. 🎉"))}
 
     <div class="bh-grid2">
-      ${card("Failed or slow requests", "status 0 = no connection; slow = over 2.5 s", table(["Request", "Status", "Times", "Avg ms", "90% under"], (d.api || []).map(([tg, s, n, a, p9]) => [e(tg), e(s), fmtInt(n), fmtInt(a), fmtInt(p9)])))}
+      ${card("Failed or slow requests", "left page = visitor left before it finished (not our fault); network error / offline = connection failed; 0 = no connection (before 8 Nov 2026); slow = over 2.5 s", table(["Request", "Status", "Times", "Avg ms", "90% under"], (d.api || []).map(([tg, s, n, a, p9]) => [e(tg), e(s), fmtInt(n), fmtInt(a), fmtInt(p9)])))}
       ${card("Pop-up messages shown", "", table(["Kind", "Message", "Times"], (d.toasts || []).map(([k, tg, n]) => [e(k || ""), e(tg || ""), fmtInt(n)])))}
     </div>
 
