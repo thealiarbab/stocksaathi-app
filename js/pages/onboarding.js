@@ -8,6 +8,17 @@
 import { getState, completeOnboarding } from "../state.js";
 import { navigate } from "../router.js";
 import { toast } from "../components/toast.js";
+import { logEvent } from "../features/telemetry.js";
+
+// "How did you hear about us?" Logged as a click labelled heard_from:<value>,
+// which web_event_daily keeps per day forever, so a drop in one source shows
+// up within days (the Nov 2026 ChatGPT drop took a week to diagnose).
+const HEARD_FROM = [
+  ["chatgpt", "ChatGPT"], ["google", "Google search"], ["other_ai", "Gemini, Perplexity or another AI"],
+  ["instagram", "Instagram"], ["youtube", "YouTube"], ["friend", "A friend or classmate"],
+  ["school", "School or a teacher"], ["other", "Somewhere else"],
+];
+let heardLogged = "";
 
 let step = 0;
 let form = {
@@ -88,6 +99,13 @@ function renderStep(s) {
           <input class="input" id="f-class" placeholder="e.g. 12-Science or FINED-A" value="${escapeAttr(form.classCode)}" />
           <div class="dim text-xs" style="margin-top: 4px;">Useful if your teacher groups your class together for challenges.</div>
         </div>
+        <div>
+          <label class="label" for="f-heard">How did you hear about StockSaathi? (optional)</label>
+          <select class="input" id="f-heard">
+            <option value="">Choose one</option>
+            ${HEARD_FROM.map(([v, l]) => `<option value="${v}" ${form.heardFrom === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </div>
       </div>
       <div class="flex gap-2 wrap justify-between" style="margin-top: var(--sp-5);">
         <button class="btn btn-outline" data-back>Back</button>
@@ -136,7 +154,12 @@ function attachStepListeners(main) {
       form.age = parseInt(age.value, 10);
       form.school = (main.querySelector("#f-school")?.value || "").trim();
       form.classCode = (main.querySelector("#f-class")?.value || "").trim();
+      form.heardFrom = main.querySelector("#f-heard")?.value || "";
       if (!form.age || form.age < 13) { alert("Please enter a valid age (13+)."); return; }
+      if (form.heardFrom && form.heardFrom !== heardLogged) {
+        heardLogged = form.heardFrom;
+        logEvent("click", `heard_from:${form.heardFrom}`);
+      }
     }
     step++;
     render(main);
