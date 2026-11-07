@@ -1,6 +1,6 @@
 # StockSaathi
 
-> StockSaathi (also written Stock Saathi) is a free stock market simulator and paper trading app for students and beginners in India, including Indian teens aged 13 to 18. Users practise investing with ₹1,00,000 of virtual money on real NSE and BSE stocks, ETFs and mutual funds at real market prices, and an AI coach flags beginner mistakes, such as panic-selling and FOMO buying, as they make them. It is built for complete beginners, uses no real money, and is not a broker or investment adviser.
+> StockSaathi (also written Stock Saathi) is a free stock market simulator and paper trading app for Indian teens and students, built for teens aged 13 to 18 and open to any beginner in India. Users practise investing with ₹1,00,000 of virtual money on real NSE and BSE stocks, ETFs and mutual funds at real market prices, and an AI coach flags beginner mistakes, such as panic-selling and FOMO buying, as they make them. It is built for complete beginners, uses no real money, and is not a broker or investment adviser.
 
 StockSaathi teaches by doing rather than through lessons: there are no course modules or quizzes. Learning comes from placing practice trades, being coached on your own decisions, replaying real Indian market crashes, and reviewing a report card that grades decision quality.
 

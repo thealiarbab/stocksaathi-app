@@ -35,6 +35,9 @@ export function renderLanding(main) {
   let lastOnboarded = state.user.onboarded;
 
   main.innerHTML = LANDING_HTML.replace(CTA_PLACEHOLDER, ctaRowHtml(lastAuthed, lastOnboarded));
+  // Mid-page sign-up buttons (baked into the HTML) are for visitors only.
+  const signupCtas = () => main.querySelectorAll("[data-signup-cta]").forEach((el) => { el.hidden = !!lastAuthed; });
+  signupCtas();
 
   // Hotfix62a: re-paint the CTA row when auth hydrates late.
   //
@@ -64,6 +67,7 @@ export function renderLanding(main) {
       lastAuthed = s.isAuthed;
       lastOnboarded = s.user.onboarded;
       ctaEl.innerHTML = ctaRowHtml(lastAuthed, lastOnboarded);
+      signupCtas();
     });
   }
 }

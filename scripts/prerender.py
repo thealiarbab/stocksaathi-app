@@ -1175,15 +1175,15 @@ def build_pages():
 
     # Home: head only (main comes from partials/landing.html via build_landing.py).
     home = {"path": "/", "file": "index.html", "headOnly": True, "priority": "1.0", "changefreq": "weekly",
-            "title": "StockSaathi: Free Paper Trading App India for Beginners",
-            "description": ("Free paper trading for students and beginners in India. Practise with ₹1,00,000 of "
+            "title": "StockSaathi: Free Stock Market Simulator for Teens & Students in India",
+            "description": ("Free paper trading for Indian teens (13–18) and students. Practise with ₹1,00,000 of "
                             "virtual money on real NSE and BSE stocks, with an AI coach that spots mistakes."),
             "images": [(SITE + "/images/og-image-v2.png", OG_ALT),
                        (SITE + "/images/screenshot-wide.png", "The StockSaathi home page on a desktop screen"),
                        (SITE + "/images/screenshot-narrow.png", "The StockSaathi home page on a phone")],
             "graph": [website_node(), org_node(), founder_node(), app_node(),
                       {"@type": "WebPage", "@id": SITE + "/#webpage", "url": SITE + "/",
-                       "name": "StockSaathi: Free Paper Trading App India for Beginners", "inLanguage": "en-IN",
+                       "name": "StockSaathi: Free Stock Market Simulator for Teens & Students in India", "inLanguage": "en-IN",
                        "isPartOf": {"@id": SITE_ID}, "about": {"@id": APP_ID}, "primaryImageOfPage": OG_IMAGE}],
             "index": True, "sitemap": True}
     pages.append(home)
