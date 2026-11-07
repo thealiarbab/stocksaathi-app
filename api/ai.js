@@ -1708,6 +1708,7 @@ async function route(req) {
       case "admin-auth-update-email": return await opAdminAuthUpdateEmail(req, origin);
       case "admin-auth-set-password": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminAuthSetPassword(req, origin);
       case "auth-resolve-username":   if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthResolveUsername(req, origin);
+      case "auth-login-hint":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAuthLoginHint(req, origin);
       case "admin-auth-force-confirm": return await opAdminAuthForceConfirm(req, origin);
       case "admin-vercel-deployments": return await opAdminVercelDeployments(req, origin, url);
       case "admin-vercel-deployment":  return await opAdminVercelDeployment(req, origin, url);
@@ -3111,6 +3112,38 @@ async function opAuthResolveUsername(req, origin) {
     return j(200, { email: rows[0].email }, origin);
   } catch (e) {
     return j(502, { error: "resolve_failed", detail: String(e.message).slice(0, 120) }, origin);
+  }
+}
+
+// After a failed password login: was this account made with Google and given
+// no password? 8 of the 33 people stuck on "Incorrect email or password"
+// (5-7 Nov 2026) were, and kept typing a password that never existed.
+// Answers only { google: true|false }; an unknown account is false, the same
+// as a password account.
+async function opAuthLoginHint(req, origin) {
+  let body;
+  try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const handle = String(body?.handle || "").trim().toLowerCase().replace(/^@/, "");
+  if (!handle || handle.length > 254) return j(400, { error: "bad_handle" }, origin);
+  const col = handle.includes("@") ? "email" : "username";
+  if (col === "username" && !/^[a-z0-9_.-]{1,40}$/.test(handle)) return j(200, { google: false }, origin);
+  try {
+    const esc = handle.replace(/[\\%_]/g, (m) => "\\" + m);
+    const r = await sbAdminFetch(`/rest/v1/profiles?select=id&${col}=ilike.${encodeURIComponent(esc)}&limit=1`,
+      { signal: AbortSignal.timeout(4000) });
+    const rows = r.ok ? await r.json() : [];
+    const id = Array.isArray(rows) && rows[0]?.id;
+    if (!id) return j(200, { google: false }, origin);
+    const u = await supabaseAuthAdmin(`/auth/v1/admin/users/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(4000) });
+    if (!u.ok) return j(200, { google: false }, origin);
+    const user = await u.json();
+    const providers = new Set([
+      ...((user?.identities || []).map((i) => i?.provider)),
+      ...(user?.app_metadata?.providers || []),
+    ].filter(Boolean));
+    return j(200, { google: providers.has("google") && !providers.has("email") }, origin);
+  } catch {
+    return j(200, { google: false }, origin);
   }
 }
 

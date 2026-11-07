@@ -173,6 +173,25 @@ export function renderLogin(main) {
       const reset = /incorrect email or password/i.test(err.message || "")
         ? `<a class="btn btn-ghost btn-sm" style="margin-top:8px;" href="/reset-password-request${handle.includes("@") ? "?email=" + encodeURIComponent(handle) : ""}">Forgot password? Reset it by email →</a>`
         : "";
+      // Accounts made with "Continue with Google" have no password, so no
+      // password can ever work. Ask the server before blaming a typo.
+      if (reset && handle && await usesGoogleOnly(handle)) {
+        errBox.innerHTML = `<div class="error-msg">
+          <strong>This account was created with Google, so it has no password.</strong>
+          Tap <strong>Continue with Google</strong> above and pick the same Gmail.
+          <br><a class="btn btn-ghost btn-sm" style="margin-top:8px;" href="/reset-password-request${handle.includes("@") ? "?email=" + encodeURIComponent(handle) : ""}">Or set a password by email →</a>
+        </div>`;
+        const g = main.querySelector("#auth-google");
+        if (g && !g.hidden) {
+          g.classList.add("auth-google-pulse");
+          try { g.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+        } else {
+          try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+        }
+        btn.disabled = false;
+        btn.textContent = "Log in";
+        return;
+      }
       errBox.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}${reset ? "<br>" + reset : ""}</div>`;
       try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
       btn.disabled = false;
@@ -183,6 +202,21 @@ export function renderLogin(main) {
 
 function escapeHtml(s) {
   const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML;
+}
+
+// True only when the account exists, signed up with Google and has no
+// password. Any failure is "no", so the normal message shows.
+async function usesGoogleOnly(handle) {
+  try {
+    const r = await fetch("/api/ai?op=auth-login-hint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return false;
+    return (await r.json())?.google === true;
+  } catch { return false; }
 }
 function escapeAttr(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
