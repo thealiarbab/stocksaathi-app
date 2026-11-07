@@ -112,7 +112,11 @@ async function supabaseReq(path, opts = {}) {
   const url = env.SUPABASE_URL;
   const key = opts.serviceRole ? env.SUPABASE_SERVICE_ROLE_KEY : env.SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("supabase_not_configured");
+  // Bounded: an unbounded cache read was what held requests past Vercel's
+  // 25 s first-byte limit whenever Supabase stalled (1,050 kills, 6 Nov).
+  // A timed-out read is a cache miss; callers already treat errors that way.
   return fetch(`${url.replace(/\/$/, "")}${path}`, {
+    signal: AbortSignal.timeout(opts.timeoutMs || 5000),
     ...opts,
     headers: {
       "apikey": key,
@@ -1564,7 +1568,27 @@ async function opCommand(req, origin) {
 // -----------------------------------------------------------------------------
 // Dispatch
 // -----------------------------------------------------------------------------
+// Vercel stops a function that has not sent its first byte within 25 s and
+// the browser gets a bare 504. Answer first, at 22 s, with a JSON error the
+// page can show, and log the miss so it shows up next to the model calls.
+const DEADLINE_MS = 22_000;
 export default async function handler(req) {
+  let timer;
+  const deadline = new Promise((resolve) => {
+    timer = setTimeout(async () => {
+      const op = new URL(req.url).searchParams.get("op") || "";
+      await recordUsageRaw({ route: "ai", op: op.replace(/-/g, "_"), upstream: "none", ok: false, status: "deadline", total_ms: DEADLINE_MS }, { capMs: 1500 });
+      resolve(j(504, { error: "timeout", retry: true }, req.headers.get("Origin") || ""));
+    }, DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([handlerInner(req), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function handlerInner(req) {
   const op = new URL(req.url).searchParams.get("op") || "";
   if (!LLM_OPS.has(op)) return guarded(req);
   const caller = await callerHashes(req);
