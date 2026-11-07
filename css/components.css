@@ -5534,3 +5534,5 @@ a.feature-card h3 { color: var(--text); }
 .input-missing, .input-prefix:has(.input-missing) { border-color: var(--red) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 20%, transparent); }
 .landing-mid-cta { margin-top: var(--sp-5); }
 .cta-row[hidden] { display: none; }
+a.pill { text-decoration: none; }
+a.pill:hover, a.pill:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
