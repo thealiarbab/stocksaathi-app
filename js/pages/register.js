@@ -18,6 +18,17 @@ export function renderRegister(main) {
   let pendingName = "";
   let resendCountdown = 0;
   let resendTimer = null;
+  // Code emails sent this visit (times). Supabase makes every new code
+  // replace the last one, so the screen always names the newest email.
+  const sentAt = [];
+  // "sending" while the sign-up call (which sends the email, ~3 s server
+  // side) is still running; the code screen shows at once instead of the
+  // button spinning.
+  let sendState = "idle";
+  let sendPromise = null;
+  // An error from a sign-up that failed after the code screen was shown;
+  // the form shows it when it re-renders.
+  let pendingFormError = null;
   // What was typed, so "Change email" goes back to a filled-in form.
   const typed = { name: "", username: "", email: "" };
   // Addresses the user said are right despite a suggestion.
@@ -33,7 +44,10 @@ export function renderRegister(main) {
       pendingEmail = email;
       typed.email = email;
       stage = "otp";
-      resendSignupOtp(email).catch(() => {});
+      sendState = "sending";
+      sendPromise = resendSignupOtp(email)
+        .then(() => { sentAt.push(new Date()); sendState = "sent"; updateOtpStatus(); })
+        .catch(() => { sendState = "unknown"; updateOtpStatus(); });
       startResendTimer();
     }
   }
@@ -134,6 +148,18 @@ export function renderRegister(main) {
     const termsBox = main.querySelector("#r-terms-box");
     main.querySelector("#r-terms").addEventListener("change", () => termsBox.classList.remove("reg-terms-missing"));
     form.addEventListener("input", (e) => e.target.classList?.remove("input-missing"));
+    if (pendingFormError) {
+      const pe = pendingFormError;
+      pendingFormError = null;
+      queueMicrotask(() => {
+        if (pe.html) {
+          errBox.innerHTML = pe.html;
+          try { errBox.scrollIntoView({ block: "center", behavior: "smooth" }); } catch {}
+        } else {
+          showErr(pe.msg);
+        }
+      });
+    }
     // Show / hide password toggle. Critical on mobile where users can't
     // see what swipe-input / autocorrect actually typed.
     wirePasswordToggle(main, "#r-pw", "#r-pw-toggle");
@@ -251,47 +277,55 @@ export function renderRegister(main) {
           ? `"${domain}" isn't a real email domain, so your code could never arrive. Check the part after the @.`
           : `"${domain}" doesn't seem to accept email. Check the part after the @, or press Create account again if you're sure.`);
       }
+      // Show the code screen now; the account is created and the email
+      // sent in the background (the email alone is ~3 s on Supabase's side).
+      clearTimeout(slowTimer);
+      pendingEmail = email;
+      pendingName = name;
+      sendState = "sending";
+      stage = "otp";
+      startResendTimer();
+      render();
+      const signupPromise = registerAccount({ username, email, password: pw, displayName: name });
+      sendPromise = signupPromise.then(() => {}, () => {});
+      // Slow is not failed: past 15 s the email usually still arrives, so
+      // say so on the code screen instead of throwing the user back.
+      const slowNote = setTimeout(() => {
+        if (sendState === "sending") { sendState = "slow"; updateOtpStatus(); }
+      }, 15000);
       try {
-        // Race against a 15s timeout — Supabase signUp occasionally hangs
-        // silently on free tier, leaving the button stuck forever. If we
-        // time out, surface a real error so the user can retry instead of
-        // staring at "Creating account…" indefinitely.
-        const signupPromise = registerAccount({ username, email, password: pw, displayName: name });
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Sign-up is taking too long — check your connection and try again.")), 15000)
-        );
-        const res = await Promise.race([signupPromise, timeoutPromise]).finally(() => clearTimeout(slowTimer));
-
+        const res = await signupPromise;
+        clearTimeout(slowNote);
         if (res && res.needsConfirmation) {
-          // Switch to OTP entry
-          pendingEmail = email;
-          pendingName = name;
-          stage = "otp";
-          startResendTimer();
-          render();
+          sentAt.push(new Date());
+          sendState = "sent";
+          updateOtpStatus();
           return;
         }
-
         // Already signed in (email confirmation off)
+        sendState = "sent";
         await finishSignIn();
       } catch (err) {
+        clearTimeout(slowNote);
+        sendState = "idle";
+        if (stage === "otp") {
+          if (resendTimer) { clearInterval(resendTimer); resendTimer = null; }
+          stage = "form";
+        }
         // Email-already-registered is a super common case — send them to
         // /login with the email prefilled instead of leaving them staring
         // at a red error that says "log in instead" with no link.
         if (err.code === "email_already_registered" || /already exists|already registered/i.test(err.message || "")) {
-          errBox.innerHTML = `<div class="error-msg">
+          pendingFormError = { html: `<div class="error-msg">
             An account with <strong>${escapeHtml(email)}</strong> is already registered.
             <a href="/login?email=${encodeURIComponent(email)}" style="margin-left:6px;">Log in →</a>
             <span class="dim" style="margin:0 4px;">or</span>
             <a href="/reset-password-request">reset your password</a>
-          </div>`;
-          btn.disabled = false;
-          btn.textContent = "Create account";
-          return;
+          </div>` };
+        } else {
+          pendingFormError = { msg: err.message || "Sign-up failed. Check your connection and try again." };
         }
-        showErr(err.message);
-        btn.disabled = false;
-        btn.textContent = "Create account";
+        render();
       }
     });
 
@@ -320,7 +354,8 @@ export function renderRegister(main) {
           <div style="text-align: center; margin-bottom: var(--sp-4);">
             <div style="font-size: 48px; margin-bottom: var(--sp-2);">📬</div>
             <h1>Check your email</h1>
-            <p class="sub">We sent a verification code to <strong>${escapeHtml(pendingEmail)}</strong>. Enter it below to activate your account.</p>
+            <p class="sub">Your code goes to <strong>${escapeHtml(pendingEmail)}</strong>. Enter it below to activate your account.</p>
+            <div id="otp-status" class="otp-status" role="status" aria-live="polite"></div>
           </div>
 
           <div class="otp-spam-tip">
@@ -335,7 +370,7 @@ export function renderRegister(main) {
               <input class="input" id="otp-input" type="text" inputmode="numeric" pattern="[0-9]{4,10}" maxlength="10" required
                 placeholder="Enter the code" autocomplete="one-time-code"
                 style="font-family: var(--font-mono); letter-spacing: 0.25em; text-align: center; font-size: var(--text-xl); font-weight: 700;" />
-              <div class="dim text-xs" style="margin-top: 6px; text-align: center;">From the email we just sent.</div>
+              <div class="dim text-xs" id="otp-hint" style="margin-top: 6px; text-align: center;">Paste or type the code from the email.</div>
             </div>
 
             <div id="otp-error" role="alert"></div>
@@ -374,7 +409,20 @@ export function renderRegister(main) {
     const errBox = main.querySelector("#otp-error");
     const btn = main.querySelector("#otp-btn");
     const resendBtn = main.querySelector("#resend-btn");
-    main.querySelector("#otp-input")?.focus();
+    const otpInput = main.querySelector("#otp-input");
+    otpInput?.focus();
+    otpInput?.addEventListener("input", () => {
+      const digits = otpInput.value.replace(/\D/g, "").slice(0, 10);
+      if (digits !== otpInput.value) otpInput.value = digits;
+    });
+    otpInput?.addEventListener("paste", (e) => {
+      const digits = (e.clipboardData?.getData("text") || "").replace(/\D/g, "");
+      if (!/^\d{6,10}$/.test(digits)) return;
+      e.preventDefault();
+      otpInput.value = digits;
+      form.requestSubmit();
+    });
+    updateOtpStatus();
 
     // ----- Primary path: auto-advance when Supabase establishes a session.
     // Fires when the user clicks the confirmation link (either in this tab
@@ -420,15 +468,22 @@ export function renderRegister(main) {
       btn.disabled = true;
       btn.textContent = "Verifying…";
       try {
+        // A code can't be checked before the account exists.
+        if (sendState === "sending" || sendState === "slow") await sendPromise;
+        if (stage !== "otp") return;
         await verifySignupOtp({ email: pendingEmail, code });
         await onSignedIn();
       } catch (err) {
         // Supabase's "Token has expired or is invalid" (15 times on 18 Oct)
         // reads like a fault; it is almost always a typo or the code from an
         // older email after Resend.
+        const newest = sentAt.length ? timeOf(sentAt[sentAt.length - 1]) : "";
         const msg = /expired|invalid/i.test(err.message || "")
-          ? "That code didn't work. Check for a typo, and if you pressed Resend, use the code from the newest email."
+          ? (sentAt.length > 1
+            ? `That code didn't work. Only the newest code works: open the email sent at ${newest}. Codes from earlier emails stop working once a new one is sent.`
+            : `That code didn't work. Check each digit against the email${newest ? ` sent at ${newest}` : ""}.`)
           : err.message;
+        main.querySelector("#otp-input")?.select();
         errBox.innerHTML = `<div class="error-msg">${escapeHtml(msg)}</div>`;
         btn.disabled = false;
         btn.textContent = "Verify and continue";
@@ -437,12 +492,21 @@ export function renderRegister(main) {
 
     resendBtn.addEventListener("click", async () => {
       resendBtn.disabled = true;
+      errBox.innerHTML = "";
+      const input = main.querySelector("#otp-input");
+      if (input) input.value = "";
+      sendState = "sending";
+      updateOtpStatus();
       try {
         await resendSignupOtp(pendingEmail);
+        sentAt.push(new Date());
+        sendState = "sent";
         startResendTimer();
-        const waiting = main.querySelector("#otp-waiting");
-        if (waiting) waiting.innerHTML = `<span>✅ New email sent — check your inbox.</span>`;
+        updateOtpStatus(true);
+        input?.focus();
       } catch (err) {
+        sendState = sentAt.length ? "sent" : "unknown";
+        updateOtpStatus();
         errBox.innerHTML = `<div class="error-msg">${escapeHtml(err.message)}</div>`;
         resendBtn.disabled = false;
       }
@@ -457,6 +521,41 @@ export function renderRegister(main) {
     });
 
     updateResendUi();
+  }
+
+  function timeOf(d) {
+    try { return d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }); }
+    catch { return d.toTimeString().slice(0, 5); }
+  }
+
+  // The line under "Check your email": sending, sent at what time, and after
+  // a resend, that only the newest email's code works. Gmail stacks every
+  // code email into one conversation, which is how people ended up typing
+  // an older code (34 wrong-code errors in 3 days, Nov 2026).
+  function updateOtpStatus(justResent = false) {
+    const el = main.querySelector("#otp-status");
+    if (!el) return;
+    const n = sentAt.length;
+    const last = n ? timeOf(sentAt[n - 1]) : "";
+    let html;
+    if (sendState === "sending") {
+      html = `<span class="spinner" aria-hidden="true"></span> Sending your code…`;
+    } else if (sendState === "slow") {
+      html = `Still sending. It usually arrives within a minute; if not, press Resend below.`;
+    } else if (n > 1) {
+      html = `<strong>New code sent at ${last}.</strong> Use the code from that email only: earlier codes no longer work. In Gmail, open the conversation and scroll to the <strong>last</strong> message.`;
+    } else if (n === 1) {
+      html = `✓ Code sent at ${last}.`;
+    } else {
+      html = "";
+    }
+    el.innerHTML = html;
+    el.classList.toggle("otp-status-warn", n > 1);
+    if (justResent) {
+      el.classList.remove("otp-status-flash");
+      void el.offsetWidth;
+      el.classList.add("otp-status-flash");
+    }
   }
 
   function startResendTimer() {

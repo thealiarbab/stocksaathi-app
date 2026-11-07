@@ -5536,3 +5536,13 @@ a.feature-card h3 { color: var(--text); }
 .cta-row[hidden] { display: none; }
 a.pill { text-decoration: none; }
 a.pill:hover, a.pill:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Code screen status line: sending / sent at / newest-code warning. */
+.otp-status { margin-top: var(--sp-3); font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.otp-status:empty { display: none; }
+.otp-status-warn { display: block; text-align: left; padding: var(--sp-3); border-radius: 8px; border: 1.5px solid var(--warning); background: var(--warning-soft); color: var(--text); }
+.otp-status-flash { animation: otp-flash 1.2s ease-out 1; }
+@keyframes otp-flash { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 60%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
+@media (prefers-reduced-motion: reduce) { .otp-status-flash { animation: none; } }
+.auth-google-pulse { border-radius: 10px; animation: otp-flash 1.2s ease-out 2; }
+@media (prefers-reduced-motion: reduce) { .auth-google-pulse { animation: none; outline: 2px solid var(--warning); outline-offset: 4px; } }
