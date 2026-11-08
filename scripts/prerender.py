@@ -538,6 +538,8 @@ def org_node():
         "founder": {"@id": FOUNDER_ID},
         "foundingDate": "2026-04-19",
         "areaServed": {"@type": "Country", "name": "India"},
+        "knowsAbout": ["Stock market education", "Stock market simulators", "Indian stock market (NSE and BSE)",
+                       "Investing for teenagers and students", "Behavioural finance", "Market crash history in India"],
         "sameAs": ["https://www.instagram.com/stocksaathi.co.in/", "https://x.com/stocksaathicoin",
                    "https://github.com/thealiarbab/StockSaathi"],
         "contactPoint": [
