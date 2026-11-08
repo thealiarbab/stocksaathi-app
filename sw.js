@@ -38,6 +38,7 @@ const STATIC = [
 const CORE = [
   "/fonts/inter-latin.woff2",
   "/fonts/inter-latin-ext.woff2",
+  "/fonts/inter-rupee.woff2",
   ...(BUILD ? BUILD.core : []),
 ];
 

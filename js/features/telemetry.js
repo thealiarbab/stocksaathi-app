@@ -515,7 +515,33 @@ function watchPerf() {
       }
     }).observe({ type: "layout-shift", buffered: true });
   } catch {}
-  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) perf.inp = Math.max(perf.inp, Math.round(e.duration)); }).observe({ type: "event", buffered: true, durationThreshold: 40 }); } catch {}
+  // Slowest interaction, plus where its time went, so a slow tap can be
+  // traced: input delay = main thread busy (often third-party scripts),
+  // processing = our own handlers, presentation = rendering the result.
+  try {
+    new PerformanceObserver((l) => {
+      for (const e of l.getEntries()) {
+        const d = Math.round(e.duration);
+        if (d <= perf.inp) continue;
+        perf.inp = d;
+        perf.inpEv = e.name;
+        perf.inpEl = describeEl(e.target);
+        perf.inpAt = Math.round(e.startTime);
+        perf.inpIn = Math.round(e.processingStart - e.startTime);
+        perf.inpProc = Math.round(e.processingEnd - e.processingStart);
+      }
+    }).observe({ type: "event", buffered: true, durationThreshold: 40 });
+  } catch {}
+}
+// "button#id.cls1.cls2" for an element, without any text it contains.
+function describeEl(el) {
+  try {
+    if (!el || !el.tagName) return "";
+    const id = el.id ? "#" + el.id : "";
+    const cls = typeof el.className === "string" && el.className.trim()
+      ? "." + el.className.trim().split(/\s+/).slice(0, 3).join(".") : "";
+    return (el.tagName.toLowerCase() + id + cls).slice(0, 120);
+  } catch { return ""; }
 }
 function sendPerf() {
   if (perfSent) return;
@@ -526,6 +552,8 @@ function sendPerf() {
     ttfb: nav ? Math.round(nav.responseStart) : "",
     fcp: fcp ? Math.round(fcp.startTime) : "",
     lcp: perf.lcp || "", cls: Math.round(perf.cls * 1000) / 1000, inp: perf.inp || "",
+    inp_ev: perf.inpEv || "", inp_el: perf.inpEl || "", inp_at: perf.inpAt || "",
+    inp_in: perf.inpIn ?? "", inp_proc: perf.inpProc ?? "",
     dcl: nav ? Math.round(nav.domContentLoadedEventEnd) : "",
     load: nav ? Math.round(nav.loadEventEnd) : "",
     dev: DEV, net: navigator.connection?.effectiveType || "",

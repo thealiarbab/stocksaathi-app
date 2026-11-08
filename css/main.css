@@ -1,13 +1,25 @@
 /* Self-hosted Inter and JetBrains Mono (SIL Open Font License), latin and
-   latin-ext only: latin-ext carries the rupee sign. Served from our own
-   origin so the first paint does not wait on a second server. */
+   latin-ext only. Served from our own origin so the first paint does not
+   wait on a second server. The rupee sign has its own 1.2 KB Inter file
+   (inter-rupee.woff2, cut from latin-ext with fontTools), which is the one
+   preloaded: preloading all of latin-ext (85 KB) for one glyph held back the
+   first paint on phones. latin-ext now loads only when a page needs one of
+   its other characters. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url(/fonts/inter-rupee.woff2) format('woff2');
+  unicode-range: U+20B9;
+}
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 400 800;
   font-display: swap;
   src: url(/fonts/inter-latin-ext.woff2) format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20B8, U+20BA-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
   font-family: 'Inter';
