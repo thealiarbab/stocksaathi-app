@@ -238,6 +238,14 @@ function triesError(message, body) {
  * enabled in Supabase and never shows while it would fail.
  */
 let _googleEnabled = null;
+// Last known answer, kept in the browser so pages can draw the Google button
+// at once instead of after a network round trip (default: on, as it is in
+// production). googleSignInEnabled() still checks and corrects it.
+const GOOGLE_ON_KEY = "ss.googleOn";
+export function googleSignInLikely() {
+  if (_googleEnabled !== null) return _googleEnabled;
+  try { return localStorage.getItem(GOOGLE_ON_KEY) !== "0"; } catch { return true; }
+}
 export async function googleSignInEnabled() {
   if (_googleEnabled !== null) return _googleEnabled;
   try {
@@ -247,6 +255,7 @@ export async function googleSignInEnabled() {
     const s = r.ok ? await r.json() : null;
     _googleEnabled = !!s?.external?.google;
   } catch { _googleEnabled = false; }
+  try { localStorage.setItem(GOOGLE_ON_KEY, _googleEnabled ? "1" : "0"); } catch {}
   return _googleEnabled;
 }
 

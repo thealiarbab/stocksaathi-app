@@ -40,7 +40,7 @@ export function renderLogin(main) {
       <div class="auth-card">
         <h1>Welcome back</h1>
         <p class="sub">Log in to continue where you left off.</p>
-        ${googleButtonHtml()}
+        ${googleButtonHtml("Continue with Google", { optimistic: true })}
 
         <form class="auth-form" id="login-form" autocomplete="on">
           <div class="field">

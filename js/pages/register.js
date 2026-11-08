@@ -4,7 +4,7 @@
 
 import {
   registerAccount, validateEmail, validatePassword, validateUsername,
-  verifySignupOtp, resendSignupOtp,
+  verifySignupOtp, resendSignupOtp, googleSignInLikely,
 } from "../auth/accounts.js";
 import { switchUser } from "../state.js";
 import { navigate } from "../router.js";
@@ -82,15 +82,18 @@ export function renderRegister(main) {
   }
 
   function renderForm() {
+    // Drawn folded from the start when Google was on last time: folding it
+    // after the check came back made the form flash for a moment.
+    const foldEmail = googleSignInLikely();
     main.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card">
           <h1>Create your StockSaathi account</h1>
           <p class="sub">Your ₹1,00,000 virtual portfolio is one minute away.</p>
-          ${googleButtonHtml("Sign up with Google")}
-          <button type="button" class="btn btn-ghost btn-block btn-lg" id="r-email-toggle" hidden>Sign up with email instead</button>
+          ${googleButtonHtml("Sign up with Google", { optimistic: true })}
+          <button type="button" class="btn btn-ghost btn-block btn-lg" id="r-email-toggle"${foldEmail ? "" : " hidden"}>Sign up with email instead</button>
 
-          <form class="auth-form" id="reg-form" autocomplete="on" novalidate>
+          <form class="auth-form" id="reg-form" autocomplete="on" novalidate${foldEmail ? " hidden" : ""}>
             <div class="field">
               <label class="label" for="r-name">Your full name</label>
               <input class="input" id="r-name" name="name" type="text" required autocomplete="name" placeholder="e.g. Ananya Sharma" />
@@ -182,7 +185,7 @@ export function renderRegister(main) {
       if (typed || regForm.contains(document.activeElement) || errBox.textContent.trim()) return;
       regForm.hidden = true;
       emailToggle.hidden = false;
-    });
+    }).then((shown) => { if (shown === false) openEmail(false); });   // Google is off: the form is the only way
 
     // Start loading the database client now, not when Create account is
     // pressed: the sign-up call used to wait for it first.
