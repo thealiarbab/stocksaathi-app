@@ -531,8 +531,10 @@ def org_node():
         "alternateName": ["Stock Saathi"],
         "slogan": "Invest virtually. Learn for real.",
         "logo": {"@type": "ImageObject", "url": SITE + "/images/logo-512.png", "width": 512, "height": 512},
-        "description": ("StockSaathi makes a free stock market simulator for students and beginners in India "
-                        "(including teens 13–18), who practise investing with virtual money."),
+        "description": ("StockSaathi makes a free stock market simulator for Indian teens (13–18) and students, "
+                        "who practise investing with virtual money on real NSE and BSE prices."),
+        "disambiguatingDescription": ("StockSaathi at stocksaathi.co.in: a free virtual-money stock market "
+                                      "simulator for learning. Not a broker, investment adviser or stock-tips service."),
         "founder": {"@id": FOUNDER_ID},
         "foundingDate": "2026-04-19",
         "areaServed": {"@type": "Country", "name": "India"},
@@ -591,7 +593,9 @@ def app_node():
         "applicationCategory": "FinanceApplication",
         "applicationSubCategory": "Stock market simulator and paper trading app",
         "operatingSystem": "Any (web browser)",
-        "description": ("A free stock market simulator for students and beginners in India (including teens 13–18). "
+        "disambiguatingDescription": ("StockSaathi at stocksaathi.co.in: a free virtual-money stock market "
+                                      "simulator for learning. Not a broker, investment adviser or stock-tips service."),
+        "description": ("A free stock market simulator for Indian teens (13–18) and students. "
                         "Practise with ₹1,00,000 of virtual "
                         "money on real NSE and BSE stocks, ETFs and mutual funds at real market prices, with an AI coach "
                         "that flags beginner mistakes as you make them."),
