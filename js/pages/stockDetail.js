@@ -1499,8 +1499,8 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
         const at = fresh.ts ? new Date(fresh.ts).toLocaleString("en-IN", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
         const moved = before != null && fresh.pricePaise !== before;
         toast({ kind: "info", duration: 4000, message: !marketStatus().open
-          ? `Market is closed, so the price won't change until it opens. Last price ${formatRupees(fresh.pricePaise)}${at ? ` (${at})` : ""}.`
-          : moved ? `Updated: ${formatRupees(fresh.pricePaise)}.` : `Up to date: ${formatRupees(fresh.pricePaise)}${at ? ` as of ${at}` : ""}.` });
+          ? `Market is closed, so the price won't change until it opens. Last price ${formatRupees(fresh.pricePaise, { showDecimals: true })}.`
+          : moved ? `Updated: ${formatRupees(fresh.pricePaise, { showDecimals: true })}.` : `Up to date: ${formatRupees(fresh.pricePaise, { showDecimals: true })}${at ? `, last checked ${at}` : ""}.` });
       } else {
         toast({ kind: "error", message: "Couldn't get a newer price right now. Try again in a minute." });
       }
@@ -2051,7 +2051,7 @@ async function _reviewTrade(inst, symbol, curPrice, holding) {
     const holdPaise = Math.round(qty * limitPaise * (atOpen ? 1.2 : 1));
     if (ui.side === "BUY" && holdPaise > (getState().portfolio?.cashPaise || 0)) {
       toast({ kind: "error", message: atOpen
-        ? `Not enough cash. The price can open higher tomorrow, so this order needs ${formatRupees(holdPaise)} (20% more than now) set aside until it fills; you get the rest back. Buy fewer shares, or choose Limit and set your own price.`
+        ? `Not enough cash. The price can open higher tomorrow, so this order needs ${formatRupees(holdPaise, { showDecimals: true })} (20% more than now) set aside until it fills; you get the rest back. Buy fewer shares, or choose Limit and set your own price.`
         : "Not enough cash to reserve for this AMO.", duration: 6000 });
       return;
     }
