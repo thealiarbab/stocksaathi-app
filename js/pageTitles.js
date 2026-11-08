@@ -10,7 +10,7 @@ export const PAGE_TITLES = {
   "/chat": "Ask Saathi: Free AI Stock Market Coach for Beginners | StockSaathi",
   "/news": "Indian Stock Market News with Sentiment | StockSaathi",
   "/learn-stock-market": "How to Learn the Stock Market as a Teenager in India",
-  "/for-students": "Stock Market Game for School Students in India | StockSaathi",
+  "/for-students": "Stock Market Simulator for School Students in India | StockSaathi",
   "/about": "About StockSaathi: Founded by Ali Arbab, Student Developer",
   "/contact": "Contact StockSaathi: Support, Business and Schools",
   "/learn/2008-crash-india": "2008 Stock Market Crash in India: When Selling Early Won",

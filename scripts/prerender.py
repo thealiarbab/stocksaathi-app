@@ -1180,8 +1180,8 @@ def build_pages():
     # Home: head only (main comes from partials/landing.html via build_landing.py).
     home = {"path": "/", "file": "index.html", "headOnly": True, "priority": "1.0", "changefreq": "weekly",
             "title": "StockSaathi: Free Stock Market Simulator for Teens & Students in India",
-            "description": ("Free paper trading for Indian teens (13–18) and students. Practise with ₹1,00,000 of "
-                            "virtual money on real NSE and BSE stocks, with an AI coach that spots mistakes."),
+            "description": ("Free paper trading for Indian teens (13–18) and students: ₹1,00,000 of virtual money "
+                            "on real NSE & BSE stocks, with an AI coach that spots mistakes."),
             "images": [(SITE + "/images/og-image-v2.png", OG_ALT),
                        (SITE + "/images/screenshot-wide.png", "The StockSaathi home page on a desktop screen"),
                        (SITE + "/images/screenshot-narrow.png", "The StockSaathi home page on a phone")],
@@ -1284,14 +1284,14 @@ def build_pages():
         extraGraph=[faq_node(SITE + "/learn-stock-market", faq_pairs(learn))],
         main=learn)
 
-    students_mod = "2026-11-02"
+    students_mod = "2026-11-08"
     add(path="/for-students", file="for-students.html", priority="0.8", changefreq="monthly",
         ogType="article",
-        title="Stock Market Game for School Students in India | StockSaathi",
-        description=("A free virtual stock market game for Indian students aged 13–18: ₹1,00,000 of virtual money, "
-                     "real NSE and BSE stocks and an AI coach. No payments."),
+        title="Stock Market Simulator for School Students in India | StockSaathi",
+        description=("A free stock market simulator and virtual stock market game for Indian students aged 13–18: "
+                     "₹1,00,000 of virtual money, real NSE and BSE stocks and an AI coach."),
         crumbs=[("Home", "/"), ("For students", "/for-students")],
-        article={"headline": "A free stock market game for school and college students in India",
+        article={"headline": "A free stock market simulator for school and college students in India",
                  "datePublished": iso_ist("2026-09-30"), "dateModified": iso_ist(students_mod)},
         main=with_byline(partial("for-students.html", "/for-students"), students_mod))
 
