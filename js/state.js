@@ -389,7 +389,8 @@ export async function applyTrade({ symbol, side, qty, pricePaise, biasFlags = []
     } catch (e) {
       const msg = String(e?.message || "");
       if (msg === "trade_timeout") {
-        throw new Error("Trade took too long — a previous request may still be processing. Wait 30 seconds and try again.");
+        // Do not invite a second order: the first one has often been booked.
+        throw new Error("Your connection is very slow, so we couldn't confirm this trade. It may still have gone through: check your portfolio in a minute before placing it again.");
       }
       if (/not logged in|jwt|auth|permission/i.test(msg)) {
         await handleSessionLost();

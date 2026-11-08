@@ -2106,6 +2106,15 @@ function notListedHere(q) {
   return "";
 }
 
+// Index names students type. Returns a display name, or "".
+function indexWord(q) {
+  const t = q.trim().toLowerCase();
+  if (/\bbank ?nif|nifty ?bank/.test(t)) return "Bank Nifty";
+  if (/\bsensex\b/.test(t)) return "Sensex";
+  if (/\bnift/.test(t)) return /\b(it|pharma|auto|fmcg|metal|psu|private|midcap|smallcap|next)\b/.test(t) ? "This Nifty index" : "Nifty";
+  return "";
+}
+
 // "No matches" that never dead-ends: where else it is, a spelling fix, or Saathi.
 function searchEmptyHtml(q, kind) {
   const r = _lastSearch;
@@ -2114,6 +2123,15 @@ function searchEmptyHtml(q, kind) {
   const words = q.trim().split(/\s+/).length;
   const offList = notListedHere(q);
   if (offList && !els) return `<div class="empty-state"><span class="emoji">🇮🇳</span><h3>${escapeHtml(offList)}</h3><p class="muted">StockSaathi has every NSE stock, ETF and mutual fund. Try "gold", "nifty 50" or "bank stocks".</p></div>`;
+  // "nifty" was the most common search with no stock results (14 a week):
+  // an index is not a stock, but ETFs that follow it are one tap away.
+  const idx = indexWord(q);
+  const etfN = els?.by?.[KIND_ETF] || 0;
+  if (idx && kind === KIND_EQUITY && etfN) return `<div class="empty-state ss-empty-state"><span class="emoji">📊</span>
+      <h3>${escapeHtml(idx)} is an index, not a stock</h3>
+      <p class="muted">An index is a list of companies, so you can't buy it directly. Index ETFs follow it and trade like a share.</p>
+      <p class="ss-empty-row"><button type="button" class="btn btn-primary btn-sm" data-ss-kind="${KIND_ETF}">See ${etfN.toLocaleString("en-IN")} ETFs for “${escapeHtml(q.trim())}” →</button></p>
+    </div>`;
   return `<div class="empty-state ss-empty-state"><span class="emoji">🔍</span>
       <h3>Nothing in ${escapeHtml(TAB_NAME[kind] || "this list")} for “${escapeHtml(q.trim())}”</h3>
       ${els ? `<p class="ss-empty-row">${Object.entries(els.by).map(([k, n]) =>

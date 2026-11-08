@@ -5105,6 +5105,9 @@ body.chart-fs-open #main { animation: none; transform: none; }
 }
 .auth-google-btn:hover { border-color: var(--text-muted); }
 .auth-google-btn[hidden], .auth-google-gis[hidden], .email-hint[hidden] { display: none; }
+/* Sign-up: the email form folds behind this button once Google is ready. */
+#r-email-toggle { margin-top: var(--sp-3); }
+#r-email-toggle[hidden], .auth-form[hidden] { display: none !important; }
 /* Google's own button renders in an iframe here; reserve its 44px so the
    form doesn't jump when it arrives. */
 .auth-google-gis { display: flex; justify-content: center; min-height: 44px; }

@@ -296,17 +296,33 @@ export async function dbApplyTrade({ symbol, side, qty, pricePaise, idempotencyK
   // without this, the confirm modal would sit forever and the UI looks
   // dead. 10 s is generous (usually completes in <200ms); anything longer
   // is either a real problem or a transient lock that'll clear in a minute.
-  const { data, error } = await Promise.race([
-    client.rpc("apply_trade", {
-      p_symbol: symbol,
-      p_side: side,
-      p_qty: qty,
-      p_price_paise: pricePaise,
-      p_idempotency_key: idempotencyKey,
-      p_bias_flags: biasFlags || [],
-    }),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("trade_timeout")), 10_000)),
+  //
+  // 8 Nov 2026: on phones a 10 s cut-off was the network, not the database
+  // (apply_trade averages 86 ms). 41 of 53 trades reported as "took too long"
+  // in a week had been booked, and people placed them again. Now a slow call
+  // is asked again with the SAME idempotency key: the server returns the
+  // trade it already booked instead of booking a second one.
+  const call = () => client.rpc("apply_trade", {
+    p_symbol: symbol,
+    p_side: side,
+    p_qty: qty,
+    p_price_paise: pricePaise,
+    p_idempotency_key: idempotencyKey,
+    p_bias_flags: biasFlags || [],
+  });
+  const timed = (p, ms) => Promise.race([
+    p, new Promise((_, reject) => setTimeout(() => reject(new Error("trade_timeout")), ms)),
   ]);
+  let data, error;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      ({ data, error } = await timed(call(), attempt === 0 ? 12_000 : 15_000));
+      break;
+    } catch (e) {
+      if (String(e?.message) !== "trade_timeout" || !idempotencyKey || attempt >= 2) throw e;
+      try { window.dispatchEvent(new CustomEvent("ss:trade-slow", { detail: { attempt: attempt + 1 } })); } catch {}
+    }
+  }
   if (error) {
     if (/not logged in/i.test(error.message)) await handleSessionLost();
     throw new Error(prettifyErr(error.message));

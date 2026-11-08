@@ -1488,14 +1488,25 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   main.querySelector("#price-refresh-btn")?.addEventListener("click", async () => {
     const btn = main.querySelector("#price-refresh-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
+    // Always say what happened: 249 repeated taps in a week came from the
+    // price not visibly changing, mostly while the market was closed.
+    const before = liveQuote?.pricePaise;
     try {
       const fresh = await getQuote(symbol, { bustCache: true });
-      if (fresh) {
+      if (fresh && fresh.source !== "synthetic") {
         liveQuote = fresh;
         render(inst, symbol);
+        const at = fresh.ts ? new Date(fresh.ts).toLocaleString("en-IN", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+        const moved = before != null && fresh.pricePaise !== before;
+        toast({ kind: "info", duration: 4000, message: !marketStatus().open
+          ? `Market is closed, so the price won't change until it opens. Last price ${formatRupees(fresh.pricePaise)}${at ? ` (${at})` : ""}.`
+          : moved ? `Updated: ${formatRupees(fresh.pricePaise)}.` : `Up to date: ${formatRupees(fresh.pricePaise)}${at ? ` as of ${at}` : ""}.` });
+      } else {
+        toast({ kind: "error", message: "Couldn't get a newer price right now. Try again in a minute." });
       }
     } catch (e) {
       console.warn("[price-refresh]", e?.message || e);
+      toast({ kind: "error", message: "Couldn't get a newer price right now. Try again in a minute." });
     } finally {
       // The render above already re-paints the button if successful;
       // restore here only matters on the no-refresh-no-render path.
@@ -2040,7 +2051,7 @@ async function _reviewTrade(inst, symbol, curPrice, holding) {
     const holdPaise = Math.round(qty * limitPaise * (atOpen ? 1.2 : 1));
     if (ui.side === "BUY" && holdPaise > (getState().portfolio?.cashPaise || 0)) {
       toast({ kind: "error", message: atOpen
-        ? `Not enough cash: an order at the open holds 20% extra (${formatRupees(holdPaise)}) in case the price opens higher. Lower the quantity or use Limit.`
+        ? `Not enough cash. The price can open higher tomorrow, so this order needs ${formatRupees(holdPaise)} (20% more than now) set aside until it fills; you get the rest back. Buy fewer shares, or choose Limit and set your own price.`
         : "Not enough cash to reserve for this AMO.", duration: 6000 });
       return;
     }
@@ -2321,6 +2332,10 @@ async function fetchTradeNudge(modalRoot, inst, symbol, side, qty, curPricePaise
 async function executeTrade(inst, side, qty, pricePaise) {
   // Market order: the server books its own latest quote (apply_trade), so
   // the toast and the coach use the price it returns, not the screen's.
+  // dbApplyTrade re-asks the server when a call is slow; say so, so nobody
+  // taps again thinking it froze.
+  const onSlow = () => toast({ kind: "info", message: "Slow connection, still placing your order. Don't tap again.", duration: 5000 });
+  window.addEventListener("ss:trade-slow", onSlow);
   try {
     // Key is generated ONCE at call time — deterministic for this click
     // intent. If the RPC times out and any internal layer retries, the
@@ -2394,6 +2409,8 @@ async function executeTrade(inst, side, qty, pricePaise) {
   } catch (e) {
     toast({ kind: "error", message: e.message || "Trade failed" });
     console.error(e);
+  } finally {
+    window.removeEventListener("ss:trade-slow", onSlow);
   }
 }
 
@@ -2426,7 +2443,7 @@ function renderPriceFreshness(quote) {
   return `
     <div class="dim text-xs" style="margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
       <span>As of ${asOf} · ${srcLabel}${staleChip}</span>
-      <button class="btn btn-ghost btn-sm" id="price-refresh-btn" title="Force a fresh upstream fetch (bypasses our cache)" style="padding: 2px 8px; font-size: 11px; min-height: 0;">↻ Refresh</button>
+      <button class="btn btn-ghost btn-sm" id="price-refresh-btn" title="Get the latest price" style="padding: 2px 8px; font-size: 11px; min-height: 0;">↻ Refresh</button>
     </div>
   `;
 }

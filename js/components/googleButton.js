@@ -58,7 +58,7 @@ async function makeNonce() {
  * @param onSignedIn async () => void, runs after Supabase has the session
  * @param text      "continue_with" | "signup_with" (Google's button wording)
  */
-export async function wireGoogleButton(main, onError, onSignedIn, text = "continue_with") {
+export async function wireGoogleButton(main, onError, onSignedIn, text = "continue_with", onShown = null) {
   const wrap = main.querySelector("#auth-google");
   const slot = main.querySelector("#auth-google-gis");
   const btn = main.querySelector("#auth-google-btn");
@@ -66,6 +66,7 @@ export async function wireGoogleButton(main, onError, onSignedIn, text = "contin
   if (!(await googleSignInEnabled())) return;
   if (!main.contains(wrap)) return;            // page changed while we checked
   wrap.hidden = false;
+  try { onShown?.(); } catch {}
 
   const fallback = () => {
     slot.hidden = true;

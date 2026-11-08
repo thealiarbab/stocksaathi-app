@@ -88,6 +88,7 @@ export function renderRegister(main) {
           <h1>Create your StockSaathi account</h1>
           <p class="sub">Your ₹1,00,000 virtual portfolio is one minute away.</p>
           ${googleButtonHtml("Sign up with Google")}
+          <button type="button" class="btn btn-ghost btn-block btn-lg" id="r-email-toggle" hidden>Sign up with email instead</button>
 
           <form class="auth-form" id="reg-form" autocomplete="on" novalidate>
             <div class="field">
@@ -164,7 +165,24 @@ export function renderRegister(main) {
     // Show / hide password toggle. Critical on mobile where users can't
     // see what swipe-input / autocorrect actually typed.
     wirePasswordToggle(main, "#r-pw", "#r-pw-toggle");
-    wireGoogleButton(main, (msg) => showErr(msg), finishSignIn, "signup_with");
+    // Google first (8 Nov): in one week every visitor who used Google
+    // finished signing up (130 of 130), against 42% on the email form. Once
+    // the Google button is confirmed, the email form folds behind a button,
+    // unless the visitor already typed in it or there is something to show.
+    const regForm = main.querySelector("#reg-form");
+    const emailToggle = main.querySelector("#r-email-toggle");
+    const openEmail = (focus) => {
+      regForm.hidden = false;
+      emailToggle.hidden = true;
+      if (focus) { try { main.querySelector("#r-name")?.focus(); } catch {} }
+    };
+    emailToggle.addEventListener("click", () => openEmail(true));
+    wireGoogleButton(main, (msg) => { openEmail(false); showErr(msg); }, finishSignIn, "signup_with", () => {
+      const typed = [...regForm.querySelectorAll("input")].some(i => i.type !== "checkbox" && i.value.trim());
+      if (typed || regForm.contains(document.activeElement) || errBox.textContent.trim()) return;
+      regForm.hidden = true;
+      emailToggle.hidden = false;
+    });
 
     // Start loading the database client now, not when Create account is
     // pressed: the sign-up call used to wait for it first.
