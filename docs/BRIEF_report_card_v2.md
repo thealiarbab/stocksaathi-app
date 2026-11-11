@@ -110,8 +110,10 @@ today) or add one properly.
 
 ## Ship
 
-- Commit as Ali Arbab, push to `main`, bump `CACHE_NAME` in `sw.js`, and
-  apply any migration to production in the same task.
+- Commit as Ali Arbab, push to `main`, and apply any migration to
+  production in the same task. No `sw.js` bump: since 1 Nov the build
+  (`build/bundle.mjs`) hashes assets. A file loaded by a runtime string path
+  rather than `import` must be added to `LITERALS` there.
 - Update `AGENTS.md` with a short "Report card v2" section: how the score
   works, where the code is, and how to re-validate.
 - Final report for the owner: what changed and why, the measured grade
