@@ -1912,11 +1912,27 @@ async function opAdminSignupStats(req, origin) {
   const gate = checkAdmin(req);
   if (!gate.ok) return j(401, { error: gate.reason }, origin);
   try {
+    // The full historical aggregation is deliberately on-demand: the Signups
+    // tab calls this only while open/visible, with a five-minute client floor.
+    // Job 13 stays disabled so it cannot compete with production traffic.
+    const refresh = await sbAdminFetch(`/rest/v1/rpc/refresh_admin_signup_stats`, {
+      method: "POST", body: "{}",
+    });
+    const refreshCode = refresh.ok ? Number((await refresh.text()).trim()) : NaN;
+
+    // refresh_admin_signup_stats returns -1 when another admin analytics
+    // refresh owns the shared advisory lock. In that narrow case, serve the
+    // last committed snapshot rather than start a competing full scan.
     const cached = await sbAdminFetch(`/rest/v1/rpc/admin_signup_stats_cached`, { method: "POST", body: "{}" });
     if (cached.ok) {
       const d = await cached.json();
-      if (d && d.totals) return j(200, d, origin);
+      if (d && d.totals) {
+        if (!Number.isFinite(refreshCode) || refreshCode < 0) d.refreshSkipped = true;
+        return j(200, d, origin);
+      }
     }
+
+    // Fallback for a missing cache row (for example, the first deployment).
     const res = await sbAdminFetch(`/rest/v1/rpc/admin_signup_stats`, { method: "POST", body: "{}" });
     if (!res.ok) return j(502, { error: "query_failed", detail: `admin_signup_stats ${res.status}` }, origin);
     return j(200, await res.json(), origin);
@@ -2053,6 +2069,13 @@ async function opAdminUser(req, origin, url) {
   if (!userId) return j(400, { error: "missing_id" }, origin);
 
   try {
+    // Refresh only this user's overview cache row on an explicit profile
+    // drill-down. The hourly all-users job is intentionally disabled.
+    const selectedUserCacheRefresh = sbAdminFetch(`/rest/v1/rpc/refresh_admin_overview_user_cache`, {
+      method: "POST",
+      body: JSON.stringify({ p_user_id: userId }),
+    }).catch(() => null);
+
     const [
       profRes, portRes, holdRes, txRes, coachRes, histRes,
       watchRes, orderRes, auditRes,
@@ -2067,6 +2090,10 @@ async function opAdminUser(req, origin, url) {
       sbAdminFetch(`/rest/v1/limit_orders?select=*&user_id=eq.${encodeURIComponent(userId)}&order=created_at.desc&limit=500`),
       sbAdminFetch(`/rest/v1/admin_audit_log?select=*&target_user_id=eq.${encodeURIComponent(userId)}&order=ts.desc&limit=200`),
     ]);
+    const userCacheResponse = await selectedUserCacheRefresh;
+    if (!userCacheResponse?.ok) {
+      console.warn("[admin-user] targeted overview cache refresh failed", userId, userCacheResponse?.status || "network_error");
+    }
 
     const profile = profRes.ok ? (await profRes.json())[0] : null;
     if (!profile) return j(404, { error: "not_found" }, origin);
