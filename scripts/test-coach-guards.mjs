@@ -59,6 +59,24 @@ const sandbox = new Function(`
 `)();
 const { looksLikePricelessList } = sandbox;
 
+// Test the exact detector used by chat.js when deciding whether a streamed
+// answer must be replaced with a tool-enabled retry.
+const offerStart = SRC.indexOf("const OFFER_RE =");
+const offerEnd = SRC.indexOf("\n\n// -----------------------------------------------------------------------------", offerStart);
+const promiseStart = SRC.indexOf("const PROMISE_RE =");
+const promiseEnd = SRC.indexOf("\n", promiseStart);
+if (offerStart < 0 || offerEnd < 0 || promiseStart < 0 || promiseEnd < 0) {
+  throw new Error("Lookup-offer detector definitions not found in js/coach/agent.js");
+}
+const lookupSandbox = new Function(`
+  ${SRC.slice(offerStart, offerEnd)}
+  ${SRC.slice(promiseStart, promiseEnd)}
+  ${extractFn("looksLikeLookupOffer")}
+  ${extractFn("looksLikeFetchPromise")}
+  return { looksLikeLookupOffer, looksLikeFetchPromise };
+`)();
+const { looksLikeLookupOffer, looksLikeFetchPromise } = lookupSandbox;
+
 // -----------------------------------------------------------------------------
 // Case 1 is the verbatim reply production returned on 2026-09-14 to the owner's
 // exact phrasing, "fetch a list of 20 top bank stocks". Twenty bank names, no
@@ -205,6 +223,25 @@ for (const [name, reply, user, want] of CASES) {
   catch (e) { got = `THREW: ${e.message}`; }
   if (got === want) { pass++; }
   else { failures.push(`  ${name}\n    got ${got}, want ${want}`); }
+}
+
+const LOOKUP_OFFER_CASES = [
+  ["reported generic greeting does not trigger a tool retry",
+   "Hey. What's on your mind? I can pull a stock or crypto price, explain a concept, or walk through how something works in StockSaathi.", false],
+  ["updated Saathi capability list does not trigger a tool retry",
+   "Hey, Saathi here. I can pull live prices for NSE stocks and crypto, find stocks by sector, check market news, or explain money basics like SIPs, P/E, and taxes. What's on your mind?", false],
+  ["explicit lookup question still triggers a tool retry",
+   "Want me to pull up TCS's live price?", true],
+  ["specific pronoun-based lookup offer still triggers a tool retry",
+   "I can pull that up for you.", true],
+  ["fetch promise still triggers a tool retry",
+   "Hang tight, fetching those figures for you.", true],
+];
+let lookupOfferPass = 0;
+for (const [name, reply, want] of LOOKUP_OFFER_CASES) {
+  const got = looksLikeLookupOffer(reply) || looksLikeFetchPromise(reply);
+  if (got === want) lookupOfferPass++;
+  else failures.push(`  ${name}\\n    got ${got}, want ${want}`);
 }
 
 // -----------------------------------------------------------------------------
@@ -553,6 +590,7 @@ for (const [name, got, want] of sseResults) {
 }
 
 console.log(`coach guards: ${pass}/${CASES.length} passing`);
+console.log(`lookup offers: ${lookupOfferPass}/${LOOKUP_OFFER_CASES.length} passing`);
 console.log(`dossier:      ${dPass}/${dossierResults.length} passing`);
 console.log(`advice:       ${aPass}/${ADVICE_CASES.length} passing`);
 console.log(`scrub:        ${sPass}/${SCRUB_CASES.length} passing`);
