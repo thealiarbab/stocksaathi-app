@@ -190,7 +190,7 @@ async function loadStats() {
   st.loading = true;
   st.statsAttemptAt = Date.now();
   try {
-    st.stats = await st.adminGet("/api/ai?op=admin-signup-stats");
+    st.stats = await st.adminGet("/api/admin-signup-stats");
     const computedAt = Date.parse(st.stats.computedAt || "");
     st.statsAt = Number.isFinite(computedAt) ? computedAt : Date.now();
     st.error = null;
