@@ -6,20 +6,19 @@
 // rolling sums, averages, forecasts) is worked out here from those series.
 // All days and hours are Indian time.
 //
-// Live: while this tab is on screen and the browser tab is visible, the total
-// is checked every 10 s (~1 KB each). Every other number reloads with the full
-// stats (~1.3 s in Postgres): within 15 s of a new signup, and at least once a
-// minute regardless, since active users and the funnel move without new
-// signups. (They used to wait up to 5 minutes, and a signup landing less than
-// a minute after a reload was never followed up.) Nothing runs once you leave
-// the tab.
+// Live: while this tab is mounted and the browser tab is visible, the headline
+// count is checked every 10 s (~1 KB each). The expensive historical snapshot
+// refreshes at most every 5 min, and only while this tab is open and visible.
+// Returning to the tab triggers a refresh when its snapshot is stale. Nothing
+// runs once you leave this tab; hidden browser tabs do not refresh stats.
 // =============================================================================
 
 import { xyChart, heatmap, barList, escapeHtml, fmtInt } from "./adminCharts.js";
 
 const LIVE_MS = 10_000;
-const STATS_MIN_GAP_MS = 15_000;
-const STATS_MAX_AGE_MS = 60_000;
+const STATS_MIN_GAP_MS = 5 * 60_000;
+const STATS_MAX_AGE_MS = 5 * 60_000;
+const STATS_RETRY_MS = 60_000;
 const WEB_MAX_AGE_MS = 5 * 60_000;
 const PREF_KEY = "ss.adminSignupsPrefs.v1";
 
@@ -33,7 +32,7 @@ const C = {
 };
 
 const st = {
-  stats: null, error: null, loading: false, statsAt: 0,
+  stats: null, error: null, loading: false, statsAt: 0, statsAttemptAt: 0,
   count: null, countAt: 0, openedCount: null, liveErr: null,
   timer: null, charts: [],
   web: null, webErr: null, webAt: 0, webLoading: false,
@@ -181,17 +180,19 @@ export function renderSignupsTab(host, { adminGet, onOpenUser }) {
   st.onOpenUser = onOpenUser;
   if (st.openedCount == null && st.count != null) st.openedCount = st.count;
   paint();
-  if (!st.stats || Date.now() - st.statsAt > STATS_MAX_AGE_MS) loadStats();
-  if (!st.web || Date.now() - st.webAt > WEB_MAX_AGE_MS) loadWeb();
+  if (!document.hidden && (!st.stats || Date.now() - st.statsAt > STATS_MAX_AGE_MS)) loadStats();
+  if (!document.hidden && (!st.web || Date.now() - st.webAt > WEB_MAX_AGE_MS)) loadWeb();
   startLive();
 }
 
 async function loadStats() {
-  if (st.loading) return;
+  if (st.loading || document.hidden) return;
   st.loading = true;
+  st.statsAttemptAt = Date.now();
   try {
     st.stats = await st.adminGet("/api/ai?op=admin-signup-stats");
-    st.statsAt = Date.now();
+    const computedAt = Date.parse(st.stats.computedAt || "");
+    st.statsAt = Number.isFinite(computedAt) ? computedAt : Date.now();
     st.error = null;
     const total = st.stats.totals?.total;
     if (total != null && (st.count == null || total > st.count)) { st.count = total; st.countAt = Date.now(); }
@@ -248,7 +249,11 @@ async function liveTick() {
     // A change seen inside the gap stays pending until the next tick past it.
     if (prev != null && r.count !== prev) st.statsDue = true;
     const stale = Date.now() - st.statsAt;
-    if ((st.statsDue && stale > STATS_MIN_GAP_MS) || stale > STATS_MAX_AGE_MS) { st.statsDue = false; loadStats(); }
+    const statsRefreshDue = (st.statsDue && stale > STATS_MIN_GAP_MS) || stale > STATS_MAX_AGE_MS;
+    if (statsRefreshDue && Date.now() - st.statsAttemptAt >= STATS_RETRY_MS) {
+      st.statsDue = false;
+      loadStats();
+    }
     if (Date.now() - st.webAt > WEB_MAX_AGE_MS) loadWeb();
   } catch (e) {
     st.liveErr = e.message || String(e);
