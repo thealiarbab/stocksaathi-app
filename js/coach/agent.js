@@ -1584,7 +1584,8 @@ function mentionsKnownInstrument(raw) {
 // this to silently re-run the turn through runAgent, which has real tools, and
 // replace the reply. Deliberately narrow — it must match an OFFER, not an
 // ordinary follow-up question at the end of a real answer, so it only fires
-// when the reply is SHORT and carries no data of its own.
+// when the reply is SHORT and carries no data of its own. A generic capability
+// line ("I can pull a stock or crypto price") is not an offer to do a lookup now.
 // -----------------------------------------------------------------------------
 const OFFER_RE = new RegExp([
   "\\bwant me to\\b",
@@ -1593,7 +1594,7 @@ const OFFER_RE = new RegExp([
   "\\bwould you like (?:me )?to\\b",
   "\\bwould you like to (?:know|see|check)\\b",
   "\\blet me know (?:and|if|what|which|your)\\b",
-  "\\bi can (?:help you )?(?:pull|fetch|look|search|check|find|get)\\b",
+  "\\bi can (?:help you )?(?:pull|fetch|look|search|check|find|get)(?: up)?\\s+(?:that|it|this|those|them)\\b",
   "\\bi'?ll need to (?:pull|fetch|look|check)\\b",
   "\\btell me (?:what|which)\\b.{0,40}\\band i(?:'| w)?ll\\b",
 ].join("|"), "i");
