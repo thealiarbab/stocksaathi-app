@@ -99,7 +99,7 @@ class handler(BaseHTTPRequestHandler):
                     "/rest/v1/rpc/refresh_admin_signup_stats",
                     body=b"{}",
                     headers=headers,
-                    timeout=48.0,
+                    timeout=30.0,
                 )
                 if status == 200:
                     try:
@@ -116,7 +116,7 @@ class handler(BaseHTTPRequestHandler):
                 "/rest/v1/rpc/admin_signup_stats_cached",
                 body=b"{}",
                 headers=headers,
-                timeout=10.0,
+                timeout=8.0,
             )
             if status < 200 or status >= 300:
                 _send(self, 502, {"error": "signup_cache_unavailable", "status": status}, origin)
