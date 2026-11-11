@@ -42,6 +42,10 @@ const state = {
   overview: null,
   overviewLoading: false,
   overviewError: null,
+  signupTotal: null,
+  signupTotalAt: 0,
+  signupTotalAttemptAt: 0,
+  signupTotalLoading: false,
   activity: [],
   activityFilter: "all",     // trades | coach | orders | signups | all
   activityPaused: false,
@@ -408,11 +412,44 @@ function renderLeaderboard(rows, fmt) {
 // -----------------------------------------------------------------------------
 // Users tab
 // -----------------------------------------------------------------------------
+function usersCountText(visible, fallbackTotal) {
+  const total = state.signupTotal ?? fallbackTotal;
+  return `Users (${visible} of ${total})`;
+}
+
+async function loadUsersSignupTotal(host) {
+  if (state.signupTotalLoading || Date.now() - state.signupTotalAttemptAt < 30_000) return;
+  state.signupTotalLoading = true;
+  state.signupTotalAttemptAt = Date.now();
+  try {
+    // Read the same cached total used by Signups. This endpoint only reads
+    // admin_stats_cache; it does not run another aggregation or cron job.
+    const stats = await adminGet("/api/ai?op=admin-signup-stats");
+    const total = Number(stats?.totals?.total);
+    if (Number.isSafeInteger(total) && total >= 0) {
+      state.signupTotal = total;
+      state.signupTotalAt = Date.now();
+    }
+  } catch (e) {
+    console.warn("[admin-users] signup total unavailable", e?.message || e);
+  } finally {
+    state.signupTotalLoading = false;
+    const count = host?.querySelector("#u-count");
+    if (count && host.isConnected) {
+      const users = state.overview?.users || [];
+      count.textContent = usersCountText(applyFiltersAndSort(users).length, users.length);
+    }
+  }
+}
+
 function renderUsersTab(host, main) {
   if (!ensureOverview(host, main, "Loading users…")) return;
   const users = state.overview.users || [];
   const list = applyFiltersAndSort(users);
   const schools = [...new Set(users.map(u => u.school).filter(Boolean))].sort();
+  // The row cache can lag behind registrations. Use the Signups snapshot for
+  // the overall denominator, but keep the visible row count honest.
+  if (!state.signupTotal || Date.now() - state.signupTotalAt > 60_000) loadUsersSignupTotal(host);
 
   host.innerHTML = `
     <div class="admin-filter-bar card" style="margin-bottom: var(--sp-3);">
@@ -429,7 +466,7 @@ function renderUsersTab(host, main) {
 
     <div class="card">
       <div class="card-head">
-        <h3 id="u-count">Users (${list.length} of ${users.length})</h3>
+        <h3 id="u-count">${usersCountText(list.length, users.length)}</h3>
         <div class="dim text-xs">Click header to sort · click row for drill-down</div>
       </div>
       <div class="admin-table-wrap">
@@ -448,7 +485,7 @@ function renderUsersTab(host, main) {
     const tbody = host.querySelector(".admin-table tbody");
     if (tbody) tbody.innerHTML = renderUsersRowsHtml(filtered);
     const count = host.querySelector("#u-count");
-    if (count) count.textContent = `Users (${filtered.length} of ${users.length})`;
+    if (count) count.textContent = usersCountText(filtered.length, users.length);
     wireRowClicks(host, main);
   });
   mountThemedSelect(host.querySelector("#u-onboarded"), {
