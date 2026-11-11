@@ -1912,30 +1912,13 @@ async function opAdminSignupStats(req, origin) {
   const gate = checkAdmin(req);
   if (!gate.ok) return j(401, { error: gate.reason }, origin);
   try {
-    // The full historical aggregation is deliberately on-demand: the Signups
-    // tab calls this only while open/visible, with a five-minute client floor.
-    // Job 13 stays disabled so it cannot compete with production traffic.
-    const refresh = await sbAdminFetch(`/rest/v1/rpc/refresh_admin_signup_stats`, {
-      method: "POST", body: "{}",
-    });
-    const refreshCode = refresh.ok ? Number((await refresh.text()).trim()) : NaN;
-
-    // refresh_admin_signup_stats returns -1 when another admin analytics
-    // refresh owns the shared advisory lock. In that narrow case, serve the
-    // last committed snapshot rather than start a competing full scan.
+    // Historical stats refresh runs through /api/admin-signup-stats on the
+    // shared Python runtime; this Edge route only serves the last snapshot.
     const cached = await sbAdminFetch(`/rest/v1/rpc/admin_signup_stats_cached`, { method: "POST", body: "{}" });
-    if (cached.ok) {
-      const d = await cached.json();
-      if (d && d.totals) {
-        if (!Number.isFinite(refreshCode) || refreshCode < 0) d.refreshSkipped = true;
-        return j(200, d, origin);
-      }
-    }
-
-    // Fallback for a missing cache row (for example, the first deployment).
-    const res = await sbAdminFetch(`/rest/v1/rpc/admin_signup_stats`, { method: "POST", body: "{}" });
-    if (!res.ok) return j(502, { error: "query_failed", detail: `admin_signup_stats ${res.status}` }, origin);
-    return j(200, await res.json(), origin);
+    if (!cached.ok) return j(502, { error: "signup_cache_unavailable", detail: `admin_signup_stats_cached ${cached.status}` }, origin);
+    const d = await cached.json();
+    if (!d || !d.totals) return j(502, { error: "signup_cache_empty" }, origin);
+    return j(200, d, origin);
   } catch (e) {
     return j(500, { error: "signup_stats_failed", detail: String(e?.message || e) }, origin);
   }
