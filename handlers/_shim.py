@@ -69,6 +69,7 @@ ROUTES = {
     "mf-history": "mf-history",
     "fundamentals": "fundamentals",
     "screener": "screener",
+    "admin-signup-stats": "admin-signup-stats",
     "admin-sync-instruments": "admin-sync-instruments",
     "admin-sync-fundamentals": "admin-sync-fundamentals",
     "admin-sync-mf": "admin-sync-mf",
