@@ -40,10 +40,6 @@ def fetch_one(symbol):
     # the common case), then fall back to ".BO". Costs one extra request
     # only for symbols that were previously returning no price at all.
     tickers = [symbol] if "." in symbol else [f"{symbol}.NS", f"{symbol}.BO"]
-    # "Yahoo answered: no such symbol / no price" is not an outage. Count
-    # the real failures (timeout, connection, 429, 5xx) apart so a symbol
-    # Yahoo does not carry gets a 404, and only a real failure gets 502.
-    failed = False
     for ticker, base in ((t, b) for t in tickers for b in HOSTS):
         try:
             url = f"{base}/{url_quote(ticker, safe='.')}?interval=1d&range=5d"
@@ -97,14 +93,9 @@ def fetch_one(symbol):
                 "source": "yahoo",
                 "host": base.split("//")[1].split("/")[0],
             }
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                failed = True
-            continue
         except Exception:
-            failed = True
             continue
-    return {"error": "yahoo_unreachable" if failed else "no_data"}
+    return {"error": "yahoo_unreachable"}
 
 
 class handler(BaseHTTPRequestHandler):
@@ -130,8 +121,7 @@ class handler(BaseHTTPRequestHandler):
             return
         data = fetch_one(symbol)
         if data.get("error"):
-            code = 404 if data["error"] == "no_data" else 502
-            self._json(code, {"ok": False, **data}, nocache=nocache)
+            self._json(502, {"ok": False, **data}, nocache=nocache)
             return
         apply_eod_prev({symbol: data})
         self._json(200, {"ok": True, **data}, nocache=nocache)
