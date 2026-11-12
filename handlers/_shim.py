@@ -33,6 +33,7 @@ import io
 import os
 import pathlib
 import sys
+import time
 from typing import Optional
 
 from fastapi import FastAPI, Request
@@ -47,6 +48,8 @@ _DIR = pathlib.Path(__file__).resolve().parent
 # guarantee, so put it there explicitly.
 if str(_DIR) not in sys.path:
     sys.path.insert(0, str(_DIR))
+
+import _ops  # noqa: E402  (error reporting to the outside watcher)
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +254,26 @@ def create_app(title: str = "StockSaathi API") -> FastAPI:
         # warmer finished, and the warmer was waiting on it, so the chunk sat
         # at the 45s urlopen timeout. A 40s fundamentals page stalled user
         # quote requests the same way.
-        await run_in_threadpool(fn)
+        #
+        # Every request is counted and every failure reported to the outside
+        # watcher (handlers/_ops.py). Healthy requests cost a counter update;
+        # the report itself is sent only for a failure, capped at 300 ms.
+        t0 = time.monotonic()
+        ip = (request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or "").split(",")[0].strip()
+        canary = _ops.secret_matches(request.headers.get("x-ops-canary"))
+        try:
+            if _ops.secret_matches(request.headers.get("x-ops-selftest")):
+                raise RuntimeError("ops self-test (deliberate)")
+            await run_in_threadpool(fn)
+        except Exception as exc:
+            report = _ops.after(stem, request.method, 500, (time.monotonic() - t0) * 1000, exc=exc, ip=ip)
+            if report:
+                await run_in_threadpool(_ops.send, report)
+            raise
+        report = _ops.after(stem, request.method, h._status, (time.monotonic() - t0) * 1000,
+                            body=h.wfile.buf if h._status >= 500 else None, ip=ip, canary=canary)
+        if report:
+            await run_in_threadpool(_ops.send, report, 2.0 if canary else 0.3)
 
         merged = {}
         for k, v in h._headers_out:

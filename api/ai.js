@@ -60,6 +60,7 @@ function recordUsage(row) {
 import { liveGeminiModel, isGemini3 } from "./_models.js";
 import { lastSessionIst } from "./_session.js";
 import { handleAuthEmailHook, handleAuthEmailFromDb } from "./_authEmail.js";
+import { withOps, opsSecretOk, opsCaught, opsForwardBrowser, opsCanary, opsStatus } from "./_ops.js";
 
 export const config = { runtime: "edge" };
 
@@ -1573,7 +1574,10 @@ async function opCommand(req, origin) {
 // the browser gets a bare 504. Answer first, at 22 s, with a JSON error the
 // page can show, and log the miss so it shows up next to the model calls.
 const DEADLINE_MS = 22_000;
-export default async function handler(req) {
+// withOps counts every request and reports every failure (5xx or thrown
+// error) to the outside watcher; see api/_ops.js.
+export default withOps("/api/ai", handlerTimed);
+async function handlerTimed(req) {
   let timer;
   const deadline = new Promise((resolve) => {
     timer = setTimeout(async () => {
@@ -1662,6 +1666,11 @@ async function route(req) {
       case "time":                return opTime(req, origin);
       case "human-check":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opHumanCheck(req, origin);
       case "ops-mail":            if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opOpsMail(req, origin);
+      case "ops-canary":          return await opOpsCanary(req, origin);
+      case "admin-ops-issues":    return await opAdminOpsIssues(req, origin);
+      case "admin-ops-issue":     return await opAdminOpsIssue(req, origin, url);
+      case "admin-ops-issues-set": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminOpsIssuesSet(req, origin);
+      case "admin-ops-selftest":  return await opAdminOpsSelftest(req, origin);
       case "signup-count":        return await opSignupCount(req, origin);
       case "admin-path-check":    return opAdminPathCheck(req, origin, url);
       case "admin-overview":      return await opAdminOverview(req, origin);
@@ -1737,6 +1746,7 @@ async function route(req) {
       default: return j(400, { error: "unknown_op", op }, origin);
     }
   } catch (e) {
+    opsCaught(req, e);
     return j(500, { error: "handler_exception", detail: String(e.message).slice(0, 120) }, origin);
   }
 }
@@ -1795,7 +1805,9 @@ async function opHumanCheck(req, origin) {
 }
 
 async function opOpsMail(req, origin) {
-  if (!checkCronSecret(req)) return j(401, { error: "unauthorized" }, origin);
+  // The database sends with CRON_SECRET; the outside watcher (which mails
+  // directly when the database is down) with its own secret.
+  if (!checkCronSecret(req) && !opsSecretOk(req)) return j(401, { error: "unauthorized" }, origin);
   const env = globalThis.process?.env || {};
   const key = String(env.RESEND_API_KEY || "").trim();
   if (!key) return j(503, { error: "mail_off" }, origin);
@@ -1817,6 +1829,53 @@ async function opOpsMail(req, origin) {
   }).catch(() => null);
   if (!r || !r.ok) return j(502, { error: "send_failed", status: r?.status || 0 }, origin);
   return j(200, { ok: true }, origin);
+}
+
+// --- Ops watcher: admin Issues tab + self-checks ------------------------------
+// Problems are caught and grouped by the outside watcher (edge/ops-watch) and
+// kept one row each in ops_issues. These ops only read that list and pass the
+// owner's buttons on; all rules live in the ops_* database functions.
+async function opOpsCanary(req, origin) {
+  if (!opsSecretOk(req)) return j(404, { error: "not_found" }, origin);
+  await opsCanary();
+  return new Response(null, { status: 204, headers: cors(origin) });
+}
+async function opAdminOpsIssues(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const [res, watcher] = await Promise.all([
+    sbAdminFetch(`/rest/v1/rpc/ops_admin_list`, { method: "POST", body: "{}" }),
+    opsStatus(),
+  ]);
+  if (!res.ok) return j(502, { error: "query_failed", detail: `ops_admin_list ${res.status}` }, origin);
+  return j(200, { ...(await res.json()), watcher }, origin);
+}
+async function opAdminOpsIssue(req, origin, url) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const id = parseInt(url.searchParams.get("id") || "", 10);
+  if (!Number.isInteger(id) || id < 1) return j(400, { error: "bad_id" }, origin);
+  const res = await sbAdminFetch(`/rest/v1/rpc/ops_briefing`, { method: "POST", body: JSON.stringify({ p_issue: id }) });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `ops_briefing ${res.status}` }, origin);
+  return j(200, await res.json(), origin);
+}
+async function opAdminOpsIssuesSet(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  let b; try { b = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const action = String(b?.action || "");
+  if (!["ignore", "reopen", "fixed", "approve", "reject", "freeze", "unfreeze", "report", "trust_reset"].includes(action)) return j(400, { error: "bad_action" }, origin);
+  const p = { action, id: Number.isInteger(b.id) ? b.id : null, note: String(b.note || "").slice(0, 2000), days: Number.isInteger(b.days) ? b.days : null };
+  const res = await sbAdminFetch(`/rest/v1/rpc/ops_admin_set`, { method: "POST", body: JSON.stringify({ p }) });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `ops_admin_set ${res.status}: ${(await res.text()).slice(0, 200)}` }, origin);
+  return j(200, await res.json(), origin);
+}
+// Throws on purpose, so the owner can see one test issue travel the whole
+// path (report -> grouping -> Issues tab -> push + e-mail).
+async function opAdminOpsSelftest(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  throw new Error("ops self-test (deliberate)");
 }
 
 function checkAdmin(req) {
@@ -3421,12 +3480,18 @@ async function opEv(req, origin) {
   evRate.set(ip, r && r.reset > now ? { n: r.n + rows.length, reset: r.reset } : { n: rows.length, reset: now + 60_000 });
   if (evRate.size > 20000) evRate.clear();
   const uid = await evVerifyToken(body.tok);
+  // Failures the browser saw (script errors, failed API calls, form errors)
+  // also go to the outside watcher, alongside the usual insert.
+  const broken = rows.filter((r) => r.kind === "error" || r.kind === "api" || r.kind === "form_error");
   try {
-    await sbAdminFetch(`/rest/v1/rpc/ingest_web_events`, {
-      method: "POST",
-      headers: { "Prefer": "return=minimal" },
-      body: JSON.stringify({ p: rows, p_uid: uid, p_country: cc }),
-    });
+    await Promise.all([
+      sbAdminFetch(`/rest/v1/rpc/ingest_web_events`, {
+        method: "POST",
+        headers: { "Prefer": "return=minimal" },
+        body: JSON.stringify({ p: rows, p_uid: uid, p_country: cc }),
+      }),
+      broken.length ? opsForwardBrowser(vid, broken) : null,
+    ]);
   } catch { /* tracking must never break the page */ }
   return none();
 }

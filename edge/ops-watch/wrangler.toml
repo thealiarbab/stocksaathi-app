@@ -1,0 +1,34 @@
+# Ops watcher: error intake + one-minute pulse. Separate from edge/front-door
+# (the unfinished failover Worker) and from the site's own domain on purpose:
+# it must keep working when the site, Vercel or the database is down.
+#
+# Deploy:   npx wrangler deploy            (from app/edge/ops-watch/)
+# Storage:  npx wrangler d1 execute ops-watch --remote --file schema.sql
+# Secrets:  OPS_SECRET (shared with the site's OPS_WATCH_SECRET; the database
+#           holds only its SHA-256), SUPABASE_ANON_KEY (the public key),
+#           OPS_MAIL_TO (where alerts go). Optional RESEND_API_KEY lets alerts
+#           go out even when Vercel is down. The pulse does nothing until the
+#           first three are set.
+# Tests:    npm test
+
+name = "stocksaathi-ops-watch"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+workers_dev = true
+preview_urls = false
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ops-watch"
+database_id = "275b7535-b2cf-492f-8da3-9a27db561d06"
+
+[vars]
+SITE_URL = "https://stocksaathi.co.in"
+SUPABASE_URL = "https://hwlmwraowcylxzdpumca.supabase.co"
+OPS_MAIL_FROM = "StockSaathi Ops <orders@stocksaathi.co.in>"
+
+[observability]
+enabled = true

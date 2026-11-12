@@ -43,6 +43,7 @@
 import { liveGeminiModel } from "./_models.js";
 import { recordUsage, featureOf, normUsage, tapOpenAiSse } from "./_usage.js";
 import { callerHashes, isBlocked, inLockdown, hasHumanPass } from "./_guard.js";
+import { withOps } from "./_ops.js";
 import {
   messagesEnabled, messagesFetch, toMessagesBody, toChatCompletion, toChatSse, MESSAGES_MODEL, effortFor,
 } from "./_messages.js";
@@ -467,7 +468,10 @@ async function callMessagesUpstream(desc, payload, ctx) {
   return { status: res.status, res, upstream: desc.label, t0, ttftMs: Math.round(performance.now() - t0) };
 }
 
-export default async function handler(req) {
+// withOps counts every request and reports every failure (5xx or thrown
+// error) to the outside watcher; see api/_ops.js.
+export default withOps("/api/chat", chatHandler);
+async function chatHandler(req) {
   const origin = req.headers.get("Origin") || "";
 
   if (req.method === "OPTIONS") {
