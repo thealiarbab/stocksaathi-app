@@ -27,6 +27,12 @@ import { factText, unlockText, pillarName, pillarCopy, gradeTitle, overallSummar
 import { niftyCloses, cachedNiftyCloses } from "../data/indexCloses.js";
 import { loadActivity, cachedActivity } from "../features/learning.js";
 import { onBackdropClick } from "../components/backdrop.js";
+import { isOwner } from "../features/preview.js";
+
+// Achievements (owner preview): their card replaces the badges for owners only,
+// loaded on demand so other users never download it.
+let achUi = null;
+const ACH_PLACEHOLDER = `<div class="card ach-rc" id="achievements"><div class="card-head"><h3>Achievements</h3></div><p class="muted">…</p></div>`;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hinglish = () => { try { return !!getState()?.settings?.hinglish; } catch { return false; } };
@@ -204,9 +210,10 @@ export function renderReportCard(main) {
       ${topCard(rc, state, hi)}
       <div class="rc-pillars">${tiles}</div>
       ${renderAiCard()}
-      ${badgesCard(state)}
+      ${isOwner() ? (achUi ? achUi.achievementsCardHtml() : ACH_PLACEHOLDER) : badgesCard(state)}
       ${state.transactions.length === 0 ? emptyCard() : ""}
     `;
+    if (isOwner()) mountAch(main);
   }
 }
 
@@ -563,4 +570,13 @@ async function fetchAiCard(state, rc, input) {
     aiCardSignature = null;        // a failed call may be tried again on the next visit
     return null;
   }
+}
+
+function mountAch(main) {
+  if (achUi) { achUi.mountAchievementsCard(main); return; }
+  import("../achievements/ui.js").then((m) => {
+    achUi = m;
+    const h = main.querySelector(".ach-rc");
+    if (h) { h.outerHTML = m.achievementsCardHtml(); m.mountAchievementsCard(main); }
+  }).catch(() => {});
 }

@@ -242,6 +242,7 @@ export function mountNav() {
                 </div>
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" href="/report-card">📋 Report card</a>
+                ${state.user.isAdmin ? `<a class="dropdown-item" href="/report-card#achievements">🏅 Achievements</a>` : ""}
                 <a class="dropdown-item" href="/settings">⚙️ Settings</a>
                 <div class="dropdown-divider"></div>
                 <button class="dropdown-item danger" id="logout-btn">Log out</button>
@@ -429,6 +430,10 @@ function renderDrawer(state, allLinks, active, pfValue, ms) {
     ${state.isAuthed ? `
       <div class="drawer-divider"></div>
       <div class="drawer-section">${escapeHtml(state.user.displayName || state.user.username || "")}</div>
+      ${state.user.isAdmin ? `<a href="/report-card#achievements" class="drawer-link" data-close-on-click>
+        <span>🏅 Achievements</span>
+        <span class="muted">›</span>
+      </a>` : ""}
       <a href="/settings" class="drawer-link" data-close-on-click>
         <span>⚙️ Settings</span>
         <span class="muted">›</span>
