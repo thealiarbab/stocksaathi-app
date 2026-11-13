@@ -181,7 +181,16 @@ export function renderReportCard(main) {
     if (aiCardLoading) render();
   }
 
+  // render() runs inside the state subscriber: a throw here would also stop
+  // the other subscribers (auth sync among them). Never let one bad row do that.
   function render() {
+    try { draw(); } catch (e) {
+      console.error("[report-card] render failed", e);
+      try { main.innerHTML = head() + `<div class="card" style="padding: var(--sp-5);"><p class="muted" style="margin:0;">${T("The report card could not be drawn right now. Your trades and data are safe; please reload.", "Report card abhi nahi ban paaya. Tumhare trades aur data safe hain; page reload karo.")}</p></div>`; } catch {}
+    }
+  }
+
+  function draw() {
     const state = getState();
     if (!ready) { main.innerHTML = head() + skeleton(); return; }
     const input = buildInput(state, extras);

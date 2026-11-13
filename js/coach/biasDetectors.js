@@ -21,7 +21,7 @@ function kindOf(symbol) {
   return k === "MF" ? "MF" : k === "ETF" ? "ETF" : "STOCK";
 }
 
-const isAuto = (t) => (t.biasFlags || []).some((f) => (f?.bias || f) === "limit_order_filled");
+const isAuto = (t) => (Array.isArray(t.biasFlags) ? t.biasFlags : []).some((f) => (f?.bias || f) === "limit_order_filled");
 
 function positionsOf(holdings, trade) {
   const out = {};

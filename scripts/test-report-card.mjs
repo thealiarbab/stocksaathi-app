@@ -250,6 +250,11 @@ function clean(x, pathName = "rc") {
   ok("ledger: a tap since 24 Oct keeps its stored detector results only", out[1].flags.length === 1 && out[1].flags[0].bias === "fomo" && out[1].auto === false);
   ok("ledger: the old detectors' panic flags are ignored", out[0].flags.length === 0);
   ok("ledger: a matcher fill is marked auto", out[2].auto === true && out[2].flags.length === 0);
+  // 13 real trades (12 Sep 2026) hold bias_flags = {} instead of a list.
+  let odd = null;
+  try { odd = tradesWithFlags([{ id: 9, ts: after, symbol: "Z", side: "BUY", qty: 1, pricePaise: 10000, biasFlags: {} }, { id: 8, ts: before, symbol: "Z", side: "SELL", qty: 1, pricePaise: 10000, biasFlags: "x" }]); } catch { odd = null; }
+  ok("ledger: flags stored as {} or text do not crash and count as none", odd && odd.length === 2 && odd.every((t) => t.flags.length === 0 && t.auto === false));
+  ok("score: a trade whose flags are not a list scores as clean", score(base({ trades: spread(6).map((t) => ({ ...t, flags: {} })) })).pillars.discipline.state === "scored");
 
   // Three quick round trips in one stock, all filled by the matcher: the third sell is churning.
   const churn = [];

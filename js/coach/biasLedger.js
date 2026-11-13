@@ -23,8 +23,11 @@ import { detectChurning, detectAnchoring, detectOvertrading } from "./biasCore.j
 export const DETECTOR_CUTOFF_MS = Date.UTC(2026, 9, 23, 18, 30);
 
 const flagName = (f) => (typeof f === "string" ? f : f?.bias);
-const isAuto = (flags) => (flags || []).some((f) => flagName(f) === "limit_order_filled");
-const detectorFlags = (flags) => (flags || []).filter((f) => f && typeof f === "object" && typeof f.bias === "string" && Number.isFinite(Number(f.severity)));
+// bias_flags is a list, but 13 trades from 12 Sep 2026 hold {} (an object):
+// anything that is not a list counts as no flags.
+const list = (flags) => (Array.isArray(flags) ? flags : []);
+const isAuto = (flags) => list(flags).some((f) => flagName(f) === "limit_order_filled");
+const detectorFlags = (flags) => list(flags).filter((f) => f && typeof f === "object" && typeof f.bias === "string" && Number.isFinite(Number(f.severity)));
 
 /**
  * @param transactions [{ ts, symbol, side, qty, pricePaise, biasFlags }]

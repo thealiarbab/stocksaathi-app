@@ -128,7 +128,7 @@ function scoreDiscipline(input) {
     const inWin = t.ts >= since;
     if (inWin) { win.trades++; if (t.side === "BUY") win.buys++; else if (t.side === "SELL") win.sells++; }
     const seen = new Set();          // one flag per pattern group per trade
-    for (const f of t.flags || []) {
+    for (const f of (Array.isArray(t.flags) ? t.flags : [])) {
       const p = PATTERNS[f?.bias];
       const sev = clamp(num(f?.severity), 0, 1);
       if (!p || sev <= 0 || seen.has(p.group)) continue;
@@ -156,7 +156,7 @@ function scoreDiscipline(input) {
       if ((t.ts >= cut) !== inRecent) continue;
       n++;
       const seen = new Set();
-      for (const f of t.flags || []) {
+      for (const f of (Array.isArray(t.flags) ? t.flags : [])) {
         const p = PATTERNS[f?.bias];
         const sev = clamp(num(f?.severity), 0, 1);
         if (!p || sev <= 0 || seen.has(p.group)) continue;

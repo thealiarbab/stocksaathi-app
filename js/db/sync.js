@@ -173,7 +173,8 @@ export async function loadAllFromDb() {
       id: t.id, idempotencyKey: t.idempotency_key, ts: new Date(t.created_at).getTime(),
       symbol: t.symbol, side: t.side, qty: Number(t.qty),
       pricePaise: Number(t.price_paise), valuePaise: Number(t.value_paise),
-      biasFlags: t.bias_flags || [],
+      // Always a list: 13 old rows hold {} and broke every .some/.filter on it.
+    biasFlags: Array.isArray(t.bias_flags) ? t.bias_flags : [],
     }));
 
     const nextWatchlist = (wl.data || []).map(w => w.symbol);
