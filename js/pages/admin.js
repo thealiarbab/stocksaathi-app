@@ -780,7 +780,7 @@ function paintUserModal() {
 
     ${renderCoachSection(coachMessages)}
 
-    <div id="sec-report"><div class="admin-user-section-label">11. Report card (server-computed)</div>
+    <div id="sec-report"><div class="admin-user-section-label">11. Report card (v2, as the user sees it, plus trade stats)</div>
       ${reportCard ? `<div class="admin-user-grid">
         <div>
           ${kv("Total trades", reportCard.totalTrades)}
@@ -792,9 +792,8 @@ function paintUserModal() {
           ${kv("Biggest win", formatRupees(reportCard.biggestWinRupees * 100))}
           ${kv("Biggest loss", formatRupees(reportCard.biggestLossRupees * 100))}
           ${kv("Avg hold days", reportCard.avgHoldDays)}
-          ${kv("Bias flags", (reportCard.biasFlags || []).join(", ") || "—")}
         </div>
-      </div>` : `<div class="muted text-sm">Not available.</div>`}</div>
+      </div>${reportCardV2Html(reportCard.v2)}` : `<div class="muted text-sm">Not available.</div>`}</div>
 
     <div id="sec-auth"><div class="admin-user-section-label">12. Supabase Auth metadata</div>
       ${authMeta ? `<div class="admin-user-grid">
@@ -2062,4 +2061,24 @@ function formatDatePrecise(iso) {
   return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}:${parts.second}.${ms} IST`;
 }
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+
+// The user's report card as they see it (v2, scored on the server by the
+// same module as their page). Wins and losses above are context only.
+function reportCardV2Html(v) {
+  if (!v) return "";
+  if (v.error) return `<div class="muted text-sm" style="margin-top:8px;">Report card v2 could not be scored: ${escapeHtml(v.error)}</div>`;
+  const head = v.state === "graded" ? `Grade ${escapeHtml(v.grade)} · ${v.score} / 100` : "Not graded yet";
+  const rows = (v.pillars || []).filter((p) => p.state !== "hidden").map((p) => `
+    <div style="padding:8px 0;border-top:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><b>${escapeHtml(p.name)}</b>
+        <span class="tabular">${p.state === "scored" ? `${p.score}/100 · ${p.share}% of grade` : escapeHtml(p.state)}</span></div>
+      ${(p.lines || []).map((l) => `<div class="muted text-sm">${escapeHtml(l)}</div>`).join("")}
+    </div>`).join("");
+  return `
+    <div style="margin-top:12px;">
+      <div style="font-weight:700;font-size:var(--text-lg);">${head}</div>
+      <div class="muted text-sm" style="margin-bottom:6px;">${escapeHtml(v.summary || "")}${v.tradesCapped ? " (scored on the latest 500 trades)" : ""}</div>
+      ${rows}
+    </div>`;
+}
 function escapeAttr(s) { return String(s ?? "").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }

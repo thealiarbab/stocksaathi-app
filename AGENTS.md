@@ -277,10 +277,10 @@ effort for A/B runs; unset to restore the per-op settings.
   (market, AMO or limit), `components/tradeNote.js` shows a quiet note from
   the coach button, with a "What is …?" explainer sheet (English/Hinglish,
   "in your case" chips, one question, Ask Saathi). Rationed per pattern in
-  localStorage `ss.biasnote.v1`. Telemetry: `track("bias_note", ...)` is
-  called, but `bias_note` is in neither `track.js` KINDS nor the
-  `user_events` CHECK, so those events are dropped (found 13 Nov, not fixed).
-  The detector results themselves are stored on the trade
+  localStorage `ss.biasnote.v1`. Telemetry: web_events kind `bias_note`
+  (shown/opened/dismissed/ask) via telemetry.js `logEvent` (until 13 Nov it
+  went through `track()`, which drops kinds not in its list, so nothing was
+  saved). The detector results themselves are stored on the trade
   (`transactions.bias_flags`). Copy: `js/coach/biasCopy.js` (reflection
   only, never advice). The owner floated "grey out the screen" with the
   note: NOT built, confirm with him first.
@@ -318,9 +318,15 @@ effort for A/B runs; unset to restore the per-op settings.
   export trades/holdings/activity per user (anonymised), feed them through
   the same modules and look at the score percentiles before moving a cut
   point. Never make the cut points a live curve.
-- Known gaps: `computeReportCardServerSide` in api/ai.js (admin user view)
-  is still v1; news reads are not counted; panic/chase/disposition are not
-  judged for matcher fills or pre-24-Oct trades (they need price history).
+- Learning "reads" = explainers (`learn_events`, from 13 Nov), /learn pages
+  and news articles opened (`news_click`, migration `2026-11-13c`).
+- Admin user view (/a, section 11): `adminReportCardV2()` in api/ai.js
+  scores the same card server-side with the same modules (prices from
+  quote_cache / mf_master, real Nifty via opHistory).
+- By design: panic/chase/disposition are not judged on orders the matcher
+  filled (the decision was made when the order was placed, not at the fill)
+  nor on taps before 24 Oct (the old detectors were measured wrong; churning,
+  averaging down and overtrading are re-run on those from the ledger).
 
 ## User notices
 

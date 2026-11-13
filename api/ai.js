@@ -61,6 +61,10 @@ import { liveGeminiModel, isGemini3 } from "./_models.js";
 import { lastSessionIst } from "./_session.js";
 import { handleAuthEmailHook, handleAuthEmailFromDb } from "./_authEmail.js";
 import { withOps, opsSecretOk, opsCaught, opsForwardBrowser, opsCanary, opsStatus } from "./_ops.js";
+import { scoreReportCard, benchmarkPl } from "../js/coach/reportCardCore.js";
+import { tradesWithFlags } from "../js/coach/biasLedger.js";
+import { factText, unlockText, pillarName, overallSummary } from "../js/coach/reportCardCopy.js";
+import { computeTradeStats, returnSummary } from "../js/data/tradeStats.js";
 
 export const config = { runtime: "edge" };
 
@@ -2161,8 +2165,14 @@ async function opAdminUser(req, origin, url) {
     const limitOrders = orderRes.ok ? await orderRes.json() : [];
     const adminActionHistory = auditRes.ok ? await auditRes.json() : [];
 
-    // Server-computed report-card metrics (replicates reportCard.js:analyzeBehavior).
+    // Report card: the trade stats as before, plus the v2 card scored by the
+    // same code the user's own page runs (js/coach/reportCardCore.js).
     const reportCard = computeReportCardServerSide({ transactions, coachMessages });
+    try {
+      reportCard.v2 = await adminReportCardV2(req, origin, { userId, profile, portfolio, holdings, transactions, limitOrders });
+    } catch (e) {
+      reportCard.v2 = { error: String(e?.message || e).slice(0, 120) };
+    }
 
     // Supabase auth metadata (requires Admin API — service-role).
     const env = globalThis.process?.env || {};
@@ -2195,6 +2205,93 @@ async function opAdminUser(req, origin, url) {
   } catch (e) {
     return j(502, { error: "query_failed", detail: String(e.message).slice(0, 120) }, origin);
   }
+}
+
+// Report card v2 for the admin user view: the same inputs the user's page
+// builds (trades with their detector results, holdings at real prices else
+// cost, learning weeks, real Nifty closes), scored by the same module.
+let _rcUniverse = null, _rcUniverseAt = 0;
+async function rcUniverse(req) {
+  if (_rcUniverse && Date.now() - _rcUniverseAt < 6 * 3600_000) return _rcUniverse;
+  try {
+    const r = await fetch(new URL("/js/data/universeFull.json", req.url));
+    if (r.ok) {
+      _rcUniverse = new Map((await r.json()).map((x) => [x.symbol, x]));
+      _rcUniverseAt = Date.now();
+    }
+  } catch {}
+  return _rcUniverse || new Map();
+}
+
+async function adminReportCardV2(req, origin, { userId, profile, portfolio, holdings, transactions, limitOrders }) {
+  const uni = await rcUniverse(req);
+  const kindOf = (s) => (String(s).startsWith("MF_") ? "MF" : uni.get(s)?.kind === "ETF" ? "ETF" : "STOCK");
+  const tx = (transactions || []).map((t) => ({
+    id: t.id, ts: Date.parse(t.created_at), symbol: t.symbol, side: t.side,
+    qty: Number(t.qty), pricePaise: Number(t.price_paise), valuePaise: Number(t.value_paise),
+    biasFlags: Array.isArray(t.bias_flags) ? t.bias_flags : [],
+  })).filter((t) => Number.isFinite(t.ts));
+  const trades = tradesWithFlags(tx, kindOf);
+  const stats = computeTradeStats(tx);
+
+  const held = (holdings || []).filter((h) => Number(h.qty) > 0);
+  const syms = held.map((h) => h.symbol).filter((s) => !String(s).startsWith("MF_"));
+  const mfs = held.map((h) => h.symbol).filter((s) => String(s).startsWith("MF_"));
+  const px = {};
+  if (syms.length) {
+    const r = await sbAdminFetch(`/rest/v1/quote_cache?select=symbol,price_paise&symbol=in.(${syms.map(encodeURIComponent).join(",")})`);
+    if (r.ok) for (const q of await r.json()) if (Number(q.price_paise) > 0) px[q.symbol] = Number(q.price_paise);
+  }
+  if (mfs.length) {
+    const r = await sbAdminFetch(`/rest/v1/mf_master?select=symbol,nav&symbol=in.(${mfs.map(encodeURIComponent).join(",")})`);
+    if (r.ok) for (const m of await r.json()) if (Number(m.nav) > 0) px[m.symbol] = Math.round(Number(m.nav) * 100);
+  }
+  let paper = 0;
+  const positions = held.map((h) => {
+    const inst = uni.get(h.symbol);
+    const real = px[h.symbol];
+    if (real) paper += Math.round((real - Number(h.avg_cost_paise)) * Number(h.qty));
+    return {
+      symbol: h.symbol, name: inst?.name || h.symbol, kind: kindOf(h.symbol), sector: inst?.sector || null,
+      valuePaise: Math.round(Number(h.qty) * (real || Number(h.avg_cost_paise) || 0)),
+    };
+  });
+  const reserved = (limitOrders || []).filter((o) => o.status === "pending" && o.side === "BUY")
+    .reduce((s, o) => s + (Number(o.reserved_cash) || 0), 0);
+  const cash = Number(portfolio?.cash_paise) || 0;
+  const ret = returnSummary({ cashPaise: cash, reservedPaise: reserved, startingCashPaise: Number(portfolio?.starting_cash_paise) || 0, stats, paperPaise: paper });
+
+  let activity = null;
+  const ar = await sbAdminFetch(`/rest/v1/rpc/_report_card_activity`, { method: "POST", body: JSON.stringify({ p_user: userId }) });
+  if (ar.ok) activity = { weeks: await ar.json() };
+
+  let market = null;
+  if (trades.length) {
+    const IST = 5.5 * 3600_000;
+    const first = new Date(trades[0].ts + IST);
+    const from = `${first.toISOString().slice(0, 8)}01`;
+    const today = new Date(Date.now() + IST).toISOString().slice(0, 10);
+    const hr = await opHistory(req, origin, new URL(`https://x/api/ai?op=history&symbol=%5ENSEI&from=${from}&to=${today}`));
+    if (hr.ok) {
+      const closes = ((await hr.json())?.points || []).filter((p) => p?.d && p.d < today && Number(p.c) > 0).map((p) => [p.d, Number(p.c)]);
+      const bench = benchmarkPl(trades, closes);
+      if (bench) market = { userPlPaise: ret.plPaise, ...bench };
+    }
+  }
+
+  const rc = scoreReportCard({
+    now: Date.now(), accountCreatedAt: Date.parse(profile?.created_at || "") || trades[0]?.ts || null,
+    trades, stats, portfolio: { cashPaise: cash + reserved, positions }, activity, market,
+  });
+  return {
+    grade: rc.overall.grade, score: rc.overall.score, state: rc.overall.state,
+    summary: overallSummary(rc.overall),
+    pillars: Object.values(rc.pillars).map((p) => ({
+      key: p.key, name: pillarName(p.key), state: p.state, score: p.state === "scored" ? p.score : null, share: p.share,
+      lines: p.state === "scored" ? p.facts.map((f) => factText(f)).filter(Boolean) : p.state === "locked" ? [unlockText(p.key, p.unlock)] : [],
+    })),
+    tradesSeen: tx.length, tradesCapped: tx.length >= 500,
+  };
 }
 
 // Mirrors js/pages/reportCard.js:analyzeBehavior — keeps admin aggregation
@@ -3378,6 +3475,7 @@ const EV_KINDS = new Set([
   "session_start", "page", "page_leave", "click", "rage_click", "form_start", "field",
   "form_submit", "form_abandon", "form_error", "toast", "error", "api", "perf", "search",
   "outbound", "copy", "net", "install", "visibility", "share", "media", "coach",
+  "bias_note",   // after-trade note: shown / opened / dismissed / ask (tradeNote.js)
 ]);
 const EV_BOT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|whatsapp|python-requests|curl|wget/i;
 const EV_ID = /^[A-Za-z0-9_-]{8,40}$/;
