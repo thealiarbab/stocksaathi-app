@@ -8,15 +8,17 @@
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  /* No backdrop-filter here (13 Nov): on a sticky bar Chrome stops painting
+     the bar's contents at some browser zoom levels (fractional device pixel
+     ratios such as 110/125/175%), leaving an empty band where the nav should
+     be. A near-solid background looks the same and always paints. */
+  background: rgba(255, 255, 255, 0.97);
   border-bottom: 1px solid var(--divider);
   height: var(--nav-h);
   padding-top: env(safe-area-inset-top);
   box-sizing: content-box;
 }
-[data-theme="dark"] .nav { background: rgba(10, 11, 15, 0.85); }
+[data-theme="dark"] .nav { background: rgba(10, 11, 15, 0.97); }
 
 .nav-inner {
   max-width: var(--max-w);
@@ -5509,7 +5511,7 @@ button.ss-pill-x:hover { border-color: var(--brand); }
 .st-about { background: var(--bg-soft); }
 @media (max-width: 899px) {
   .st-layout { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
-  .st-nav { flex-direction: row; overflow-x: auto; top: 60px; z-index: 5; margin: 0 calc(-1 * var(--sp-4)); padding: 8px var(--sp-4); background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); scrollbar-width: none; }
+  .st-nav { flex-direction: row; overflow-x: auto; top: 60px; z-index: 5; margin: 0 calc(-1 * var(--sp-4)); padding: 8px var(--sp-4); background: color-mix(in srgb, var(--bg) 97%, transparent); scrollbar-width: none; }
   .st-nav::-webkit-scrollbar { display: none; }
   .st-nav a { white-space: nowrap; border-left: 0; border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; }
   .st-nav a.is-active { border-color: var(--brand); }
