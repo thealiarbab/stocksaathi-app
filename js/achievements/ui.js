@@ -78,13 +78,21 @@ function copyOf(def, ev, hi) {
 }
 
 // ---------------------------------------------------------------------------
-// The medal: a struck metal disc in the tier's colour, the family's emoji in
-// the middle. Locked = an empty dashed ring.
-// ---------------------------------------------------------------------------
+// The medal: a struck metal disc in the tier's colour. A tiered medal shows
+// its target on the face (30, 100: the way running apps print "5K" on the
+// badge); a one-off shows the family's emoji. Not earned yet = the same disc
+// as a thin outline, so the shape is known before it is won.
+const compact = (n) => { try { return new Intl.NumberFormat("en-IN", { notation: "compact", maximumFractionDigits: 1 }).format(n); } catch { return String(n); } };
+function medalFace(def) {
+  const t = Number(def.threshold);
+  if (def.tiers > 1 && def.metric !== "balanced_level" && Number.isFinite(t) && t >= 2) return `<b>${esc(compact(t))}</b>`;
+  return `<span class="ach-emoji">${esc(def.emoji || "🏅")}</span>`;
+}
 function medal(def, { size = "md", locked = false } = {}) {
   const tier = locked ? "locked" : (def.tiers > 1 || def.tier > 1 ? TIERS[def.tier]?.key : "gold") || "bronze";
-  return `<span class="ach-medal ach-${size} ach-t-${tier}" aria-hidden="true"><span class="ach-face">${esc(def.emoji || "🏅")}</span></span>`;
+  return `<span class="ach-medal ach-${size} ach-t-${tier}" aria-hidden="true"><span class="ach-face">${medalFace(def)}</span></span>`;
 }
+const dayText = (iso) => { try { return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }); } catch { return ""; } };
 
 // ---------------------------------------------------------------------------
 // Toasts
@@ -215,6 +223,7 @@ export async function openAchievements({ focus = null } = {}) {
   let cat = "all";
   track(focus || "list", { action: "opened", from: focus ? "toast" : "list" });
 
+  let picked = focus || null;   // the shelf medal whose story is open
   const draw = (data) => {
     const hi = lang;
     if (!data) {
@@ -223,66 +232,115 @@ export async function openAchievements({ focus = null } = {}) {
     }
     const { defs, earned, earnedSet } = view(data);
     const evOf = new Map(earned.map((e) => [e.code, e]));
+    const ordered = [...defs.values()];
     const fams = new Map();
-    for (const d of [...defs.values()].sort((a, b) => a.sort - b.sort || a.tier - b.tier)) {
+    for (const d of ordered) {
       if (!fams.has(d.family)) fams.set(d.family, []);
       fams.get(d.family).push(d);
     }
+    for (const list of fams.values()) list.sort((a, b) => a.tier - b.tier);
+    // One entry per family: best tier earned, the next one, progress to it.
+    const all = [...fams.values()].map((list) => {
+      const got = list.filter((d) => earnedSet.has(d.code));
+      const best = got[got.length - 1] || null;
+      const next = list.find((d) => !earnedSet.has(d.code)) || null;
+      const pr = next ? progressFor(next, data.facts) : null;
+      return { list, got, best, next, pr, head: best || list[0], cat: list[0].category };
+    });
+    const inCat = all.filter((f) => cat === "all" || f.cat === cat);
+    const shelf = inCat.filter((f) => f.best).sort((a, b) => (evOf.get(b.best.code)?.earned_at || "").localeCompare(evOf.get(a.best.code)?.earned_at || ""));
+    const todo = inCat.filter((f) => !f.best);
+    const nextUp = inCat.filter((f) => f.next && f.pr && f.pr.target > 1 && f.next.metric !== "balanced_level" && f.pr.pct > 0 && f.pr.pct < 1)
+      .sort((a, b) => b.pr.pct - a.pr.pct).slice(0, 3);
+    const tierWord = (d) => (d.tiers > 1 ? copyOf(d, null, hi).tier : "");
+    const of = (a, b) => (hi ? `${b} me se ${a}` : `${a} of ${b}`);
+    const num = (n) => Number(n).toLocaleString("en-IN");
+    const progressLine = (f) => f.pr && f.pr.target > 1 && f.next.metric !== "balanced_level"
+      ? `<span class="ach-prog"><span class="ach-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${f.pr.target}" aria-valuenow="${Math.min(f.pr.value, f.pr.target)}" aria-label="${esc(copyOf(f.next, null, hi).name)}"><span style="width:${Math.round(f.pr.pct * 100)}%"></span></span><span class="ach-bar-num">${of(num(Math.min(f.pr.value, f.pr.target)), num(f.pr.target))}</span></span>`
+      : "";
+
+    // The Khan-style strip: every tier in the catalogue, filled when earned.
+    const strip = ordered.map((d) => `<i class="${earnedSet.has(d.code) ? `on ach-t-${TIERS[d.tier]?.key || "gold"}` : ""}"></i>`).join("");
     const tierCount = [0, 0, 0, 0, 0];
     for (const e of earned) tierCount[defs.get(e.code)?.tier || 0]++;
-    const rows = [...fams.values()].filter((list) => cat === "all" || list[0].category === cat).map((list) => {
-      const got = list.filter((d) => earnedSet.has(d.code));
-      const best = got[got.length - 1];
-      const nextDef = list.find((d) => !earnedSet.has(d.code));
-      const head = best || list[0];
-      const c = copyOf(head, best ? evOf.get(best.code)?.evidence : null, hi);
-      const seeded = best && evOf.get(best.code)?.seeded;
-      const pr = nextDef ? progressFor(nextDef, data.facts) : null;
-      const nc = nextDef ? copyOf(nextDef, null, hi) : null;
+    const tally = [4, 3, 2, 1].filter((t) => tierCount[t]).map((t) => `${tierCount[t]} ${(hi ? TIERS[t].hi : TIERS[t].en).toLowerCase()}`).join(", ");
+
+    const sel = picked ? all.find((f) => f.list.some((d) => d.code === picked)) : null;
+    const detail = sel && sel.best ? (() => {
+      const c = copyOf(sel.best, evOf.get(sel.best.code)?.evidence, hi);
+      const nc = sel.next ? copyOf(sel.next, null, hi) : null;
+      const seeded = evOf.get(sel.best.code)?.seeded;
       return `
-        <li class="ach-row ${best ? "is-earned" : "is-locked"} ${focus && list.some((d) => d.code === focus) ? "is-focus" : ""}" data-family="${esc(head.family)}">
-          ${medal(head, { size: "md", locked: !best })}
-          <div class="ach-row-main">
-            <div class="ach-row-top">
-              <h3>${esc(c.name)}</h3>
-              ${list.length > 1 ? `<span class="ach-pips" aria-label="${got.length} of ${list.length} tiers">${list.map((d) => `<i class="ach-pip ach-t-${TIERS[d.tier].key} ${earnedSet.has(d.code) ? "on" : ""}"></i>`).join("")}</span>` : ""}
-            </div>
-            ${best ? `<p class="ach-row-why">${esc(c.why)}${seeded ? ` <span class="ach-sample">Preview sample</span>` : ""}</p>` : ""}
-            ${nextDef ? `
-              <p class="ach-row-next">${best ? (hi ? "Agla" : "Next") + ` (${esc(nc.tier)}): ` : ""}${esc(nc.desc)}</p>
-              ${pr && pr.target > 1 && nextDef.metric !== "balanced_level" ? `
-                <div class="ach-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${pr.target}" aria-valuenow="${Math.min(pr.value, pr.target)}" aria-label="${esc(nc.name)}">
-                  <span style="width:${Math.round(pr.pct * 100)}%"></span>
-                </div>
-                <span class="ach-bar-num">${Math.min(pr.value, pr.target).toLocaleString("en-IN")} / ${pr.target.toLocaleString("en-IN")}</span>` : ""}`
-            : `<p class="ach-row-next ach-done">${list.length > 1 ? (hi ? "Saare tiers ho gaye" : "Every tier earned") : (hi ? "Kama liya" : "Earned")}</p>`}
+        <div class="ach-detail">
+          ${medal(sel.best, { size: "lg" })}
+          <div>
+            <h4>${esc(c.name)}${sel.best.tiers > 1 ? ` <span class="ach-tierword ach-t-${TIERS[sel.best.tier].key}">${esc(c.tier)}</span>` : ""}</h4>
+            <p>${esc(c.why)}${seeded ? ` <span class="ach-sample">${hi ? "Preview sample" : "Preview sample"}</span>` : ""}</p>
+            ${nc ? `<p class="ach-next">${hi ? "Agla" : "Next"}, ${esc(nc.tier)}: ${esc(nc.desc)}</p>${progressLine(sel)}` : `<p class="ach-next is-done">${sel.list.length > 1 ? (hi ? "Saare tiers ho gaye." : "Every tier earned.") : (hi ? "Kama liya." : "Earned.")}</p>`}
+          </div>
+        </div>`;
+    })() : "";
+
+    const section = (title, body, extra = "") => body ? `<section class="ach-sec"><div class="ach-sec-head"><h3>${title}</h3>${extra}</div>${body}</section>` : "";
+    const nextHtml = nextUp.map((f) => {
+      const nc = copyOf(f.next, null, hi);
+      return `
+        <li class="ach-next-row">
+          ${medal(f.next, { size: "md", locked: true })}
+          <div class="ach-next-main">
+            <p class="ach-next-name">${esc(nc.name)}${f.next.tiers > 1 ? ` <span class="ach-tierword ach-t-${TIERS[f.next.tier].key}">${esc(nc.tier)}</span>` : ""}</p>
+            <p class="ach-next-desc">${esc(nc.desc)}</p>
+            ${progressLine(f)}
           </div>
         </li>`;
     }).join("");
+    const shelfHtml = shelf.map((f) => {
+      const c = copyOf(f.best, null, hi);
+      const ev = evOf.get(f.best.code);
+      return `
+        <li><button type="button" class="ach-shelf-item ${sel === f ? "is-picked" : ""}" data-pick="${esc(f.best.code)}" aria-pressed="${sel === f}">
+          ${medal(f.best, { size: "lg" })}
+          <span class="ach-shelf-name">${esc(c.name)}</span>
+          <span class="ach-shelf-meta">${f.list.length > 1 ? `${esc(tierWord(f.best))}, ${of(f.got.length, f.list.length)}` : esc(dayText(ev?.earned_at))}</span>
+        </button></li>${sel === f && detail ? `<li class="ach-detail-li">${detail}</li>` : ""}`;
+    }).join("");
+    const todoHtml = todo.map((f) => {
+      const c = copyOf(f.list[0], null, hi);
+      return `
+        <li class="ach-todo">
+          ${medal(f.list[0], { size: "md", locked: true })}
+          <div><p class="ach-todo-name">${esc(c.name)}</p><p class="ach-todo-desc">${esc(c.desc)}</p>${progressLine(f)}</div>
+        </li>`;
+    }).join("");
+
     overlay.innerHTML = `
       <div class="modal ach-sheet" role="dialog" aria-modal="true" aria-labelledby="ach-title" tabindex="-1">
         <header class="ach-head">
-          <div>
-            <h2 id="ach-title">${hi ? "Achievements" : "Achievements"}</h2>
-            <p class="ach-sub">${hi ? `${earned.length} kamaye, ${defs.size} mein se` : `${earned.length} earned of ${defs.size}`}
-              <span class="ach-tally">${[4, 3, 2, 1].filter((t) => tierCount[t]).map((t) => `<span><i class="ach-pip on ach-t-${TIERS[t].key}"></i>${tierCount[t]}</span>`).join("")}</span>
-            </p>
-          </div>
-          <div class="ach-head-tools">
-            <div class="tn-lang" role="group" aria-label="Language">
-              <button type="button" data-lang="en" aria-pressed="${!hi}">English</button>
-              <button type="button" data-lang="hi" aria-pressed="${hi}">Hinglish</button>
+          <div class="ach-head-row">
+            <h2 id="ach-title">Achievements</h2>
+            <div class="ach-head-tools">
+              <div class="tn-lang" role="group" aria-label="Language">
+                <button type="button" data-lang="en" aria-pressed="${!hi}">English</button>
+                <button type="button" data-lang="hi" aria-pressed="${hi}">Hinglish</button>
+              </div>
+              <button type="button" class="ach-x ach-close" aria-label="${hi ? "Band karo" : "Close"}">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
             </div>
-            <button type="button" class="ach-x ach-close" aria-label="${hi ? "Band karo" : "Close"}">
-              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-            </button>
           </div>
+          <p class="ach-sub"><b>${of(earned.length, defs.size)}</b> ${hi ? "kamaye" : "earned"}${tally ? `: ${esc(tally)}` : ""}</p>
+          <div class="ach-strip" aria-hidden="true">${strip}</div>
+          <nav class="ach-cats" aria-label="${hi ? "Category" : "Category"}">
+            <button type="button" data-cat="all" aria-pressed="${cat === "all"}">${hi ? "Sab" : "All"}</button>
+            ${CATEGORIES.map((c) => `<button type="button" data-cat="${c.key}" aria-pressed="${cat === c.key}">${esc(hi ? c.hi : c.en)}</button>`).join("")}
+          </nav>
         </header>
-        <nav class="ach-cats" aria-label="${hi ? "Category" : "Category"}">
-          <button type="button" data-cat="all" aria-pressed="${cat === "all"}">${hi ? "Sab" : "All"}</button>
-          ${CATEGORIES.map((c) => `<button type="button" data-cat="${c.key}" aria-pressed="${cat === c.key}">${esc(hi ? c.hi : c.en)}</button>`).join("")}
-        </nav>
-        <ul class="ach-list">${rows || `<li class="ach-empty">${hi ? "Is category mein abhi kuch nahi." : "Nothing in this category yet."}</li>`}</ul>
+        <div class="ach-body">
+          ${section(hi ? "Agla kadam" : "Next up", nextHtml && `<ul class="ach-next-list">${nextHtml}</ul>`)}
+          ${section(hi ? "Tumhari shelf" : "Your shelf", shelfHtml && `<ul class="ach-shelf">${shelfHtml}</ul>`, `<span>${shelf.length}</span>`)}
+          ${section(hi ? "Abhi kamana baaki" : "Still to earn", todoHtml && `<ul class="ach-todos">${todoHtml}</ul>`, `<span>${todo.length}</span>`)}
+          ${!shelfHtml && !todoHtml ? `<p class="ach-empty">${hi ? "Is category mein abhi kuch nahi." : "Nothing in this category yet."}</p>` : ""}
+        </div>
         <p class="ach-foot">${hi
           ? "Har achievement tumhare apne trades aur seekhne se aata hai. Zyada trade karne se koi achievement nahi milta."
           : "Every achievement comes from your own trades and learning. Trading more never earns one."}</p>
@@ -294,6 +352,13 @@ export async function openAchievements({ focus = null } = {}) {
     overlay.querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
       cat = b.dataset.cat; draw(_data);
       overlay.querySelector(`[data-cat="${cat}"]`)?.focus();
+    }));
+    overlay.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => {
+      picked = picked === b.dataset.pick ? null : b.dataset.pick;
+      const keep = overlay.querySelector(".ach-body")?.scrollTop || 0;
+      draw(_data);
+      const body = overlay.querySelector(".ach-body"); if (body) body.scrollTop = keep;
+      overlay.querySelector(`[data-pick="${b.dataset.pick}"]`)?.focus();
     }));
     overlay.querySelector(".ach-close").addEventListener("click", close);
   };
@@ -327,32 +392,29 @@ export async function openAchievements({ focus = null } = {}) {
 export function achievementsCardHtml() {
   const hi = hinglish();
   const d = _data;
+  const head = (right) => `<div class="rc-sec-head"><h2 class="rc-sec-title">Achievements</h2>${right ? `<span>${right}</span>` : ""}</div>`;
   if (!d) {
-    return `<div class="card ach-rc" id="achievements"><div class="card-head"><h3>${hi ? "Achievements" : "Achievements"}</h3></div><p class="muted">${hi ? "Load ho raha hai…" : "Loading…"}</p></div>`;
+    return `<section class="ach-rc" id="achievements">${head("")}<p class="muted">${hi ? "Load ho raha hai…" : "Loading…"}</p></section>`;
   }
   const { defs, earned } = view(d);
   const recent = [...earned].sort((a, b) => (a.earned_at < b.earned_at ? 1 : -1));
-  // One medal per family, its highest tier, newest first.
+  // The latest medals, one per family at its highest tier (Strava keeps the
+  // four most recent on the profile; here up to six).
   const seen = new Set(); const shelf = [];
   for (const e of recent) {
     const def = defs.get(e.code);
     if (seen.has(def.family)) continue;
     const best = recent.filter((x) => defs.get(x.code).family === def.family).map((x) => defs.get(x.code)).sort((a, b) => b.tier - a.tier)[0];
-    seen.add(def.family); shelf.push(best);
+    seen.add(def.family); shelf.push({ def: best, at: e.earned_at });
   }
   return `
-    <div class="card ach-rc" id="achievements">
-      <div class="card-head">
-        <h3>Achievements</h3>
-        <span class="dim" style="font-size: var(--text-xs);">${hi ? `${earned.length} / ${defs.size} kamaye` : `${earned.length} of ${defs.size} earned`}</span>
-      </div>
-      ${shelf.length ? `<ul class="ach-shelf">${shelf.slice(0, 10).map((def) => `
-        <li title="${esc((hi ? def.name_hi : def.name_en) + (def.tiers > 1 ? ` (${TIERS[def.tier].en})` : ""))}">
-          ${medal(def, { size: "md" })}<span>${esc(hi ? def.name_hi : def.name_en)}</span>
-        </li>`).join("")}</ul>`
+    <section class="ach-rc" id="achievements">
+      ${head(hi ? `${defs.size} me se ${earned.length} kamaye` : `${earned.length} of ${defs.size} earned`)}
+      ${shelf.length ? `<ul class="ach-rc-shelf">${shelf.slice(0, 6).map(({ def, at }) => `
+        <li>${medal(def, { size: "md" })}<span><b>${esc(hi ? def.name_hi : def.name_en)}</b><small>${def.tiers > 1 ? esc(hi ? TIERS[def.tier].hi : TIERS[def.tier].en) + ", " : ""}${esc(dayText(at))}</small></span></li>`).join("")}</ul>`
         : `<p class="muted">${hi ? "Pehla achievement trade, replay ya Saathi se sawaal se aata hai." : "Your first one comes from a trade, a crash replay or a question to Saathi."}</p>`}
-      <button type="button" class="btn btn-ghost btn-sm ach-rc-open">${hi ? "Saare achievements aur agla kadam" : "All achievements and what's next"}</button>
-    </div>`;
+      <button type="button" class="rc-link ach-rc-open">${hi ? "Saare achievements aur agla kadam" : "See all achievements and what's next"}</button>
+    </section>`;
 }
 
 /** Wire the card after the report card renders; refreshes it in place. */
@@ -432,32 +494,33 @@ function ensureStyle() {
 }
 
 const CSS = `
-.ach-t-bronze   { --m1: #7A4A22; --m2: #C98B52; --m3: #F2C49A; }
-.ach-t-silver   { --m1: #5E6875; --m2: #AEB8C4; --m3: #F1F4F8; }
-.ach-t-gold     { --m1: #8A6410; --m2: #D9A824; --m3: #FFE7A0; }
-.ach-t-platinum { --m1: #3C5A7A; --m2: #9FC1DF; --m3: #EEF7FF; }
+.ach-t-bronze   { --m1: #7A4A22; --m2: #C98B52; --m3: #F2C49A; --mt: #4A2A10; }
+.ach-t-silver   { --m1: #5E6875; --m2: #AEB8C4; --m3: #F1F4F8; --mt: #2E3540; }
+.ach-t-gold     { --m1: #8A6410; --m2: #D9A824; --m3: #FFE7A0; --mt: #4D3605; }
+.ach-t-platinum { --m1: #3C5A7A; --m2: #9FC1DF; --m3: #EEF7FF; --mt: #1D3550; }
 .ach-medal { position: relative; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%;
   background: conic-gradient(from 210deg, var(--m1), var(--m3) 18%, var(--m2) 38%, var(--m1) 55%, var(--m3) 72%, var(--m2) 88%, var(--m1));
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 2px 6px -2px rgba(15,17,24,.35); }
 .ach-medal .ach-face { display: grid; place-items: center; border-radius: 50%; line-height: 1;
   background: radial-gradient(circle at 35% 30%, var(--m3), var(--m2) 70%); box-shadow: inset 0 1px 2px rgba(0,0,0,.25); }
-.ach-sm { width: 28px; height: 28px; } .ach-sm .ach-face { width: 22px; height: 22px; font-size: 12px; }
-.ach-md { width: 44px; height: 44px; } .ach-md .ach-face { width: 34px; height: 34px; font-size: 18px; }
-.ach-lg { width: 64px; height: 64px; } .ach-lg .ach-face { width: 50px; height: 50px; font-size: 26px; }
-.ach-t-locked { background: none; box-shadow: inset 0 0 0 2px var(--border-strong); }
-.ach-t-locked .ach-face { background: var(--bg-soft); box-shadow: none; filter: grayscale(1); opacity: .45; }
+.ach-face b { font-weight: 800; color: var(--mt); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; text-shadow: 0 1px 0 rgba(255,255,255,.45); }
+.ach-sm { width: 28px; height: 28px; } .ach-sm .ach-face { width: 22px; height: 22px; font-size: 12px; } .ach-sm .ach-face b { font-size: 9px; }
+.ach-md { width: 44px; height: 44px; } .ach-md .ach-face { width: 34px; height: 34px; font-size: 18px; } .ach-md .ach-face b { font-size: 13px; }
+.ach-lg { width: 60px; height: 60px; } .ach-lg .ach-face { width: 47px; height: 47px; font-size: 24px; } .ach-lg .ach-face b { font-size: 17px; }
+/* Not earned: the same disc drawn as a thin outline. */
+.ach-t-locked { background: none; box-shadow: inset 0 0 0 1.5px var(--border-strong, var(--border)); }
+.ach-t-locked .ach-face { background: none; box-shadow: inset 0 0 0 1px var(--border); }
+.ach-t-locked .ach-face b { color: var(--text-muted); text-shadow: none; font-weight: 700; }
+.ach-t-locked .ach-emoji { filter: grayscale(1); opacity: .4; }
 
 .ach-toast { position: fixed; right: 16px; bottom: 96px; z-index: 91; width: min(360px, calc(100vw - 32px));
   display: flex; gap: 14px; align-items: flex-start; padding: 14px 12px 14px 14px;
-  background: var(--surface); color: var(--text); border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--m2, var(--brand)) 55%, var(--border));
-  box-shadow: 0 18px 40px -16px rgba(15,17,24,.45);
-  opacity: 0; transform: translateY(14px) scale(.96);
+  background: var(--surface); color: var(--text); border-radius: 12px;
+  border: 1px solid var(--border); border-top: 3px solid var(--m2, var(--brand));
+  box-shadow: 0 18px 40px -18px rgba(15,17,24,.45);
+  opacity: 0; transform: translateY(14px);
   transition: opacity 220ms var(--ease), transform 300ms cubic-bezier(.2,.9,.25,1.15); }
 .ach-toast.is-in { opacity: 1; transform: none; }
-.ach-toast::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(120px 90px at 46px 44px, color-mix(in srgb, var(--m2, var(--brand)) 26%, transparent), transparent 70%); }
-.ach-toast > * { position: relative; }
 .ach-sheet:focus { outline: none; }
 .ach-tt-bronze { --m2: #C98B52; } .ach-tt-silver { --m2: #AEB8C4; } .ach-tt-gold { --m2: #D9A824; } .ach-tt-platinum { --m2: #9FC1DF; }
 .ach-toast-summary { --m2: var(--brand); }
@@ -473,9 +536,8 @@ const CSS = `
 .ach-tier-word { color: color-mix(in srgb, var(--m2) 70%, var(--text-strong)); font-weight: 700; }
 .ach-toast-name { margin: 2px 0 4px; font-size: var(--text-lg); letter-spacing: -.01em; color: var(--text-strong); }
 .ach-toast-why { margin: 0 0 8px; font-size: var(--text-sm); line-height: 1.5; color: var(--text); }
-.ach-link { min-height: 36px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--brand-soft); color: var(--brand-dark); font-weight: 700; font-size: var(--text-sm); cursor: pointer; }
-[data-theme="dark"] .ach-link { color: var(--brand); }
-.ach-link:focus-visible, .ach-x:focus-visible, .ach-cats button:focus-visible { outline: none; box-shadow: var(--sh-focus); }
+.ach-link { min-height: 36px; padding: 0; border: 0; background: none; color: var(--brand); font-weight: 700; font-size: var(--text-sm); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ach-link:focus-visible, .ach-x:focus-visible, .ach-cats button:focus-visible, .ach-shelf-item:focus-visible { outline: none; box-shadow: var(--sh-focus); }
 .ach-x { width: 32px; height: 32px; flex-shrink: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); display: grid; place-items: center; cursor: pointer; }
 .ach-x:hover { background: var(--bg-soft); color: var(--text-strong); }
 .ach-stack { display: flex; flex-shrink: 0; padding-top: 2px; }
@@ -484,50 +546,93 @@ const CSS = `
 .ach-toast-summary.is-in .ach-stack .ach-medal { animation: ach-strike 520ms cubic-bezier(.2,.9,.25,1.2) both; }
 .ach-toast-summary.is-in .ach-stack .ach-medal:nth-child(2) { animation-delay: 90ms; }
 .ach-toast-summary.is-in .ach-stack .ach-medal:nth-child(3) { animation-delay: 180ms; }
-.ach-sample { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--bg-soft); color: var(--text-muted); font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.ach-sample { display: inline-block; padding: 1px 7px; border-radius: 4px; background: var(--bg-soft); color: var(--text-muted); font-size: 11px; font-weight: 600; vertical-align: 1px; }
 @media (max-width: 559px) { .ach-toast { left: 12px; right: 12px; width: auto; bottom: calc(84px + env(safe-area-inset-bottom)); } }
 
-.ach-sheet { width: min(720px, 100%); max-width: 720px; max-height: min(86vh, 820px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
-.ach-head { flex-shrink: 0; display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-5) var(--sp-5) var(--sp-3); }
+/* The list: next up (bars), the shelf (earned, with their story), still to earn. */
+.ach-sheet { width: min(760px, 100%); max-width: 760px; max-height: min(88vh, 860px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.ach-head { flex-shrink: 0; padding: var(--sp-5) var(--sp-5) 0; border-bottom: 1px solid var(--border); }
+.ach-head-row { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: center; }
 .ach-head h2 { margin: 0; font-size: var(--text-2xl, 24px); letter-spacing: -.02em; }
-.ach-sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-sm); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.ach-tally { display: inline-flex; gap: 10px; font-variant-numeric: tabular-nums; color: var(--text-strong); font-weight: 600; }
-.ach-tally span { display: inline-flex; gap: 4px; align-items: center; }
 .ach-head-tools { display: flex; gap: 8px; align-items: center; }
-.ach-cats { flex-shrink: 0; display: flex; gap: 6px; padding: 0 var(--sp-5) var(--sp-3); overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--divider); }
+.ach-sub { margin: 6px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.ach-sub b { color: var(--text-strong); }
+.ach-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(10px, 1fr)); gap: 3px; margin-top: var(--sp-3); }
+.ach-strip i { height: 10px; border-radius: 2px; background: var(--bg-soft); box-shadow: inset 0 0 0 1px var(--border); }
+.ach-strip i.on { background: linear-gradient(160deg, var(--m3), var(--m2) 60%, var(--m1)); box-shadow: none; }
+.ach-cats { display: flex; gap: var(--sp-5); margin-top: var(--sp-4); overflow-x: auto; scrollbar-width: none; }
 .ach-cats::-webkit-scrollbar { display: none; }
-.ach-cats button { flex-shrink: 0; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
-.ach-cats button[aria-pressed="true"] { background: var(--text-strong); border-color: var(--text-strong); color: var(--surface); }
-.ach-list { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-5) var(--sp-3); overflow-y: auto; flex: 1; }
-.ach-row { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--divider); }
-.ach-row:last-child { border-bottom: 0; }
-.ach-row.is-focus { background: linear-gradient(90deg, var(--brand-soft), transparent 70%); margin: 0 calc(-1 * var(--sp-5)); padding-left: var(--sp-5); padding-right: var(--sp-5); }
-.ach-row-main { flex: 1; min-width: 0; }
-.ach-row-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-.ach-row h3 { margin: 0; font-size: var(--text-base); color: var(--text-strong); }
-.ach-row.is-locked h3 { color: var(--text-muted); }
-.ach-row-why { margin: 3px 0 0; font-size: var(--text-sm); line-height: 1.5; }
-.ach-row-next { margin: 3px 0 0; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; }
-.ach-done { color: color-mix(in srgb, var(--brand) 80%, var(--text-muted)); font-weight: 600; }
-.ach-pips { display: inline-flex; gap: 4px; flex-shrink: 0; }
-.ach-pip { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
-.ach-pip.on { background: radial-gradient(circle at 35% 30%, var(--m3), var(--m2) 65%, var(--m1)); box-shadow: none; }
-.ach-bar { display: inline-block; vertical-align: middle; width: min(220px, 60%); height: 6px; border-radius: 3px; background: var(--bg-soft); overflow: hidden; margin-top: 6px; }
+.ach-cats button { flex-shrink: 0; padding: 0 0 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-muted); font: inherit; font-size: var(--text-sm); font-weight: 600; cursor: pointer; }
+.ach-cats button:hover { color: var(--text-strong); }
+.ach-cats button[aria-pressed="true"] { color: var(--text-strong); border-bottom-color: var(--text-strong); }
+.ach-body { flex: 1; overflow-y: auto; padding: 0 var(--sp-5) var(--sp-4); }
+.ach-sec { padding-top: var(--sp-5); }
+.ach-sec-head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.ach-sec-head h3 { margin: 0; font-size: var(--text-md); font-weight: 700; color: var(--text-strong); }
+.ach-sec-head span { font-size: var(--text-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ach-tierword { font-size: var(--text-xs); font-weight: 700; color: color-mix(in srgb, var(--m1) 75%, var(--text-strong)); }
+[data-theme="dark"] .ach-tierword { color: var(--m2); }
+
+.ach-next-list, .ach-shelf, .ach-todos, .ach-rc-shelf { list-style: none; margin: 0; padding: 0; }
+.ach-next-row { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) 0; border-bottom: 1px solid var(--divider); }
+.ach-next-row:last-child { border-bottom: 0; }
+.ach-next-main { flex: 1; min-width: 0; }
+.ach-next-name { margin: 0; font-weight: 600; color: var(--text-strong); font-size: var(--text-md); }
+.ach-next-desc { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-sm); line-height: 1.45; }
+.ach-prog { display: flex; align-items: center; gap: var(--sp-2); margin-top: 8px; }
+.ach-bar { flex: 1; max-width: 260px; display: block; height: 6px; border-radius: 3px; background: var(--bg-soft); overflow: hidden; }
 .ach-bar span { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
-.ach-bar-num { margin-left: 8px; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; vertical-align: middle; }
+.ach-bar-num { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.ach-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); grid-auto-flow: dense; gap: var(--sp-2); }
+/* The story opens under the tapped medal's row; dense packing lets the
+   medals after it fill the rest of that row. */
+.ach-detail-li { grid-column: 1 / -1; }
+.ach-detail-li .ach-detail { margin-top: 0; }
+.ach-shelf-item { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--sp-3) var(--sp-2); border: 1px solid transparent; border-radius: var(--r-sm); background: none; font: inherit; color: inherit; text-align: center; cursor: pointer; }
+.ach-shelf-item:hover { background: var(--bg-soft); }
+.ach-shelf-item.is-picked { border-color: var(--border); background: var(--bg-soft); }
+.ach-shelf-name { font-size: var(--text-sm); font-weight: 600; color: var(--text-strong); line-height: 1.3; }
+.ach-shelf-meta { font-size: var(--text-xs); color: var(--text-muted); }
+.ach-detail { display: flex; gap: var(--sp-4); align-items: flex-start; margin-top: var(--sp-3); padding: var(--sp-4); background: var(--bg-soft); border-radius: var(--r-sm); }
+.ach-detail h4 { margin: 0 0 4px; font-size: var(--text-lg); color: var(--text-strong); }
+.ach-detail p { margin: 0 0 4px; font-size: var(--text-sm); line-height: 1.55; color: var(--text); }
+.ach-detail .ach-next { color: var(--text-muted); }
+.ach-detail .ach-next.is-done { color: var(--brand); font-weight: 600; }
+
+.ach-todos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-5); }
+.ach-todo { display: flex; gap: var(--sp-3); align-items: flex-start; padding: var(--sp-3) 0; border-bottom: 1px solid var(--divider); }
+.ach-todo > div { min-width: 0; flex: 1; }
+.ach-todo-name { margin: 0; font-weight: 600; font-size: var(--text-sm); color: var(--text-strong); }
+.ach-todo-desc { margin: 2px 0 0; font-size: var(--text-xs); color: var(--text-muted); line-height: 1.45; }
 .ach-empty { padding: var(--sp-6) 0; color: var(--text-muted); }
 .ach-foot { flex-shrink: 0; margin: 0; padding: var(--sp-3) var(--sp-5) var(--sp-4); font-size: var(--text-xs); color: var(--text-muted); border-top: 1px solid var(--divider); }
+
+/* On the report card: the latest medals, then a link to the full list. */
+.ach-rc { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
+.ach-rc-shelf { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--sp-5); }
+.ach-rc-shelf li { display: flex; gap: var(--sp-3); align-items: center; padding: var(--sp-3) 0; border-bottom: 1px solid var(--divider); min-width: 0; }
+.ach-rc-shelf li > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ach-rc-shelf b { font-size: var(--text-sm); color: var(--text-strong); font-weight: 600; }
+.ach-rc-shelf small { font-size: var(--text-xs); color: var(--text-muted); }
+
+@media (max-width: 720px) {
+  .ach-rc-shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ach-todos { grid-template-columns: 1fr; }
+}
 @media (max-width: 559px) {
   .ach-overlay { align-items: flex-end; padding: 0; }
-  .ach-sheet { width: 100%; max-height: 92vh; border-radius: 20px 20px 0 0; }
-  .ach-head { padding: var(--sp-4) var(--sp-4) var(--sp-3); flex-wrap: wrap; }
-  .ach-cats, .ach-list { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  .ach-sheet { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; }
+  .ach-head { padding: var(--sp-4) var(--sp-4) 0; }
+  .ach-head { position: relative; }
+  .ach-head-row { flex-wrap: wrap; padding-right: 40px; }
+  .ach-close { position: absolute; top: var(--sp-3); right: var(--sp-3); }
+  .ach-body { padding: 0 var(--sp-4) var(--sp-4); }
+  .ach-shelf { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ach-detail { flex-direction: column; }
+  .ach-rc-shelf { grid-template-columns: 1fr; }
   .ach-foot { padding: var(--sp-3) var(--sp-4) calc(var(--sp-4) + env(safe-area-inset-bottom)); }
 }
-
-.ach-rc { margin-top: var(--sp-6); }
-.ach-shelf { list-style: none; margin: 0 0 var(--sp-4); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: var(--sp-3); }
-.ach-shelf li { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: var(--text-xs); color: var(--text); line-height: 1.3; }
 
 @media (prefers-reduced-motion: reduce) {
   .ach-toast { transition: opacity 120ms linear; transform: none; }

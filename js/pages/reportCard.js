@@ -21,18 +21,13 @@ import { getInstrument, ensureUniverseLoaded } from "../data/universe.js";
 import { getQuoteBatch } from "../data/marketData.js";
 import { computeTradeStats } from "../data/tradeStats.js";
 import { aiLang } from "../features/aiLang.js";
-import { scoreReportCard, benchmarkPl, GRADES, WEIGHTS } from "../coach/reportCardCore.js";
+import { scoreReportCard, benchmarkPl, GRADES, WEIGHTS, gradeFor } from "../coach/reportCardCore.js";
+import { isOwner } from "../features/preview.js";
 import { tradesWithFlags } from "../coach/biasLedger.js";
 import { factText, unlockText, pillarName, pillarCopy, gradeTitle, overallSummary, promptLines } from "../coach/reportCardCopy.js";
 import { niftyCloses, cachedNiftyCloses } from "../data/indexCloses.js";
 import { loadActivity, cachedActivity } from "../features/learning.js";
 import { onBackdropClick } from "../components/backdrop.js";
-import { isOwner } from "../features/preview.js";
-
-// Achievements (owner preview): their card replaces the badges for owners only,
-// loaded on demand so other users never download it.
-let achUi = null;
-const ACH_PLACEHOLDER = `<div class="card ach-rc" id="achievements"><div class="card-head"><h3>Achievements</h3></div><p class="muted">…</p></div>`;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hinglish = () => { try { return !!getState()?.settings?.hinglish; } catch { return false; } };
@@ -145,6 +140,7 @@ function buildInput(state, extras) {
 export function renderReportCard(main) {
   let alive = true;
   let ready = false;
+  shapeShown = false;
   const first = getState();
   const firstTs = (first.transactions || []).reduce((m, t) => Math.min(m, t.ts), Infinity);
   const since = Number.isFinite(firstTs) ? firstTs : Date.now();
@@ -204,90 +200,181 @@ export function renderReportCard(main) {
     const rc = scoreReportCard(input);
     last = { input, rc };
     const hi = hinglish();
-    const tiles = Object.values(rc.pillars).filter((p) => p.state !== "hidden").map((p) => pillarTile(p, hi)).join("");
+    const owner = isOwner();
+    if (owner && !achUi && !achUiLoading) {
+      achUiLoading = true;
+      import("../achievements/ui.js").then((m) => { achUi = m; if (alive) render(); }).catch(() => {});
+    }
     main.innerHTML = `
       ${head()}
       ${topCard(rc, state, hi)}
-      <div class="rc-pillars">${tiles}</div>
+      ${markSheet(rc, hi)}
       ${renderAiCard()}
-      ${isOwner() ? (achUi ? achUi.achievementsCardHtml() : ACH_PLACEHOLDER) : badgesCard(state)}
       ${state.transactions.length === 0 ? emptyCard() : ""}
+      ${owner ? (achUi ? achUi.achievementsCardHtml() : "") : badgesCard(state)}
     `;
-    if (isOwner()) mountAch(main);
+    if (owner && achUi) achUi.mountAchievementsCard(main);
+    // The shape draws itself once per visit, not on every re-render.
+    if (!shapeShown) { shapeShown = true; main.querySelector(".rc-shape")?.classList.add("is-new"); }
   }
 }
 
+// Achievements replace the old badges for owner accounts (their preview).
+let achUi = null, achUiLoading = false, shapeShown = false;
+
 function head() {
   return `
-    <div class="rc-head">
-      <h1>${T("Report Card", "Report Card")}</h1>
-      <p class="muted">${T("A grade for how you decide, not for how the market moved.", "Grade tumhare faislon ka hai, market ke chalne ka nahi.")}</p>
-    </div>`;
+    <header class="rc-head">
+      <div>
+        <h1>${T("Report card", "Report card")}</h1>
+        <p>${T("A grade for how you decide, not for how the market moved.", "Grade tumhare faislon ka hai, market ke chalne ka nahi.")}</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" data-rc="how">${T("How this is scored", "Score kaise banta hai")}</button>
+    </header>`;
 }
 
 function skeleton() {
   return `
-    <div class="rc-top"><div class="rc-ring is-loading"></div>
-      <div class="rc-top-main"><div class="skeleton" style="height:14px;width:120px;border-radius:4px;"></div>
-      <div class="skeleton" style="height:26px;width:200px;border-radius:4px;margin:10px 0;"></div>
-      <div class="skeleton" style="height:14px;width:min(360px,90%);border-radius:4px;"></div></div></div>
-    <div class="rc-pillars">${[0, 1, 2].map(() => `<div class="rc-pillar"><div class="skeleton" style="height:96px;border-radius:6px;"></div></div>`).join("")}</div>`;
+    <section class="rc-hero"><div class="rc-hero-main">
+      <div class="skeleton" style="height:84px;width:120px;border-radius:6px;"></div>
+      <div class="skeleton" style="height:16px;width:min(320px,80%);border-radius:4px;margin-top:14px;"></div></div>
+      <div class="skeleton rc-shape-skel"></div></section>
+    <section class="rc-sheet">${[0, 1, 2, 3, 4, 5].map(() => `<div class="rc-row"><div class="skeleton" style="height:18px;border-radius:4px;grid-column:1/-1;"></div></div>`).join("")}</section>`;
+}
+
+// ---- The hero: grade, where it sits on the scale, and the shape ----------------
+// Six parts drawn as a hexagon (the student's "shape"); a locked part is a
+// dashed spoke. Order matches the mark sheet.
+const SHORT = {
+  discipline: ["Discipline", "Discipline"], results: ["Results", "Results"], research: ["Research", "Research"],
+  diversification: ["Spread", "Spread"], learning: ["Learning", "Learning"], market: ["vs Nifty", "vs Nifty"],
+};
+function shapeSvg(rc, hi) {
+  const ps = Object.values(rc.pillars).filter((p) => p.state !== "hidden");
+  const n = ps.length;
+  if (n < 3) return "";
+  const R = 92, cx = 150, cy = 128;
+  const at = (i, r) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  };
+  const ring = (f) => ps.map((_, i) => at(i, R * f).map((v) => v.toFixed(1)).join(",")).join(" ");
+  const pts = ps.map((p, i) => at(i, R * (p.state === "scored" ? Math.max(0.04, p.score / 100) : 0)));
+  const labels = ps.map((p, i) => {
+    const [x, y] = at(i, R + 20);
+    const anchor = Math.abs(x - cx) < 4 ? "middle" : x > cx ? "start" : "end";
+    const dy = y < cy - R * 0.6 ? -4 : y > cy + R * 0.6 ? 14 : 4;
+    const g = p.state === "scored" ? gradeFor(p.score) : "–";
+    return `<text x="${x.toFixed(1)}" y="${(y + dy).toFixed(1)}" text-anchor="${anchor}" class="rc-shape-label ${p.state === "scored" ? "" : "is-off"}"><tspan class="rc-shape-name">${esc(SHORT[p.key]?.[hi ? 1 : 0] || pillarName(p.key, hi))}</tspan><tspan class="rc-shape-grade" dx="5">${esc(g)}</tspan></text>`;
+  }).join("");
+  const spokes = ps.map((p, i) => {
+    const [x, y] = at(i, R);
+    return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="${p.state === "scored" ? "" : "is-off"}"/>`;
+  }).join("");
+  const dots = ps.map((p, i) => p.state === "scored" ? `<circle cx="${pts[i][0].toFixed(1)}" cy="${pts[i][1].toFixed(1)}" r="3.5" class="tone-${toneOf(p.score)}"/>` : "").join("");
+  const label = ps.map((p) => `${pillarName(p.key, hi)} ${p.state === "scored" ? `${p.score} of 100` : T("not open yet", "abhi band")}`).join(", ");
+  return `
+    <svg class="rc-shape" viewBox="0 0 300 256" role="img" aria-label="${esc(T("Your shape: ", "Tumhara shape: ") + label)}">
+      <g class="rc-shape-grid">${[1, 0.75, 0.5, 0.25].map((f) => `<polygon points="${ring(f)}"/>`).join("")}${spokes}</g>
+      <g class="rc-shape-you"><polygon points="${pts.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ")}"/>${dots}</g>
+      ${labels}
+    </svg>`;
+}
+
+// The grade scale with the student's marker on it (cut points from the core).
+function scaleHtml(score, hi) {
+  const bands = [...GRADES].reverse().map((g, i, arr) => ({ grade: g.grade, from: g.min, to: arr[i + 1]?.min ?? 100 }));
+  const you = gradeFor(score);
+  // Equal-width grades (the D band is 0-47, drawn to scale it would take half
+  // the bar); the pin sits proportionally inside its own grade.
+  const n = bands.length;
+  const k = Math.max(0, bands.findIndex((b) => b.grade === you));
+  const inBand = Math.max(0, Math.min(1, (score - bands[k].from) / Math.max(1, bands[k].to - bands[k].from)));
+  const pinPct = ((k + inBand) / n) * 100;
+  return `
+    <div class="rc-band" aria-label="${esc(T(`Grade scale. You are at ${score}, grade ${you}.`, `Grade scale. Tum ${score} par ho, grade ${you}.`))}">
+      <div class="rc-band-track">
+        ${bands.map((b) => `<span class="${b.grade === you ? "is-you" : ""}" style="flex:1 1 0"><b>${esc(b.grade)}</b></span>`).join("")}
+        <i class="rc-band-pin" style="left:${pinPct.toFixed(1)}%"></i>
+      </div>
+      <div class="rc-band-nums" aria-hidden="true">${bands.slice(1).map((b, i) => `<span style="left:${(((i + 1) / n) * 100).toFixed(2)}%">${b.from}</span>`).join("")}</div>
+    </div>`;
 }
 
 function topCard(rc, state, hi) {
   const o = rc.overall;
   const graded = o.state === "graded";
   const u = o.unlock || { have: 0, need: 5 };
-  const pctDone = graded ? o.score : Math.round((Math.min(u.have, u.need) / u.need) * 100);
   const nPos = Object.values(state.holdings || {}).filter((h) => h?.qty > 0).length;
   const nTx = state.transactions.length;
+  const counts = T(
+    `${nTx} trade${nTx === 1 ? "" : "s"} and ${nPos} holding${nPos === 1 ? "" : "s"} so far`,
+    `Ab tak ${nTx} trade${nTx === 1 ? "" : "s"} aur ${nPos} holding${nPos === 1 ? "" : "s"}`);
+  const gradeBlock = graded
+    ? `<p class="rc-grade tone-${toneOf(o.score)}"><span class="rc-letter">${esc(o.grade)}</span><span class="rc-marks"><b class="tabular">${o.score}</b>/100</span></p>
+       <h2 class="rc-title">${esc(gradeTitle(o.grade, hi))}</h2>`
+    : `<p class="rc-grade is-building"><span class="rc-letter tabular">${u.have}<small>/${u.need}</small></span><span class="rc-marks">${T("trades", "trades")}</span></p>
+       <h2 class="rc-title">${T("Building your record", "Record ban raha hai")}</h2>`;
   return `
-    <section class="rc-top ${graded ? "" : "is-building"}" style="--pct:${pctDone};">
-      <div class="rc-ring" aria-hidden="true">
-        ${graded ? `<span class="rc-letter">${esc(o.grade)}</span>` : `<span class="rc-progress">${u.have}<small>/${u.need}</small></span>`}
-      </div>
-      <div class="rc-top-main">
-        <div class="rc-kicker">${graded ? `${T("Overall", "Overall")} · <span class="tabular">${o.score}</span> / 100` : T("Not graded yet", "Abhi grade nahi")}</div>
-        <div class="rc-title">${esc(graded ? gradeTitle(o.grade, hi) : T("Building your record", "Record ban raha hai"))}</div>
+    <section class="rc-hero ${graded ? "" : "is-building"}">
+      <div class="rc-hero-main">
+        ${gradeBlock}
         <p class="rc-sum">${esc(overallSummary(o, hi))}</p>
-        <div class="rc-top-actions">
-          <button type="button" class="btn btn-primary btn-sm" data-rc="how">${T("How this is scored", "Score kaise banta hai")}</button>
-          <span class="pill pill-neutral">${nTx} ${T(nTx === 1 ? "trade" : "trades", nTx === 1 ? "trade" : "trades")}</span>
-          <span class="pill pill-neutral">${nPos} ${T(nPos === 1 ? "position" : "positions", nPos === 1 ? "position" : "positions")}</span>
-        </div>
+        ${graded ? scaleHtml(o.score, hi) : `<div class="rc-slots" aria-hidden="true">${Array.from({ length: u.need }, (_, i) => `<i class="${i < u.have ? "on" : ""}"></i>`).join("")}</div>`}
+        <p class="rc-counts">${esc(counts)}</p>
       </div>
+      ${shapeSvg(rc, hi)}
     </section>`;
 }
 
-const toneOf = (score) => (score >= 70 ? "good" : score >= 45 ? "warn" : "bad");
+// Colour follows the grade, so the same letter is always the same colour.
+const toneOf = (score) => { const g = gradeFor(score); return g === "A+" || g === "A" ? "good" : g === "D" ? "bad" : "warn"; };
+const chevron = `<svg class="rc-row-go" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>`;
 
-function pillarTile(p, hi) {
+// ---- The mark sheet: one row per part, like a school report card ---------------
+function markSheet(rc, hi) {
+  const rows = Object.values(rc.pillars).filter((p) => p.state !== "hidden").map((p) => markRow(p, hi)).join("");
+  return `
+    <section class="rc-sheet" aria-labelledby="rc-sheet-title">
+      <h2 id="rc-sheet-title" class="rc-sec-title">${T("Mark sheet", "Mark sheet")}</h2>
+      <div class="rc-sheet-head" aria-hidden="true">
+        <span>${T("Part", "Hissa")}</span><span>${T("Marks", "Marks")}</span><span>${T("Grade", "Grade")}</span><span>${T("Remark", "Remark")}</span>
+      </div>
+      ${rows}
+    </section>`;
+}
+
+function markRow(p, hi) {
   const name = esc(pillarName(p.key, hi));
   if (p.state === "scored") {
     const fact = p.facts.find((f) => f.tone !== "info") || p.facts[0];
+    const tone = toneOf(p.score);
     return `
-      <button type="button" class="rc-pillar tone-${toneOf(p.score)}" data-rc="pillar:${p.key}">
-        <span class="rc-p-head"><span class="rc-p-name">${name}</span><span class="rc-p-score tabular">${p.score}<small>/100</small></span></span>
-        <span class="rc-bar"><i style="width:${p.score}%;"></i></span>
-        <span class="rc-p-fact">${esc(factText(fact, hi))}</span>
-        <span class="rc-p-more">${T("See details", "Details dekho")}</span>
+      <button type="button" class="rc-row tone-${tone}" data-rc="pillar:${p.key}">
+        <span class="rc-row-name">${name}<small>${T(`Counts for ${p.share}%`, `${p.share}% ginta hai`)}</small></span>
+        <span class="rc-row-marks"><b class="tabular">${p.score}</b><i class="rc-meter"><i style="width:${p.score}%"></i></i></span>
+        <span class="rc-row-grade">${esc(gradeFor(p.score))}</span>
+        <span class="rc-row-remark">${esc(factText(fact, hi))}</span>
+        ${chevron}
       </button>`;
   }
   if (p.state === "pending") {
     return `
-      <div class="rc-pillar is-locked">
-        <span class="rc-p-head"><span class="rc-p-name">${name}</span></span>
-        <span class="rc-p-fact">${T("Could not load this right now. It is left out of your grade until it loads.", "Yeh abhi load nahi hua. Load hone tak grade me nahi gina jaata.")}</span>
+      <div class="rc-row is-locked">
+        <span class="rc-row-name">${name}</span>
+        <span class="rc-row-marks"><b>–</b></span><span class="rc-row-grade">–</span>
+        <span class="rc-row-remark">${T("Could not load this right now. It is left out of your grade until it loads.", "Yeh abhi load nahi hua. Load hone tak grade me nahi gina jaata.")}</span>
       </div>`;
   }
   const u = p.unlock || {};
   const prog = Number.isFinite(u.have) && u.need > 0 ? Math.round((Math.min(u.have, u.need) / u.need) * 100) : 0;
   return `
-    <button type="button" class="rc-pillar is-locked" data-rc="pillar:${p.key}">
-      <span class="rc-p-head"><span class="rc-p-name">${name}</span><span class="rc-p-tag">${T("Not enough data yet", "Abhi data kam hai")}</span></span>
-      <span class="rc-bar"><i style="width:${prog}%;"></i></span>
-      <span class="rc-p-fact">${esc(unlockText(p.key, u, hi))}</span>
-      <span class="rc-p-more">${T("What counts here", "Yahan kya ginta hai")}</span>
+    <button type="button" class="rc-row is-locked" data-rc="pillar:${p.key}">
+      <span class="rc-row-name">${name}<small>${T(`Will count for ${p.weight}%`, `Khulne par ${p.weight}% ginega`)}</small></span>
+      <span class="rc-row-marks"><b>–</b><i class="rc-meter"><i style="width:${prog}%"></i></i></span>
+      <span class="rc-row-grade">${T("Not open", "Band")}</span>
+      <span class="rc-row-remark">${esc(unlockText(p.key, u, hi))}</span>
+      ${chevron}
     </button>`;
 }
 
@@ -396,7 +483,7 @@ function openHow(rc) {
       <h2 id="rc-dlg-title">${T("How this is scored", "Score kaise banta hai")}</h2>
       <p>${T("The grade reads what you do on StockSaathi, not just how many trades you place: your habits around each trade, what your money actually made, whether you looked into a stock before buying it (its page on earlier days, its chart, your watchlist, questions to Saathi), how spread out you are, and how steadily you learn. After 4 weeks or 10 trades, your result against the Nifty 50 joins too.",
         "Grade woh padhta hai jo tum StockSaathi par karte ho, sirf trades ki ginti nahi: har trade ke aas paas tumhari aadatein, paise ne asal me kya banaya, kharidne se pehle stock ko dekha ya nahi (pehle din uska page, chart, watchlist, Saathi se sawaal), paisa kitna phaila hai, aur kitna lagataar seekhte ho. 4 hafte ya 10 trades ke baad Nifty 50 ke saamne tumhara result bhi judta hai.")}</p>
-      <p>${Object.entries(WEIGHTS).map(([k, w]) => `${esc(pillarName(k, hinglish()))} ${w}%`).join(" · ")}</p>
+      <p>${T("Full weights: ", "Poora wazan: ")}${Object.entries(WEIGHTS).map(([k, w]) => `${esc(pillarName(k, hinglish()))} ${w}%`).join(", ")}.</p>
       <table class="rc-parts"><thead><tr><th>${T("Part", "Hissa")}</th><th>${T("Share today", "Aaj ka hissa")}</th><th>${T("Score", "Score")}</th></tr></thead><tbody>${rows}</tbody></table>
       <p>${T("A part without enough history is left out and the others share its weight, so being new never lowers a grade. The overall grade needs Discipline, which unlocks after 5 trades.",
         "Jis hisse ka data kam hai woh chhod diya jaata hai aur uska wazan baakiyon me bant jaata hai, isliye naya hone se grade kam nahi hota. Overall grade ke liye Discipline chahiye, jo 5 trades ke baad khulta hai.")}</p>
@@ -443,24 +530,15 @@ function askSaathi(text) {
 function badgesCard(state) {
   const earnedBadges = computeBadges(state);
   return `
-    <div class="card" style="margin-top: var(--sp-5);">
-      <div class="card-head">
-        <h3>Badges</h3>
-        <span class="dim" style="font-size: var(--text-xs);">${earnedBadges.size} / ${BADGES.length} earned</span>
-      </div>
-      <div class="badges-grid">
-        ${BADGES.map(b => {
+    <section class="rc-badges" aria-labelledby="rc-badges-title">
+      <div class="rc-sec-head"><h2 id="rc-badges-title" class="rc-sec-title">${T("Badges", "Badges")}</h2><span>${T(`${earnedBadges.size} of ${BADGES.length} earned`, `${BADGES.length} me se ${earnedBadges.size} mile`)}</span></div>
+      <ul class="rc-badge-list">
+        ${BADGES.map((b) => {
           const earned = earnedBadges.has(b.code);
-          return `
-            <div class="badge-card ${earned ? "earned" : "locked"}" aria-label="${esc(b.title)}">
-              <div class="emoji">${b.emoji}</div>
-              <div class="title">${esc(b.title)}</div>
-              <div class="desc">${esc(b.desc)}</div>
-            </div>
-          `;
+          return `<li class="${earned ? "is-earned" : ""}"><span class="rc-badge-ico" aria-hidden="true">${b.emoji}</span><span class="rc-badge-txt"><b>${esc(b.title)}</b><small>${esc(b.desc)}</small></span><span class="rc-badge-state">${earned ? T("Earned", "Mila") : T("Not yet", "Abhi nahi")}</span></li>`;
         }).join("")}
-      </div>
-    </div>`;
+      </ul>
+    </section>`;
 }
 
 function computeBadges(state) {
@@ -489,11 +567,11 @@ function computeBadges(state) {
 
 function emptyCard() {
   return `
-    <div class="card" style="margin-top: var(--sp-5); text-align: center; padding: var(--sp-8);">
-      <h3 style="margin: 0 0 var(--sp-3);">${T("Your report card grows with you", "Report card tumhare saath badhta hai")}</h3>
-      <p class="muted" style="max-width: 480px; margin: 0 auto;">${T("Place a few trades, finish a crash replay, ask Saathi a question. Each one unlocks a part of the card.", "Kuch trades lagao, ek crash replay poora karo, Saathi se sawaal pucho. Har cheez card ka ek hissa kholti hai.")}</p>
-      <div style="margin-top: var(--sp-5);"><a href="/stocks" class="btn btn-primary">${T("Browse markets", "Markets dekho")}</a></div>
-    </div>`;
+    <section class="rc-empty">
+      <h2>${T("Your report card fills in as you go", "Report card tumhare saath bharta hai")}</h2>
+      <p>${T("Place a few trades, finish a crash replay, ask Saathi a question. Each one opens a row of the mark sheet.", "Kuch trades lagao, ek crash replay poora karo, Saathi se sawaal pucho. Har cheez mark sheet ki ek row kholti hai.")}</p>
+      <a href="/stocks" class="btn btn-primary">${T("Browse markets", "Markets dekho")}</a>
+    </section>`;
 }
 
 // ---- Saathi's card ----------------------------------------------------------------
@@ -501,19 +579,18 @@ function renderAiCard() {
   if (!aiCard && !aiCardLoading) return "";
   if (aiCardLoading && !aiCard) {
     return `
-      <div class="pf-digest-card mood-flat loading" style="margin-top: var(--sp-5);">
-        <div class="pf-digest-head"><span class="pf-digest-label">Saathi</span><span class="dim text-xs">${T("reading your card…", "tumhara card padh raha hai…")}</span></div>
-        <div class="pf-digest-body skeleton" style="height: 48px; border-radius: 6px;"></div>
-      </div>
-    `;
+      <section class="rc-remarks is-loading" aria-busy="true">
+        <h2 class="rc-sec-title">${T("Saathi's remarks", "Saathi ki remarks")}</h2>
+        <p class="muted">${T("Saathi is reading your card…", "Saathi tumhara card padh raha hai…")}</p>
+      </section>`;
   }
   const more = (aiCard.strengths || []).length + (aiCard.watchouts || []).length > 0;
   return `
-    <div class="pf-digest-card mood-up" style="margin-top: var(--sp-5);">
-      <div class="pf-digest-head"><span class="pf-digest-label">Saathi</span></div>
-      <div class="pf-digest-body rc-ai-text">${esc(aiCard.narrative || "")}</div>
-      ${more ? `<button type="button" class="btn btn-ghost btn-sm" data-rc="ai" style="margin-top: var(--sp-3);">${T("Strengths and watch-outs", "Strengths aur dhyan dene wali baatein")}</button>` : ""}
-    </div>
+    <section class="rc-remarks">
+      <h2 class="rc-sec-title">${T("Saathi's remarks", "Saathi ki remarks")}</h2>
+      <p class="rc-ai-text">${esc(aiCard.narrative || "")}</p>
+      ${more ? `<button type="button" class="rc-link" data-rc="ai">${T("Strengths and watch-outs", "Strengths aur dhyan dene wali baatein")}</button>` : ""}
+    </section>
   `;
 }
 
@@ -572,11 +649,3 @@ async function fetchAiCard(state, rc, input) {
   }
 }
 
-function mountAch(main) {
-  if (achUi) { achUi.mountAchievementsCard(main); return; }
-  import("../achievements/ui.js").then((m) => {
-    achUi = m;
-    const h = main.querySelector(".ach-rc");
-    if (h) { h.outerHTML = m.achievementsCardHtml(); m.mountAchievementsCard(main); }
-  }).catch(() => {});
-}

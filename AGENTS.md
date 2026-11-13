@@ -284,10 +284,14 @@ effort for A/B runs; unset to restore the per-op settings.
   Never add an achievement that counts trades or asks for daily trading.
 - **UI:** `js/achievements/ui.js` (toasts, list sheet, styles injected at
   runtime), started from `js/app.js` for owners only. The bell links to
-  `/report-card#achievements`; ui.js opens the list from that hash, so the
-  report card page has no achievements code (its 8 badges are unchanged;
-  `achievementsCardHtml`/`mountAchievementsCard` exist but are not wired in
-  yet: the owner decides when the report card shows them). Telemetry:
+  `/report-card#achievements`; ui.js opens the list from that hash. Since
+  13 Nov the report card shows the latest six medals for owner accounts
+  (reportCard.js imports ui.js lazily, only when isOwner()); everyone else
+  still sees the 8 old badges. List layout (owner asked for a redesign from
+  real apps): an 86-square tier strip (Khan Academy), "Next up" with bars
+  (Duolingo), the shelf of earned medals with a story under the tapped row
+  (Strava), "Still to earn" as outline medals (Apple Fitness); a tiered
+  medal prints its target on the face (Nike Run Club). Telemetry:
   web_events kind `achievement` (shown/opened/dismissed).
 - **Approval queue:** /a → Achievements. `op=ach-draft` (callLlm, op
   `ach-draft`, recorded in llm_usage) drafts 3-4 seasonal concepts for ONE
@@ -368,8 +372,12 @@ effort for A/B runs; unset to restore the per-op settings.
   from tradeNote.js and aiExplainer.js; migration `2026-11-13a`). Holdings at
   real prices only, else cost.
 - Copy (English + Hinglish): `js/coach/reportCardCopy.js`. Page:
-  `js/pages/reportCard.js` (tiles + pop-ups; badges unchanged until
-  achievements). The AI card gets the scored card as text (`card` in the
+  `js/pages/reportCard.js`. Layout since 13 Nov is a school mark sheet,
+  not a card grid: hero (grade, equal-width grade scale with the student's
+  pin, the six parts as a hexagon), then one row per part (marks, its own
+  grade, "counts for N%", the remark), then "Saathi's remarks". Colour
+  follows the grade (A+/A green, B+ to C amber, D red). No all-caps
+  labels, no ring. The AI card gets the scored card as text (`card` in the
   `report-card` op; effort unchanged).
 - Tests: `scripts/test-report-card.mjs` (in perf-syntax.yml, with
   test-bias-core.mjs). v3 calibrated on 987 real graded users (5+ trades) on
