@@ -35,34 +35,6 @@ export function mountNav() {
   const root = document.getElementById("nav-root");
   if (!root) return;
   let lastStateKey = null;
-  render();
-  subscribe((state) => {
-    if (navStateKey(state) !== lastStateKey) render();
-  });
-  window.addEventListener("ss:navigate", updateActiveLinks);
-
-  // Click-outside closes user dropdown
-  document.addEventListener("click", (e) => {
-    const dd = root.querySelector(".dropdown");
-    if (dd && !dd.contains(e.target)) dd.classList.remove("open");
-    const drawer = document.getElementById("nav-drawer");
-    if (drawer?.classList.contains("open") &&
-        !drawer.querySelector(".nav-drawer-panel").contains(e.target) &&
-        !e.target.closest(".nav-burger") &&
-        !e.target.closest("[data-mobile-menu]")) {
-      // ^ also exclude the mobile bottom-nav "More" button — otherwise the
-      // same click that opens the drawer bubbles up and closes it
-      // immediately, making the button appear broken.
-      closeDrawer();
-    }
-  });
-
-  // Close drawer on escape + on hashchange
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeDrawer();
-  });
-  window.addEventListener("ss:navigate", closeDrawer);
-
   // The bar fits itself to the space it really has (13 Nov). Width breakpoints
   // kept failing: 1920px at 150% zoom is a 1280px page, and the same page
   // needs more room on one machine than another (fonts, browser font size,
@@ -95,6 +67,34 @@ export function mountNav() {
   fitObserver?.observe(root);
   window.addEventListener("resize", queueFit);
   document.fonts?.ready?.then(queueFit).catch(() => {});
+  // (Set up above the first render: render() calls fitNav.)
+  render();
+  subscribe((state) => {
+    if (navStateKey(state) !== lastStateKey) render();
+  });
+  window.addEventListener("ss:navigate", updateActiveLinks);
+
+  // Click-outside closes user dropdown
+  document.addEventListener("click", (e) => {
+    const dd = root.querySelector(".dropdown");
+    if (dd && !dd.contains(e.target)) dd.classList.remove("open");
+    const drawer = document.getElementById("nav-drawer");
+    if (drawer?.classList.contains("open") &&
+        !drawer.querySelector(".nav-drawer-panel").contains(e.target) &&
+        !e.target.closest(".nav-burger") &&
+        !e.target.closest("[data-mobile-menu]")) {
+      // ^ also exclude the mobile bottom-nav "More" button — otherwise the
+      // same click that opens the drawer bubbles up and closes it
+      // immediately, making the button appear broken.
+      closeDrawer();
+    }
+  });
+
+  // Close drawer on escape + on hashchange
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeDrawer();
+  });
+  window.addEventListener("ss:navigate", closeDrawer);
 
   function render() {
     const state = getState();
