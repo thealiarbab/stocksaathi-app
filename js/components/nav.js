@@ -63,6 +63,39 @@ export function mountNav() {
   });
   window.addEventListener("ss:navigate", closeDrawer);
 
+  // The bar fits itself to the space it really has (13 Nov). Width breakpoints
+  // kept failing: 1920px at 150% zoom is a 1280px page, and the same page
+  // needs more room on one machine than another (fonts, browser font size,
+  // a bigger portfolio number, the bell's badge). So nothing is decided by
+  // screen width any more: after each render, resize or font load the bar
+  // starts with everything shown and drops the least useful piece, one step
+  // at a time, until nothing overflows. Steps (CSS: .nav-inner[data-fit]):
+  //   1 shortcut hint  2 NSE pill  3 tighter links  4 portfolio pill
+  //   5 "Ask" label    6 links move into the menu button
+  const FIT_MAX = 6;
+  const overflowing = (inner) => {
+    const links = inner.querySelector(".nav-links");
+    return inner.scrollWidth > inner.clientWidth + 1 ||
+      (links && links.offsetParent !== null && links.scrollWidth > links.clientWidth + 1);
+  };
+  function fitNav() {
+    const inner = root.querySelector(".nav-inner");
+    if (!inner) return;
+    let level = 0;
+    inner.dataset.fit = "0";
+    while (level < FIT_MAX && overflowing(inner)) inner.dataset.fit = String(++level);
+  }
+  let fitQueued = false;
+  const queueFit = () => {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(() => { fitQueued = false; fitNav(); });
+  };
+  const fitObserver = typeof ResizeObserver === "function" ? new ResizeObserver(queueFit) : null;
+  fitObserver?.observe(root);
+  window.addEventListener("resize", queueFit);
+  document.fonts?.ready?.then(queueFit).catch(() => {});
+
   function render() {
     const state = getState();
     lastStateKey = navStateKey(state);
@@ -226,6 +259,15 @@ export function mountNav() {
 
     ensureDrawer();
     renderDrawer(state, allLinks, seg, pfValue, ms);
+
+    // Fit now (before paint, no flash) and again whenever the right side
+    // changes size: the bell mounts later, the portfolio number changes.
+    fitNav();
+    if (fitObserver) {
+      if (render.right) fitObserver.unobserve(render.right);
+      render.right = root.querySelector(".nav-right");
+      if (render.right) fitObserver.observe(render.right);
+    }
 
     // Notification bell (owner preview): loaded only for those accounts.
     const bellSlot = root.querySelector("#nav-bell-slot");

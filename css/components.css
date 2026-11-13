@@ -113,10 +113,8 @@
    informational items (portfolio cash pill + NSE live-status pill) to
    keep the primary navigation readable. At ≥ 1480 px there's room for
    everything again, so they come back. */
-@media (min-width: 1280px) and (max-width: 1479px) {
-  body.coach-docked .nav-cash { display: none; }
-  body.coach-docked .market-status { display: none; }
-}
+/* (The docked-coach cut-off that lived here is now handled by nav.js
+   fitNav(), which measures the bar instead of guessing from screen width.) */
 
 /* Mobile bottom nav — fixed thumb-zone navigation bar shown only on phones.
    Replaces the old "must tap burger → drawer → item" 3-tap path with a
@@ -5141,23 +5139,40 @@ body.chart-fs-open #main { animation: none; transform: none; }
 @media (min-width: 1024px) and (max-width: 1199px) {
   .portfolio-grid { grid-template-columns: 1fr; }
 }
-/* Top bar: links never wrap to two lines; the NSE pill, cash pill and the
-   shortcut hint step aside first. */
+/* Top bar fits itself (13 Nov). nav.js fitNav() measures the bar after every
+   render, resize, zoom change and font load, and sets data-fit 0-6 on
+   .nav-inner: the lowest step at which nothing overflows. No screen-width
+   cut-offs above the phone layout: they broke at zoom levels nobody tested
+   (1920px at 150% = a 1280px page, with ~20px to spare in one font and
+   overflowing in another).
+   Nothing in the bar wraps or shrinks, so overflow is measurable and the
+   right-hand controls can never be pushed off the edge; the links row is
+   the only part that can be squeezed, and it scrolls rather than spills
+   while the next step is applied. */
 .nav-link { white-space: nowrap; }
-@media (min-width: 821px) and (max-width: 1279px) {
-  .nav-inner .market-status { display: none; }
-  .nav-link { padding: 8px 10px; }
-}
-@media (min-width: 821px) and (max-width: 1099px) {
-  .nav-cash { display: none; }
-  .nav-inner kbd { display: none; }
+.nav-inner > .brand-logo, .nav-right, .nav-right > * { flex-shrink: 0; }
+.nav-right > * { white-space: nowrap; }
+/* padding/margin pair: room for focus rings inside the scroll box */
+.nav-links { min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 4px 2px; margin: -4px -2px; }
+.nav-links::-webkit-scrollbar { display: none; }
+@media (min-width: 821px) {
+  .nav-inner[data-fit="1"] .nav-cmdk-kbd,
+  .nav-inner[data-fit="2"] .nav-cmdk-kbd, .nav-inner[data-fit="2"] .market-status,
+  .nav-inner[data-fit="3"] .nav-cmdk-kbd, .nav-inner[data-fit="3"] .market-status,
+  .nav-inner[data-fit="4"] .nav-cmdk-kbd, .nav-inner[data-fit="4"] .market-status, .nav-inner[data-fit="4"] .nav-cash,
+  .nav-inner[data-fit="5"] .nav-cmdk-kbd, .nav-inner[data-fit="5"] .market-status, .nav-inner[data-fit="5"] .nav-cash, .nav-inner[data-fit="5"] .nav-cmdk-label,
+  .nav-inner[data-fit="6"] .nav-cmdk-kbd, .nav-inner[data-fit="6"] .market-status, .nav-inner[data-fit="6"] .nav-cash, .nav-inner[data-fit="6"] .nav-cmdk-label,
+  .nav-inner[data-fit="6"] .nav-links { display: none; }
+  .nav-inner[data-fit="3"] .nav-link, .nav-inner[data-fit="4"] .nav-link,
+  .nav-inner[data-fit="5"] .nav-link { padding: 8px 8px; }
+  .nav-inner[data-fit="6"] .nav-burger { display: grid; }
 }
 
-/* Phones, signed in (17 Oct): the NSE pill was meant to hide below 820px,
-   but the later `.market-status { display: inline-flex }` won on equal
-   specificity, so the top bar ran to ~460px and pushed the menu button off
-   a 390px screen. Stock pages carry their own market pill. */
-@media (max-width: 1279px) {
+/* Phones (17 Oct): the NSE pill must stay hidden below 820px; the later
+   `.market-status { display: inline-flex }` won on equal specificity and
+   pushed the menu button off a 390px screen. Stock pages carry their own
+   market pill. */
+@media (max-width: 820px) {
   .nav-inner .market-status { display: none; }
 }
 /* A large portfolio total (or a long percentage) can't widen the hero past
@@ -5584,12 +5599,6 @@ button.ss-pill-x:hover { border-color: var(--brand); }
 a.feature-card { display: block; color: inherit; text-decoration: none; }
 a.feature-card h3 { color: var(--text); }
 .landing-guides-cta { margin-top: var(--sp-5); }
-/* Six top links when signed in (Guides added 7 Nov): tighten between 821px
-   and 959px so the bar never runs past the screen edge. */
-@media (min-width: 821px) and (max-width: 959px) {
-  .nav-link { padding: 8px 6px; }
-  .nav-cmdk-label, .nav-cmdk-kbd { display: none; }
-}
 
 /* Register: terms box + inline missing-field marks (Nov 2026). The browser's
    own "please tick this box" bubble was the #1 sign-up blocker (89 errors in
