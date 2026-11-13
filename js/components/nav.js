@@ -382,6 +382,7 @@ function navStateKey(state) {
     state.user?.id,
     state.user?.displayName,
     state.user?.username,
+    state.user?.isAdmin,      // owners get the Achievements menu item
     state.portfolio?.cashPaise,
     computeHoldingsValue(state),
     resolvedTheme(state.settings),
