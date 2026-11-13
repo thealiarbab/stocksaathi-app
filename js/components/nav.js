@@ -65,8 +65,11 @@ export function mountNav() {
   };
   const fitObserver = typeof ResizeObserver === "function" ? new ResizeObserver(queueFit) : null;
   fitObserver?.observe(root);
-  window.addEventListener("resize", queueFit);
-  document.fonts?.ready?.then(queueFit).catch(() => {});
+  // Zoom changes fire "resize": fit straight away (at most 7 layouts). The
+  // observer above waits a frame, since changing the bar inside its own
+  // callback logs a "ResizeObserver loop" error.
+  window.addEventListener("resize", fitNav);
+  document.fonts?.ready?.then(fitNav).catch(() => {});
   // (Set up above the first render: render() calls fitNav.)
   render();
   subscribe((state) => {
