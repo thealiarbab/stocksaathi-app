@@ -58,6 +58,10 @@ def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
     # BSE-only listings 404 on ".NS" — try NSE first, then ".BO". See the
     # same fallback in quote.py / quotes.py / live-quote.py.
     tickers = [symbol] if "." in symbol else [f"{symbol}.NS", f"{symbol}.BO"]
+    # "Yahoo answered: no such symbol / no candles" is not an outage. Count
+    # the real failures (timeout, connection, 429, 5xx) apart so a symbol
+    # Yahoo does not carry gets a 404, and only a real failure gets 502.
+    failed = False
     for ticker, base in ((t, b) for t in tickers for b in YAHOO_HOSTS):
         if period1 and period2:
             url = f"{base}/{url_quote(ticker, safe='.')}?interval={interval}&period1={int(period1)}&period2={int(period2)}"
@@ -71,7 +75,12 @@ def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
             })
             with urllib.request.urlopen(req, timeout=8) as r:
                 data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                failed = True
+            continue
         except Exception:
+            failed = True
             continue
         result = ((data.get("chart") or {}).get("result") or [None])[0]
         if not result:
@@ -114,7 +123,7 @@ def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
             "exchange": meta.get("exchangeName") or "",
             "host": base.split("//")[1].split("/")[0],
         }
-    return None
+    return {"error": "yahoo_unreachable" if failed else "no_data"}
 
 
 class handler(BaseHTTPRequestHandler):
@@ -186,8 +195,9 @@ class handler(BaseHTTPRequestHandler):
                 return
 
         data = fetch_yahoo(symbol, range_, interval, period1=period1, period2=period2)
-        if not data:
-            self._json(502, {"ok": False, "error": "yahoo_unreachable"})
+        if "error" in data:
+            code = 404 if data["error"] == "no_data" else 502
+            self._json(code, {"ok": False, "error": data["error"]})
             return
 
         import time
