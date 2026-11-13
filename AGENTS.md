@@ -7,10 +7,9 @@ Vanilla-JS SPA + Python serverless (Vercel) + Postgres (Supabase). Virtual-money
 Handoff notes were kept OUTSIDE git (`docs/HANDOFF_claude-session-jolly-ptolemy_chat-notifications-portfolio_2026-10-19.md`, gitignored, owner has a copy). Summary: owner's standing rules, his UX
 decisions, the pending queue IN HIS ORDER, what shipped, root causes, and
 tooling traps. Done since: #6 Settings redesign (24 Oct), #1 bias detectors
-+ after-trade note (24 Oct). Next: #2 report card algorithm (in progress,
-uncommitted on the PC as of 13 Nov), #3 achievements (DB live for owners 13 Nov,
-code in achievements-ship/ until pushed). Commit 27b1c155 still needs his approval for a
-history rewrite.
++ after-trade note (24 Oct), #2 report card v2 (13 Nov, see below), #3
+achievements (13 Nov, owner accounts only, see "Achievements"). Commit 27b1c155
+still needs his approval for a history rewrite.
 
 ## Stack
 - **Frontend:** vanilla JS modules (no framework). Source runs unbuilt in local
@@ -283,9 +282,12 @@ effort for A/B runs; unset to restore the per-op settings.
   pins the JS side. Catalogue changes: `node scripts/achievements-seed.mjs`
   prints the upsert for a new migration (status is never overwritten).
   Never add an achievement that counts trades or asks for daily trading.
-- **UI:** `js/achievements/ui.js` (toasts, list sheet, report card card,
-  styles injected at runtime), started from `js/app.js` for owners only;
-  report card shows it instead of the 8 badges for owners. Telemetry:
+- **UI:** `js/achievements/ui.js` (toasts, list sheet, styles injected at
+  runtime), started from `js/app.js` for owners only. The bell links to
+  `/report-card#achievements`; ui.js opens the list from that hash, so the
+  report card page has no achievements code (its 8 badges are unchanged;
+  `achievementsCardHtml`/`mountAchievementsCard` exist but are not wired in
+  yet: the owner decides when the report card shows them). Telemetry:
   web_events kind `achievement` (shown/opened/dismissed).
 - **Approval queue:** /a → Achievements. `op=ach-draft` (callLlm, op
   `ach-draft`, recorded in llm_usage) drafts 3-4 seasonal concepts for ONE
@@ -300,7 +302,7 @@ effort for A/B runs; unset to restore the per-op settings.
   nothing else changes. Diwali 2027 and Budget 2028 are not in yet.
 - **Rollout:** /a switch sets rollout = 'all' (server awards everyone on the
   next nightly pass, one summary each), AND lift the `isAdmin`/`isOwner()`
-  checks in `js/app.js` and `js/pages/reportCard.js`. Preview samples for
+  check in `js/app.js` (and wire the card into the report card if wanted). Preview samples for
   the owners are `seeded = true`; a real award replaces a sample.
 
 ## Behaviour detectors and the after-trade note (rewritten 24 Oct)
@@ -322,10 +324,50 @@ effort for A/B runs; unset to restore the per-op settings.
   (market, AMO or limit), `components/tradeNote.js` shows a quiet note from
   the coach button, with a "What is …?" explainer sheet (English/Hinglish,
   "in your case" chips, one question, Ask Saathi). Rationed per pattern in
-  localStorage `ss.biasnote.v1`. Telemetry: user_events kind `bias_note`
-  (shown/opened/dismissed/ask). Copy: `js/coach/biasCopy.js` (reflection
+  localStorage `ss.biasnote.v1`. Telemetry: `track("bias_note", ...)` is
+  called, but `bias_note` is in neither `track.js` KINDS nor the
+  `user_events` CHECK, so those events are dropped (found 13 Nov, not fixed).
+  The detector results themselves are stored on the trade
+  (`transactions.bias_flags`). Copy: `js/coach/biasCopy.js` (reflection
   only, never advice). The owner floated "grey out the screen" with the
   note: NOT built, confirm with him first.
+
+## Report card v2 (13 Nov 2026)
+
+- Score: `js/coach/reportCardCore.js`, pure with no imports (like biasCore).
+  Pillars and weights: Discipline 45 (detector flags on the user's own
+  trades, weighted by pattern, severity and a 45-day half-life, divided by
+  how much they trade, pulled to the middle until the record is 28 days
+  old), Diversification 25 (biggest stock, biggest sector, effective number
+  of positions with funds/ETFs counting as 5, idle cash judged gently after
+  30 days), Learning and activity 20 (8 steady weeks: showing up, crash
+  replays, Saathi questions, explainers read; trade count never counts),
+  Against the Nifty 50 10 (same rupees on the same days in the index, FIFO;
+  hidden before 28 days and 10 trades). A pillar without enough data is
+  locked and says what unlocks it; its weight goes to the others. No grade
+  before 5 trades. Fixed cut points A+ 83, A 77, B+ 70, B 63, C 53.
+- Inputs: `js/coach/biasLedger.js` (stored flags for taps since 24 Oct; for
+  matcher fills and older trades it re-runs the ledger-only detectors:
+  churning, averaging down, overtrading), `js/data/indexCloses.js` (real
+  Nifty closes via `/api/ai?op=history&symbol=^NSEI`; `/api/history` cannot
+  do indices, it appends `.NS`), `js/features/learning.js` + RPC
+  `report_card_activity()` and table `learn_events` (explainer reads, logged
+  from tradeNote.js and aiExplainer.js; migration `2026-11-13a`). Holdings at
+  real prices only, else cost.
+- Copy (English + Hinglish): `js/coach/reportCardCopy.js`. Page:
+  `js/pages/reportCard.js` (tiles + pop-ups; badges unchanged until
+  achievements). The AI card gets the scored card as text (`card` in the
+  `report-card` op; effort unchanged).
+- Tests: `scripts/test-report-card.mjs` (in perf-syntax.yml, with
+  test-bias-core.mjs). Calibrated on 957 real graded users (5+ trades) on
+  13 Nov: A+ 6%, A 15%, B+ 28%, B 25%, C 20%, D 7% (v1 had 69% B+ and no C/D,
+  because its bias counts were always 0 after a reload). To re-measure,
+  export trades/holdings/activity per user (anonymised), feed them through
+  the same modules and look at the score percentiles before moving a cut
+  point. Never make the cut points a live curve.
+- Known gaps: `computeReportCardServerSide` in api/ai.js (admin user view)
+  is still v1; news reads are not counted; panic/chase/disposition are not
+  judged for matcher fills or pre-24-Oct trades (they need price history).
 
 ## User notices
 

@@ -18,7 +18,7 @@
 //   op=trade-nudge        POST { action, symbol, name, sector, qty, priceRupees, portfolio } -> { nudge, severity }
 //   op=market-mood        POST { sectors, asOf }          -> { narrative, temperature }
 //   op=market-search      POST { query, candidates }      -> { matches, rationale }
-//   op=report-card        POST { totalTrades, winRate, biggestWin, biggestLoss, avgHoldDays, biasFlags, portfolioReturnPct, topSectors, startedAt } -> { narrative, strengths, watchouts }
+//   op=report-card        POST { totalTrades, winRate, wins, losses, evens, biggestWin, biggestLoss, avgHoldDays, biasFlags, portfolioReturnPct, topSectors, startedAt, card: [lines of the scored card] } -> { narrative, strengths, watchouts }
 //   op=crash-suggestions  GET                             -> { suggestions }
 //   op=command            POST { query, context }         -> { action, response, target?, query?, symbol?, side?, qty? }
 // =============================================================================
@@ -1011,20 +1011,33 @@ async function opMarketSearch(req, origin) {
 // --- Report card narrative ---------------------------------------------------
 const SYSTEM_REPORT = `You are Saathi writing a student's behavioural-investing report card. From the stats and bias flags return strict JSON:
 { "narrative": "<80-120 words, second person, specific to the numbers>", "strengths": ["3 ≤10-word items"], "watchouts": ["3 ≤10-word items"] }
-Quote the actual numbers. 3 strengths + 3 watch-outs, substantive not fluff. No emojis, no markdown, no buy/sell advice, teen-readable English, dry-honest > diplomatic.`;
+Quote the actual numbers. 3 strengths + 3 watch-outs, substantive not fluff. No emojis, no markdown, no buy/sell advice, teen-readable English, dry-honest > diplomatic.
+When a "Report card on screen" section is given, it is what the student sees next to your text: the grade, each part's score out of 100 and the facts behind it. Agree with it. Never state a different grade or score, never invent a part, and build strengths from the high parts and watch-outs from the low ones. A part marked locked has too little history: say what unlocks it, do not call it a weakness. If the grade is "not graded yet", say so plainly and do not guess one.`;
+
+// The scored card the page shows (js/coach/reportCardCore.js), as plain lines.
+// Cleaned here: it is prompt text from a browser.
+function reportCardLines(body) {
+  const lines = Array.isArray(body.card) ? body.card : [];
+  return lines.filter((x) => typeof x === "string" && x.trim()).slice(0, 24)
+    .map((x) => x.replace(/[\u0000-\u001f]+/g, " ").slice(0, 240));
+}
 
 async function opReportCard(req, origin) {
   let body; try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const card = reportCardLines(body);
+  const closed = [body.wins, body.losses, body.evens].every((x) => Number.isFinite(Number(x)))
+    ? ` (${Number(body.wins)} won, ${Number(body.losses)} lost, ${Number(body.evens)} even; closed positions only)` : "";
   const userMsg = [
     `Started: ${body.startedAt || "recently"}`,
     `Total trades: ${body.totalTrades || 0}`,
-    `Win rate: ${((body.winRate || 0) * 100).toFixed(0)}%`,
+    `Win rate: ${((body.winRate || 0) * 100).toFixed(0)}%${closed}`,
     `Biggest win: ₹${body.biggestWin || 0}`,
     `Biggest loss: ₹${body.biggestLoss || 0}`,
     `Avg hold time: ${body.avgHoldDays || 0} days`,
     `Portfolio return: ${body.portfolioReturnPct >= 0 ? "+" : ""}${Number(body.portfolioReturnPct || 0).toFixed(2)}%`,
     `Top sectors: ${(body.topSectors || []).join(", ") || "none yet"}`,
     `Bias flags raised: ${(body.biasFlags || []).length ? (body.biasFlags || []).join(", ") : "none"}`,
+    ...(card.length ? ["", "Report card on screen:", ...card] : []),
   ].join("\n");
   try {
     const text = await callLlm({ op: "report-card", hinglish: hinglishOf(req),
@@ -1923,7 +1936,7 @@ async function opAchDraft(req, origin) {
     const text = await callLlm({
       op: "ach-draft", feature: "achievements",
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      max_tokens: 1400, temperature: 0.7, response_format: { type: "json_object" }, profile: "json", effort: "medium",
+      max_tokens: 1400, temperature: 0.7, response_format: { type: "json_object" }, profile: "json", effort: "high",
     });
     parsed = parseJsonLoose(text);
   } catch (e) {

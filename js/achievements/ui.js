@@ -400,7 +400,17 @@ export function startAchievements() {
   window.addEventListener("ss:navigate", () => {
     const was = lastPath; lastPath = location.pathname;
     if (/^\/(crash-replay|chat)/.test(was)) setTimeout(checkNow, 1500);
+    setTimeout(openFromHash, 300);
   });
+  // The bell links to /report-card#achievements: open the list here, so the
+  // report card page itself needs no achievements code.
+  window.addEventListener("hashchange", openFromHash);
+  setTimeout(openFromHash, 300);
+}
+function openFromHash() {
+  if (location.hash !== "#achievements" || _overlay) return;
+  history.replaceState(history.state, "", location.pathname + location.search);
+  openAchievements();
 }
 async function checkNow() {
   try {
