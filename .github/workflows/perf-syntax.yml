@@ -75,6 +75,16 @@ jobs:
       - name: Quote fetch terminates for unpriced symbols
         run: node scripts/test-quote-loop.mjs
 
+      # The behaviour detectors, on the real trades that broke the old ones.
+      - name: Behaviour detectors — biasCore regression suite
+        run: node scripts/test-bias-core.mjs
+
+      # The report card score: edge cases (no trades, only buys, all evens,
+      # one huge position, all cash, a split in the price history), the rules
+      # it is built on, and every sentence in English and Hinglish.
+      - name: Report card — score, ledger and copy
+        run: node scripts/test-report-card.mjs
+
   prompt-version-sync:
     name: CURRENT_PROMPT_VERSION matches across customCrash.js and pregen-crashes.mjs
     runs-on: ubuntu-latest

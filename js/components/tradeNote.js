@@ -19,6 +19,7 @@ import { biasCopy } from "../coach/biasCopy.js";
 import { NOTE_THRESHOLD } from "../coach/biasCore.js";
 import { onBackdropClick } from "./backdrop.js";
 import { track } from "../features/track.js";
+import { logLearn } from "../features/learning.js";
 
 const SEEN_KEY = "ss.biasnote.v1";
 const H = 3_600_000;
@@ -96,6 +97,7 @@ export function showTradeNote(result, { name } = {}) {
   card.querySelector(".tn-x").addEventListener("click", () => { track("bias_note", result.evidence?.symbol || null, { bias: result.bias, action: "dismissed" }); closeNote(); });
   card.querySelector(".tn-learn").addEventListener("click", () => {
     track("bias_note", result.evidence?.symbol || null, { bias: result.bias, action: "opened" });
+    logLearn("bias", result.bias);          // counts as an explainer read on the report card
     closeNote();
     openExplainer(result, { name, hi });
   });

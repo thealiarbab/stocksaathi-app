@@ -7,9 +7,10 @@ Vanilla-JS SPA + Python serverless (Vercel) + Postgres (Supabase). Virtual-money
 Handoff notes were kept OUTSIDE git (`docs/HANDOFF_claude-session-jolly-ptolemy_chat-notifications-portfolio_2026-10-19.md`, gitignored, owner has a copy). Summary: owner's standing rules, his UX
 decisions, the pending queue IN HIS ORDER, what shipped, root causes, and
 tooling traps. Done since: #6 Settings redesign (24 Oct), #1 bias detectors
-+ after-trade note (24 Oct). Next: #2 report card algorithm, then #3
-achievements (80+/seasonal). Commit 27b1c155 still needs his approval for a
-history rewrite.
++ after-trade note (24 Oct), #2 report card v2 (13 Nov, see below). Next: #3
+achievements (80+/seasonal; a 13 Nov run left its database part live for the
+owner accounts and its code uncommitted). Commit 27b1c155 still needs his
+approval for a history rewrite.
 
 ## Stack
 - **Frontend:** vanilla JS modules (no framework). Source runs unbuilt in local
@@ -276,10 +277,50 @@ effort for A/B runs; unset to restore the per-op settings.
   (market, AMO or limit), `components/tradeNote.js` shows a quiet note from
   the coach button, with a "What is …?" explainer sheet (English/Hinglish,
   "in your case" chips, one question, Ask Saathi). Rationed per pattern in
-  localStorage `ss.biasnote.v1`. Telemetry: user_events kind `bias_note`
-  (shown/opened/dismissed/ask). Copy: `js/coach/biasCopy.js` (reflection
+  localStorage `ss.biasnote.v1`. Telemetry: `track("bias_note", ...)` is
+  called, but `bias_note` is in neither `track.js` KINDS nor the
+  `user_events` CHECK, so those events are dropped (found 13 Nov, not fixed).
+  The detector results themselves are stored on the trade
+  (`transactions.bias_flags`). Copy: `js/coach/biasCopy.js` (reflection
   only, never advice). The owner floated "grey out the screen" with the
   note: NOT built, confirm with him first.
+
+## Report card v2 (13 Nov 2026)
+
+- Score: `js/coach/reportCardCore.js`, pure with no imports (like biasCore).
+  Pillars and weights: Discipline 45 (detector flags on the user's own
+  trades, weighted by pattern, severity and a 45-day half-life, divided by
+  how much they trade, pulled to the middle until the record is 28 days
+  old), Diversification 25 (biggest stock, biggest sector, effective number
+  of positions with funds/ETFs counting as 5, idle cash judged gently after
+  30 days), Learning and activity 20 (8 steady weeks: showing up, crash
+  replays, Saathi questions, explainers read; trade count never counts),
+  Against the Nifty 50 10 (same rupees on the same days in the index, FIFO;
+  hidden before 28 days and 10 trades). A pillar without enough data is
+  locked and says what unlocks it; its weight goes to the others. No grade
+  before 5 trades. Fixed cut points A+ 83, A 77, B+ 70, B 63, C 53.
+- Inputs: `js/coach/biasLedger.js` (stored flags for taps since 24 Oct; for
+  matcher fills and older trades it re-runs the ledger-only detectors:
+  churning, averaging down, overtrading), `js/data/indexCloses.js` (real
+  Nifty closes via `/api/ai?op=history&symbol=^NSEI`; `/api/history` cannot
+  do indices, it appends `.NS`), `js/features/learning.js` + RPC
+  `report_card_activity()` and table `learn_events` (explainer reads, logged
+  from tradeNote.js and aiExplainer.js; migration `2026-11-13a`). Holdings at
+  real prices only, else cost.
+- Copy (English + Hinglish): `js/coach/reportCardCopy.js`. Page:
+  `js/pages/reportCard.js` (tiles + pop-ups; badges unchanged until
+  achievements). The AI card gets the scored card as text (`card` in the
+  `report-card` op; effort unchanged).
+- Tests: `scripts/test-report-card.mjs` (in perf-syntax.yml, with
+  test-bias-core.mjs). Calibrated on 957 real graded users (5+ trades) on
+  13 Nov: A+ 6%, A 15%, B+ 28%, B 25%, C 20%, D 7% (v1 had 69% B+ and no C/D,
+  because its bias counts were always 0 after a reload). To re-measure,
+  export trades/holdings/activity per user (anonymised), feed them through
+  the same modules and look at the score percentiles before moving a cut
+  point. Never make the cut points a live curve.
+- Known gaps: `computeReportCardServerSide` in api/ai.js (admin user view)
+  is still v1; news reads are not counted; panic/chase/disposition are not
+  judged for matcher fills or pre-24-Oct trades (they need price history).
 
 ## User notices
 

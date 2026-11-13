@@ -1,0 +1,440 @@
+// scripts/test-report-card.mjs — the report card score (js/coach/reportCardCore.js),
+// the trade ledger that feeds it (js/coach/biasLedger.js) and every sentence
+// it can show, in both languages (js/coach/reportCardCopy.js).
+//
+// These are the app's own modules, not copies. The cases are the ones the
+// brief names (no trades, only buys, all evens, one huge position, all cash,
+// a split-adjusted price mismatch) plus the rules the score was built on:
+// a flag counts against how much you trade, a locked part never lowers a
+// grade, the Nifty part stays hidden until 4 weeks or 10 trades, and one
+// day's price move cannot swing the grade.
+//
+// The grade cut points themselves were set on real users (see AGENTS.md,
+// "Report card v2"); this file only guards the logic.
+//
+// Run:  node scripts/test-report-card.mjs
+import * as core from "../js/coach/reportCardCore.js";
+import * as copy from "../js/coach/reportCardCopy.js";
+import { tradesWithFlags, DETECTOR_CUTOFF_MS } from "../js/coach/biasLedger.js";
+import { computeTradeStats } from "../js/data/tradeStats.js";
+
+const DAY = 86_400_000;
+const WEEK = 7 * DAY;
+const NOW = Date.UTC(2026, 10, 13, 6, 0);          // Fri 13 Nov 2026, 11:30 IST
+let pass = 0, fail = 0;
+const ok = (name, cond, extra = "") => { if (cond) pass++; else { fail++; console.log("FAIL", name, extra); } };
+const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+
+// ---- Builders ---------------------------------------------------------------------
+const tr = (daysAgo, symbol, side, qty, px, flags = [], auto = false) => ({ ts: NOW - daysAgo * DAY, symbol, side, qty, pricePaise: px, flags, auto });
+const flag = (bias, severity = 0.7, evidence = {}) => ({ bias, severity, evidence });
+const pos = (symbol, valuePaise, sector = "Banking", kind = "STOCK") => ({ symbol, name: symbol + " Ltd", valuePaise, kind, sector });
+const base = (o = {}) => ({
+  now: NOW, accountCreatedAt: NOW - 60 * DAY, trades: [], stats: null,
+  portfolio: { cashPaise: 10_000_000, positions: [] }, activity: null, market: null, ...o,
+});
+// n clean trades spread evenly from `fromDays` ago to `toDays` ago, buys and sells alternating.
+const spread = (n, fromDays = 40, toDays = 1, sym = "S") => Array.from({ length: n }, (_, i) =>
+  tr(fromDays - (i * (fromDays - toDays)) / Math.max(1, n - 1), sym + (i % 7), i % 2 ? "SELL" : "BUY", 1, 10000));
+const weeksOf = (fn, n = 8) => Array.from({ length: n }, (_, i) => [core.istWeekStart(NOW - i * WEEK), ...fn(i)]);
+
+// Every card scored here is kept, so the copy checks at the end run over all of them.
+const seen = [];
+const score = (input) => { const rc = core.scoreReportCard(input); seen.push(rc); return rc; };
+// No NaN, Infinity or undefined anywhere in a result (JSON would hide NaN as null).
+function clean(x, pathName = "rc") {
+  if (typeof x === "number") return Number.isFinite(x) ? null : pathName;
+  if (x === undefined) return pathName;
+  if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) { const bad = clean(v, `${pathName}.${k}`); if (bad) return bad; }
+  return null;
+}
+
+// ---- 1. No trades -------------------------------------------------------------------
+{
+  const rc = score(base());
+  ok("no trades: not graded", rc.overall.state === "building" && rc.overall.grade === null && rc.overall.score === null);
+  ok("no trades: discipline says what unlocks it", rc.pillars.discipline.state === "locked" && rc.pillars.discipline.unlock.have === 0 && rc.pillars.discipline.unlock.need === 5);
+  ok("no trades: diversification locked, not zero", rc.pillars.diversification.state === "locked" && rc.pillars.diversification.unlock.key === "no_holdings" && rc.pillars.diversification.score === undefined);
+  ok("no trades: learning waits for its data", rc.pillars.learning.state === "pending");
+  ok("no trades: Nifty part hidden", rc.pillars.market.state === "hidden");
+  ok("no trades: summary names the 5 trades", /5 trades/.test(copy.overallSummary(rc.overall)) && /5 trades/.test(copy.overallSummary(rc.overall, true)));
+
+  const fresh = score(base({ accountCreatedAt: NOW - 3 * DAY, activity: { weeks: [] } }));
+  ok("new account, nothing done: learning locked with a count", fresh.pillars.learning.state === "locked" && fresh.pillars.learning.unlock.have === 0 && fresh.pillars.learning.unlock.need === 3);
+
+  const empty = score({});
+  ok("empty input does not throw or grade", empty.overall.state === "building" && clean(empty.overall) === null);
+}
+
+// ---- 2. Under 5 trades: never a grade, however bad ------------------------------------
+{
+  const trades = [0, 1, 2, 3].map((d) => tr(d + 1, "X", "SELL", 5, 10000, [flag("panic_sell", 1)]));
+  const rc = score(base({ trades }));
+  ok("4 flagged trades: still not graded", rc.overall.state === "building" && rc.overall.grade === null && rc.pillars.discipline.unlock.have === 4);
+}
+
+// ---- 3. Only buys ---------------------------------------------------------------------
+{
+  const trades = [40, 33, 26, 19, 12, 5].map((d, i) => tr(d, "B" + i, "BUY", 10, 50000));
+  const positions = trades.map((t, i) => pos(t.symbol, 500_000, ["Banking", "IT", "Pharma", "Auto", "FMCG", "Energy"][i]));
+  const rc = score(base({ trades, portfolio: { cashPaise: 500_000, positions } }));
+  ok("only buys: graded, nothing broken", rc.overall.state === "graded" && clean(rc) === null, clean(rc) || "");
+  ok("only buys: clean record scores 100 once it is 4 weeks old", rc.pillars.discipline.score === 100 && rc.pillars.discipline.facts[0].key === "clean");
+  ok("only buys: Nifty part waits for data, is not scored as zero", rc.pillars.market.state === "pending" && rc.pillars.market.share === 0);
+
+  // Stats (wins, losses, win rate) are context only: they never move the score.
+  const a = score(base({ trades, stats: computeTradeStats([]) }));
+  const b = score(base({ trades, stats: { wins: 0, losses: 99, evens: 0, winRate: 0, realisedPaise: -9e9 } }));
+  ok("win rate and realised loss never change the score", a.overall.score === b.overall.score && a.pillars.discipline.score === b.pillars.discipline.score);
+}
+
+// ---- 4. All evens ---------------------------------------------------------------------
+{
+  const tx = [];
+  for (let i = 0; i < 3; i++) {
+    tx.push({ id: i * 2, ts: NOW - (18 - i * 6) * DAY, symbol: "E" + i, side: "BUY", qty: 5, pricePaise: 10000, biasFlags: [] });
+    tx.push({ id: i * 2 + 1, ts: NOW - (14 - i * 6) * DAY, symbol: "E" + i, side: "SELL", qty: 5, pricePaise: 10000, biasFlags: [] });
+  }
+  const stats = computeTradeStats(tx);
+  ok("all evens: shared stats give a finite win rate", stats.evens === 3 && stats.wins === 0 && stats.losses === 0 && Number.isFinite(stats.winRate));
+  const trades = tradesWithFlags(tx);
+  const closes = [["2026-10-20", 25000], ["2026-11-12", 25000]];
+  const bench = core.benchmarkPl(trades, closes);
+  const rc = score(base({ trades, stats, market: { userPlPaise: 0, ...bench } }));
+  ok("all evens: graded with no NaN anywhere", rc.overall.state === "graded" && clean(rc) === null, clean(rc) || "");
+  ok("all evens: no flags, so discipline is not marked down", rc.pillars.discipline.detail.flags === 0 && rc.pillars.discipline.score >= 72);
+  ok("all evens: holding nothing now locks diversification", rc.pillars.diversification.state === "locked");
+}
+
+// ---- 5. One huge position ---------------------------------------------------------------
+{
+  const trades = spread(6);
+  const huge = score(base({ trades, portfolio: { cashPaise: 500_000, positions: [pos("BIG", 9_500_000)] } }));
+  const d = huge.pillars.diversification;
+  ok("one huge position: scored low", d.state === "scored" && d.score < 30, String(d.score));
+  ok("one huge position: the fact is the user's own number", d.facts[0].key === "top_stock" && d.facts[0].pct === 95 && d.facts[0].tone === "bad");
+  ok("one huge position: sentence quotes it", /BIG Ltd.*95%/.test(copy.factText(d.facts[0])));
+
+  const sectors = ["Banking", "IT", "Pharma", "Auto", "FMCG", "Energy"];
+  const even = score(base({ trades, portfolio: { cashPaise: 1_000_000, positions: sectors.map((s, i) => pos("P" + i, 1_500_000, s)) } }));
+  ok("six even positions in six sectors: scored high", even.pillars.diversification.score >= 90, String(even.pillars.diversification.score));
+  ok("spreading out raises the overall grade", even.overall.score > huge.overall.score + 10, `${even.overall.score} vs ${huge.overall.score}`);
+
+  const oneSector = score(base({ trades, portfolio: { cashPaise: 1_000_000, positions: sectors.map((_, i) => pos("Q" + i, 1_500_000, "Banking")) } }));
+  ok("six positions in one sector score below six sectors", oneSector.pillars.diversification.score < even.pillars.diversification.score && oneSector.pillars.diversification.facts.some((f) => f.key === "top_sector" && f.pct === 100));
+
+  // A fund is a basket: one index fund is not one concentrated bet.
+  const fund = score(base({ trades, portfolio: { cashPaise: 500_000, positions: [pos("MF_NIFTY", 9_500_000, null, "MF")] } }));
+  ok("one mutual fund is not treated as one stock", fund.pillars.diversification.score >= 80 && !fund.pillars.diversification.facts.some((f) => f.key === "top_stock"), String(fund.pillars.diversification.score));
+
+  // Dust positions do not count as "real" ones.
+  const dust = score(base({ trades, portfolio: { cashPaise: 0, positions: [pos("BIG", 9_800_000), pos("D1", 100_000, "IT"), pos("D2", 100_000, "Pharma")] } }));
+  ok("positions under 2% are not counted as real", dust.pillars.diversification.facts.find((f) => f.key === "positions").n === 1);
+}
+
+// ---- 6. All cash, and cash judged fairly ------------------------------------------------
+{
+  const trades = spread(6);
+  const rc = score(base({ trades, portfolio: { cashPaise: 10_000_000, positions: [] } }));
+  ok("all cash: diversification locked, never a zero", rc.pillars.diversification.state === "locked" && rc.pillars.diversification.share === 0);
+  ok("all cash: the grade is the scored parts only", rc.overall.state === "graded" && rc.overall.score === rc.pillars.discipline.score && rc.pillars.discipline.share === 100);
+
+  const small = score(base({ trades, portfolio: { cashPaise: 9_000_000, positions: [pos("ONE", 1_000_000)] } }));
+  ok("one small position in a pile of cash: not judged yet", small.pillars.diversification.state === "locked" && small.pillars.diversification.unlock.key === "small" && small.pillars.diversification.unlock.pct === 10);
+
+  const two = [pos("A", 50_000, "IT"), pos("B", 50_000, "Pharma")];
+  const newbie = score(base({ trades, accountCreatedAt: NOW - 10 * DAY, portfolio: { cashPaise: 9_900_000, positions: two } }));
+  ok("cash is not judged in the first month", newbie.pillars.diversification.detail.cashJudged === false && newbie.pillars.diversification.detail.parts.cash === 100);
+  const old = score(base({ trades, portfolio: { cashPaise: 9_900_000, positions: two } }));
+  ok("99% idle cash after a month: marked gently, never under 40", old.pillars.diversification.detail.cashJudged && old.pillars.diversification.detail.parts.cash >= 40 && old.pillars.diversification.detail.parts.cash < 60);
+  const mid = score(base({ trades, portfolio: { cashPaise: 6_000_000, positions: [pos("A", 2_000_000, "IT"), pos("B", 2_000_000, "Pharma")] } }));
+  ok("60% cash costs nothing", mid.pillars.diversification.detail.parts.cash === 100);
+}
+
+// ---- 7. A locked or missing part never lowers a grade ------------------------------------
+{
+  const trades = spread(8);
+  const activity = { weeks: weeksOf(() => [3, 1, 2, 1]) };
+  const portfolio = { cashPaise: 1_000_000, positions: [pos("A", 3_000_000, "IT"), pos("B", 3_000_000, "Pharma"), pos("C", 3_000_000, "Auto")] };
+  const full = score(base({ trades, activity, portfolio }));
+  const p = full.pillars;
+  const mean = (keys) => Math.round(keys.reduce((s, k) => s + p[k].score * p[k].weight, 0) / keys.reduce((s, k) => s + p[k].weight, 0));
+  ok("overall is the weighted mean of the scored parts", full.overall.score === mean(["discipline", "diversification", "learning"]));
+  const shares = Object.values(p).reduce((s, x) => s + x.share, 0);
+  ok("shares of scored parts add up to 100", near(shares, 100, 1), String(shares));
+
+  const noLearn = score(base({ trades, activity: null, portfolio }));
+  const q = noLearn.pillars;
+  ok("learning data missing: left out, not scored as zero", q.learning.state === "pending" && noLearn.overall.score === Math.round((q.discipline.score * 45 + q.diversification.score * 25) / 70));
+}
+
+// ---- 8. Discipline: flags against how much you trade --------------------------------------
+{
+  const chase = () => [flag("fomo", 0.7, { symbol: "S1" })];
+  const few = spread(5);
+  few[2].flags = chase(); few[4].flags = chase();
+  const many = spread(300);
+  many[296].flags = chase(); many[298].flags = chase();
+  const sFew = score(base({ trades: few })).pillars.discipline;
+  const sMany = score(base({ trades: many })).pillars.discipline;
+  ok("2 flags in 5 trades cost far more than 2 in 300", sMany.score - sFew.score >= 40, `${sFew.score} vs ${sMany.score}`);
+  ok("2 flags in 300 trades is still a good score", sMany.score >= 85, String(sMany.score));
+  ok("the fact counts the flagged buys out of the user's buys", sFew.facts[0].key === "chase" && sFew.facts[0].n === 2 && sFew.facts[0].of === 3);
+
+  // Trading more never helps by itself: the same clean record, 6 or 300 trades.
+  ok("a clean record scores the same at 6 trades and 300", score(base({ trades: spread(6) })).pillars.discipline.score === score(base({ trades: spread(300) })).pillars.discipline.score);
+
+  // Severity and recency.
+  const one = (sev, daysAgo) => { const t = spread(10, 120, 1); t.push(tr(daysAgo, "Z", "SELL", 1, 10000, [flag("panic_sell", sev)])); return score(base({ trades: t })).pillars.discipline; };
+  ok("a stronger signal costs more", one(1, 2).score < one(0.5, 2).score);
+  ok("an old flag costs less than a new one", one(1, 100).score > one(1, 2).score + 5, `${one(1, 100).score} vs ${one(1, 2).score}`);
+  ok("a flag outside 90 days is shown as an old note", one(1, 100).facts.some((f) => f.key === "panic_old" && f.days === 100));
+  ok("a recent flag is shown with its count", one(1, 2).facts.some((f) => f.key === "panic" && f.n === 1));
+
+  // What is and is not counted.
+  const withFlags = (flags) => { const t = spread(10); t[9].flags = flags; return score(base({ trades: t })).pillars.discipline.score; };
+  const cleanScore = withFlags([]);
+  ok("concentration flags are left to the diversification part", withFlags([flag("concentration", 1), flag("sector_concentration", 1)]) === cleanScore);
+  ok("the matcher's marker is not a flag", withFlags(["limit_order_filled", { bias: "limit_order_filled" }]) === cleanScore);
+  ok("two chase flags on one trade count once", withFlags([flag("fomo", 0.7), flag("pump_chase", 0.7)]) === withFlags([flag("fomo", 0.7)]));
+  ok("a zero-severity flag is nothing", withFlags([flag("panic_sell", 0)]) === cleanScore);
+  ok("an unknown pattern is ignored", withFlags([flag("made_up", 1)]) === cleanScore);
+
+  // A young record is pulled to the middle: no verdict from a few days.
+  const young = (flags) => score(base({ accountCreatedAt: NOW - 3 * DAY, trades: [0, 1, 2, 3, 4].map((i) => tr(2 - i * 0.4, "Y", "SELL", 1, 10000, flags)) })).pillars.discipline;
+  const best = young([]), worst = young([flag("panic_sell", 1)]);
+  ok("first days, clean: good but not perfect", best.score >= 75 && best.score <= 81, String(best.score));
+  ok("first days, every trade flagged: floor of 50", worst.score >= 50 && worst.score < 60, String(worst.score));
+  ok("a young record says so", best.facts.some((f) => f.key === "young" && f.full === 28));
+}
+
+// ---- 9. Split-adjusted price mismatch ------------------------------------------------------
+{
+  // Stored flag: a buy "50% below cost" is a split, not averaging down.
+  const withAnchor = (below) => { const t = spread(10); t[8].flags = [flag("anchoring", 0.9, { symbol: "S1", below_cost_pct: below })]; return score(base({ trades: t })).pillars.discipline; };
+  const cleanD = score(base({ trades: spread(10) })).pillars.discipline;
+  ok("averaging-down flag 50% below cost is not counted (split)", withAnchor(-50).score === cleanD.score && withAnchor(-50).detail.flags === 0);
+  ok("averaging-down flag 90% below cost is not counted (1:10 split)", withAnchor(-90).score === cleanD.score);
+  ok("a real 12% averaging down is counted", withAnchor(-12).score < cleanD.score && withAnchor(-12).facts.some((f) => f.key === "avg_down"));
+
+  // The same through the ledger: a matcher-filled buy after a 1:2 split.
+  const auto = ["limit_order_filled"];
+  const tx = [
+    { id: 1, ts: NOW - 30 * DAY, symbol: "TRENT", side: "BUY", qty: 10, pricePaise: 423900, biasFlags: auto },
+    { id: 2, ts: NOW - 20 * DAY, symbol: "TRENT", side: "BUY", qty: 10, pricePaise: 211950, biasFlags: auto },
+    ...[15, 12, 9, 6].map((d, i) => ({ id: 3 + i, ts: NOW - d * DAY, symbol: "O" + i, side: "BUY", qty: 1, pricePaise: 10000, biasFlags: auto })),
+  ];
+  const trades = tradesWithFlags(tx);
+  const d = score(base({ trades })).pillars.discipline;
+  ok("ledger: the split buy does not reach the score", d.detail.flags === 0 && !d.facts.some((f) => f.key.startsWith("avg_down")), JSON.stringify(d.facts));
+
+  // The Nifty comparison follows the user's own cost, so a split in the price
+  // history cannot move the benchmark.
+  const closes = [["2026-10-10", 100], ["2026-11-12", 100]];
+  const b = core.benchmarkPl(trades, closes);
+  ok("benchmark of a flat index is zero whatever the trade prices", b.benchPlPaise === 0 && b.peakInvestedPaise === 10 * 423900 + 10 * 211950 + 4 * 10000);
+}
+
+// ---- 10. The ledger ---------------------------------------------------------------------
+{
+  const after = DETECTOR_CUTOFF_MS + 5 * DAY, before = DETECTOR_CUTOFF_MS - 10 * DAY;
+  const stored = { bias: "fomo", severity: 0.6, evidence: { symbol: "A" } };
+  const out = tradesWithFlags([
+    { id: 2, ts: after, symbol: "A", side: "BUY", qty: 1, pricePaise: 10000, biasFlags: [stored, "note", { bias: "x" }, null] },
+    { id: 1, ts: before, symbol: "A", side: "SELL", qty: 1, pricePaise: 10000, biasFlags: [{ bias: "panic_sell", severity: 1 }] },
+    { id: 3, ts: after + DAY, symbol: "B", side: "BUY", qty: 1, pricePaise: 10000, biasFlags: ["limit_order_filled"] },
+    { id: 4, ts: after + DAY, symbol: "", side: "BUY", qty: 1, pricePaise: 10000 },
+    { id: 5, ts: after + DAY, symbol: "C", side: "BUY", qty: 0, pricePaise: 10000 },
+  ]);
+  ok("ledger: oldest first, broken rows dropped", out.length === 3 && out[0].ts === before && out[2].symbol === "B");
+  ok("ledger: a tap since 24 Oct keeps its stored detector results only", out[1].flags.length === 1 && out[1].flags[0].bias === "fomo" && out[1].auto === false);
+  ok("ledger: the old detectors' panic flags are ignored", out[0].flags.length === 0);
+  ok("ledger: a matcher fill is marked auto", out[2].auto === true && out[2].flags.length === 0);
+
+  // Three quick round trips in one stock, all filled by the matcher: the third sell is churning.
+  const churn = [];
+  for (let i = 0; i < 3; i++) {
+    churn.push({ id: i * 2, ts: after + i * 2 * DAY, symbol: "CH", side: "BUY", qty: 5, pricePaise: 10000, biasFlags: ["limit_order_filled"] });
+    churn.push({ id: i * 2 + 1, ts: after + i * 2 * DAY + DAY, symbol: "CH", side: "SELL", qty: 5, pricePaise: 10100, biasFlags: ["limit_order_filled"] });
+  }
+  const c = tradesWithFlags(churn);
+  ok("ledger: churning is found on matcher fills", c[5].flags.some((f) => f.bias === "churning") && c.slice(0, 5).every((t) => t.flags.length === 0));
+
+  // Twelve trades on one day. Taps before 24 Oct: the 10th is overtrading. Matcher fills: never.
+  const day = (auto) => [
+    { id: 0, ts: before - 2 * DAY, symbol: "F", side: "BUY", qty: 1, pricePaise: 10000, biasFlags: auto ? ["limit_order_filled"] : [] },
+    ...Array.from({ length: 12 }, (_, i) => ({ id: i + 1, ts: before + i * 60_000, symbol: "T" + i, side: "BUY", qty: 1, pricePaise: 10000, biasFlags: auto ? ["limit_order_filled"] : [] })),
+  ];
+  const taps = tradesWithFlags(day(false)), fills = tradesWithFlags(day(true));
+  ok("ledger: the 10th hand-placed trade of a day is overtrading", taps[10].flags.some((f) => f.bias === "overtrading") && taps.filter((t) => t.flags.length).length === 1);
+  ok("ledger: orders the matcher filled are never overtrading", fills.every((t) => !t.flags.some((f) => f.bias === "overtrading")));
+}
+
+// ---- 11. Learning and activity ------------------------------------------------------------
+{
+  const trades = spread(6);
+  const steady = score(base({ trades, activity: { weeks: weeksOf(() => [3, 1, 0, 0]) } })).pillars.learning;
+  const binge = score(base({ trades, activity: { weeks: weeksOf((i) => (i === 2 ? [1, 20, 50, 50] : [0, 0, 0, 0])) } })).pillars.learning;
+  ok("eight steady weeks score high", steady.state === "scored" && steady.score >= 85, String(steady.score));
+  ok("one binge day does not replace a steady habit", steady.score - binge.score >= 40, `${steady.score} vs ${binge.score}`);
+  ok("learning facts are the user's own counts", steady.facts[0].key === "weeks" && steady.facts[0].active === 8 && steady.facts[0].of === 8 && steady.facts[1].replays === 8);
+
+  const act = { weeks: weeksOf(() => [2, 0, 2, 1]) };
+  ok("the number of trades never counts", score(base({ trades: [], activity: act })).pillars.learning.score === score(base({ trades: spread(300), activity: act })).pillars.learning.score);
+
+  const idle = score(base({ trades, activity: { weeks: weeksOf(() => [2, 0, 0, 0]) } })).pillars.learning;
+  ok("opening the app without learning: some credit, and it says so", idle.score === 40 && idle.facts.some((f) => f.key === "no_actions"));
+  const none = score(base({ trades, activity: { weeks: [] } })).pillars.learning;
+  ok("nothing in 8 weeks: scored zero, with no NaN", none.score === 0 && clean(none) === null);
+
+  // A new account is judged on the weeks it has existed.
+  const wk = (r, q, e) => ({ weeks: [[core.istWeekStart(NOW), 3, r, q, e]] });
+  const newDone = score(base({ accountCreatedAt: NOW - 5 * DAY, activity: wk(1, 2, 1) })).pillars.learning;
+  ok("5-day account that did all three: full marks", newDone.state === "scored" && newDone.score === 100 && newDone.detail.weeks === 1, String(newDone.score));
+  const newIdle = score(base({ accountCreatedAt: NOW - 5 * DAY, activity: wk(0, 2, 0) })).pillars.learning;
+  ok("5-day account with 2 actions: not judged yet", newIdle.state === "locked" && newIdle.unlock.have === 2);
+
+  ok("week starts on Monday, IST", core.istWeekStart(NOW) === "2026-11-09"
+    && core.istWeekStart(Date.UTC(2026, 10, 8, 18, 29)) === "2026-11-02"       // Sun 23:59 IST
+    && core.istWeekStart(Date.UTC(2026, 10, 8, 18, 30)) === "2026-11-09");      // Mon 00:00 IST
+}
+
+// ---- 12. Against the Nifty 50 --------------------------------------------------------------
+{
+  const mk = (n, firstDaysAgo) => Array.from({ length: n }, (_, i) => tr(firstDaysAgo - (i * (firstDaysAgo - 1)) / Math.max(1, n - 1), "M" + i, "BUY", 1, 10000));
+  const m = { userPlPaise: 0, benchPlPaise: 0, peakInvestedPaise: 1_000_000, sinceTs: NOW - 27 * DAY };
+  ok("9 trades in 27 days: hidden even with data", score(base({ trades: mk(9, 27), market: m })).pillars.market.state === "hidden");
+  ok("10 trades in 3 days: shown", score(base({ trades: mk(10, 3), market: m })).pillars.market.state === "scored");
+  ok("5 trades over 28 days: shown", score(base({ trades: mk(5, 28), market: m })).pillars.market.state === "scored");
+  ok("shown but no index data: left out, not zero", score(base({ trades: mk(10, 3), market: null })).pillars.market.state === "pending");
+  ok("no money ever invested: left out", score(base({ trades: mk(10, 3), market: { ...m, peakInvestedPaise: 0 } })).pillars.market.state === "pending");
+
+  const at = (userPl, benchPl) => score(base({ trades: mk(10, 30), market: { ...m, userPlPaise: userPl, benchPlPaise: benchPl } })).pillars.market;
+  ok("level with the Nifty is 50", at(100_000, 100_000).score === 50);
+  ok("5% ahead is 65", at(50_000, 0).score === 65);
+  ok("far behind stops at 0, far ahead at 100", at(-900_000, 0).score === 0 && at(900_000, 0).score === 100);
+  ok("the fact carries both rupee figures", at(123_456, 100_000).facts[0].youPaise === 123_456 && at(123_456, 100_000).facts[0].niftyPaise === 100_000);
+
+  // Small weight: with every part scored, the worst and best Nifty result are 10 points apart.
+  const full = (userPl) => score(base({
+    trades: mk(10, 30), activity: { weeks: weeksOf(() => [3, 1, 1, 1]) },
+    portfolio: { cashPaise: 1_000_000, positions: [pos("A", 3_000_000, "IT"), pos("B", 3_000_000, "Pharma"), pos("C", 3_000_000, "Auto")] },
+    market: { ...m, userPlPaise: userPl },
+  }));
+  const lo = full(-900_000), hi = full(900_000);
+  ok("Nifty part is a tenth of the grade", lo.pillars.market.share === 10 && near(hi.overall.score - lo.overall.score, 10, 1), `${lo.overall.score}..${hi.overall.score}`);
+
+  // benchmarkPl: the same rupees on the same days.
+  const closes = [["2026-10-05", 100], ["2026-10-06", 102], ["2026-10-20", 105], ["2026-11-12", 110]];
+  const t0 = Date.UTC(2026, 9, 5, 6, 0), t1 = Date.UTC(2026, 9, 20, 6, 0);
+  const buy = { ts: t0, symbol: "X", side: "BUY", qty: 10, pricePaise: 1_000_000 };
+  const held = core.benchmarkPl([buy], closes);
+  ok("benchmark: 1 lakh held while the index goes 100 to 110 makes 10,000", held.benchPlPaise === 1_000_000 && held.peakInvestedPaise === 10_000_000 && held.sinceTs === t0);
+  const half = core.benchmarkPl([buy, { ts: t1, symbol: "X", side: "SELL", qty: 5, pricePaise: 2_000_000 }], closes);
+  ok("benchmark: selling half takes that money out of the index at that day's close", half.benchPlPaise === 250_000 + 500_000 && half.peakInvestedPaise === 10_000_000);
+  const early = core.benchmarkPl([{ ...buy, ts: Date.UTC(2026, 8, 1) }], closes);
+  ok("benchmark: a trade before the series uses its first close", early.benchPlPaise === 1_000_000);
+  const today = core.benchmarkPl([{ ...buy, ts: NOW }], closes);
+  ok("benchmark: a trade today has made nothing yet", today.benchPlPaise === 0);
+  ok("benchmark: no closes or no trades gives null, not zero", core.benchmarkPl([buy], []) === null && core.benchmarkPl([], closes) === null && core.benchmarkPl([buy], [["2026-10-05", 0]]) === null);
+  const weekend = core.benchmarkPl([{ ...buy, ts: Date.UTC(2026, 9, 10, 6, 0) }], closes);      // no session that day
+  ok("benchmark: a day with no session uses the close before it", weekend.benchPlPaise === Math.round(10_000_000 * (110 / 102 - 1)));
+}
+
+// ---- 13. Stable: one day's prices do not swing the grade ------------------------------------
+{
+  const trades = spread(12);
+  const mkt = (userPl) => ({ userPlPaise: userPl, benchPlPaise: 200_000, peakInvestedPaise: 8_000_000, sinceTs: NOW - 40 * DAY });
+  const card = (aValue, userPl) => score(base({
+    trades, activity: { weeks: weeksOf(() => [2, 0, 2, 1]) }, market: mkt(userPl),
+    portfolio: { cashPaise: 2_000_000, positions: [pos("A", aValue, "IT"), pos("B", 2_000_000, "Pharma"), pos("C", 2_000_000, "Auto"), pos("D", 1_500_000, "FMCG")] },
+  }));
+  const flat = card(2_500_000, 250_000);
+  const up = card(Math.round(2_500_000 * 1.05), 250_000 + 125_000);       // biggest holding +5% in a day
+  const down = card(Math.round(2_500_000 * 0.95), 250_000 - 125_000);     // or -5%
+  ok("a 5% day in the biggest holding moves the overall score by 2 at most", Math.abs(up.overall.score - flat.overall.score) <= 2 && Math.abs(down.overall.score - flat.overall.score) <= 2, `${down.overall.score} ${flat.overall.score} ${up.overall.score}`);
+  ok("prices never touch discipline or learning", up.pillars.discipline.score === flat.pillars.discipline.score && up.pillars.learning.score === flat.pillars.learning.score);
+  const a = score(base({ trades, now: NOW })), b = score(base({ trades, now: NOW + DAY }));
+  ok("one more day with nothing new moves discipline by 1 at most", Math.abs(a.pillars.discipline.score - b.pillars.discipline.score) <= 1);
+}
+
+// ---- 14. Grades -----------------------------------------------------------------------------
+{
+  const g = core.gradeFor;
+  ok("grade cut points", g(100) === "A+" && g(83) === "A+" && g(82) === "A" && g(77) === "A" && g(76) === "B+" && g(70) === "B+"
+    && g(69) === "B" && g(63) === "B" && g(62) === "C" && g(53) === "C" && g(52) === "D" && g(0) === "D");
+  ok("cut points go down and end at 0", core.GRADES.every((x, i, arr) => i === 0 || x.min < arr[i - 1].min) && core.GRADES[core.GRADES.length - 1].min === 0);
+  ok("weights add up to 100, discipline largest, Nifty smallest", Object.values(core.WEIGHTS).reduce((s, x) => s + x, 0) === 100
+    && core.WEIGHTS.discipline === Math.max(...Object.values(core.WEIGHTS)) && core.WEIGHTS.market === Math.min(...Object.values(core.WEIGHTS)));
+  for (const grade of core.GRADES.map((x) => x.grade)) ok(`grade ${grade} has a title in both languages`, copy.gradeTitle(grade).length > 2 && copy.gradeTitle(grade, true).length > 2);
+}
+
+// ---- 15. Copy: every sentence, both languages ------------------------------------------------
+{
+  const sample = {
+    panic: { n: 2, of: 7 }, chase: { n: 2, of: 11 }, churn: { n: 3, symbol: "IDEA" }, overtrade: { n: 4, peak: 23 },
+    avg_down: { n: 1, of: 9 }, disposition: { n: 2 },
+    panic_old: { days: 100 }, chase_old: { days: 95 }, churn_old: { days: 120 }, overtrade_old: { days: 99 }, avg_down_old: { days: 140 }, disposition_old: { days: 91 },
+    clean: { trades: 12, days: 40 }, young: { days: 6, full: 28 }, record: { trades: 31, days: 62 },
+    top_stock: { name: "Reliance Industries", symbol: "RELIANCE", pct: 52 }, positions: { n: 4, funds: 1 }, top_sector: { sector: "Banking", pct: 71, n: 3 },
+    cash: { pct: 60, days: 12 }, cash_idle: { pct: 88, days: 70 },
+    weeks: { active: 5, of: 8 }, actions: { replays: 1, questions: 4, reads: 2, weeks: 3, of: 8 }, no_actions: { of: 8 }, untried: { replays: true, questions: false, reads: false },
+    vs_nifty: { youPaise: -123450, niftyPaise: 678900, diff: -8.1, sinceTs: Date.UTC(2026, 9, 5, 6, 0) },
+  };
+  const bad = /undefined|NaN|null|\[object/;
+  for (const [key, f] of Object.entries(sample)) {
+    const en = copy.factText({ key, tone: "info", ...f }), hi = copy.factText({ key, tone: "info", ...f }, true);
+    ok(`copy: "${key}" has an English sentence`, en.length > 12 && !bad.test(en), en);
+    ok(`copy: "${key}" has a Hinglish sentence`, hi.length > 12 && !bad.test(hi) && hi !== en, hi);
+  }
+  // Every fact the core can produce must have a sentence. Run over every card scored above.
+  const produced = new Set();
+  let unworded = "";
+  for (const rc of seen) for (const p of Object.values(rc.pillars)) for (const f of p.facts || []) {
+    produced.add(f.key);
+    for (const hi of [false, true]) { const t = copy.factText(f, hi); if (!t || bad.test(t)) unworded = `${f.key}: ${t}`; }
+  }
+  ok("copy: every fact scored in this file reads cleanly in both languages", !unworded, unworded);
+  const unknown = [...produced].filter((k) => !(k in sample));
+  ok("copy: the core produced no fact key this file does not know", unknown.length === 0, unknown.join(","));
+  ok("copy: the cases above reached most kinds of fact", produced.size >= 16, [...produced].join(","));
+
+  ok("copy: the user's own numbers are in the sentence", /2 of your last 7 sells/.test(copy.factText({ key: "panic", ...sample.panic })) && /most: 23/.test(copy.factText({ key: "overtrade", ...sample.overtrade })));
+  ok("copy: rupees always have 2 decimals", /lost ₹1,234\.50/.test(copy.factText({ key: "vs_nifty", ...sample.vs_nifty })) && /would have made ₹6,789\.00/.test(copy.factText({ key: "vs_nifty", ...sample.vs_nifty })));
+  ok("copy: singular and plural", /noted 1 time \(/.test(copy.factText({ key: "churn", n: 1, symbol: "X" })) && /You hold 1 position\./.test(copy.factText({ key: "positions", n: 1, funds: 0 })));
+  ok("copy: an unknown fact is an empty string, not a crash", copy.factText({ key: "nope" }) === "" && copy.factText(null) === "");
+
+  for (const key of Object.keys(core.WEIGHTS)) {
+    for (const hi of [false, true]) {
+      const c = copy.pillarCopy(key, hi);
+      ok(`copy: ${key} explains itself (${hi ? "Hinglish" : "English"})`, c && c.name && c.what.length > 40 && c.how.length > 40 && c.tryThis.length > 20);
+    }
+  }
+  const unlocks = [["trades", { have: 2, need: 5 }], ["no_holdings", {}], ["small", { pct: 10, need: 20 }], ["learn", { have: 1, need: 3 }], ["other", {}]];
+  for (const [key, u] of unlocks) {
+    const en = copy.unlockText("discipline", { key, ...u }), hi = copy.unlockText("discipline", { key, ...u }, true);
+    ok(`copy: unlock "${key}" in both languages`, en.length > 12 && hi.length > 12 && en !== hi && !bad.test(en + hi), en);
+  }
+  ok("copy: the unlock line counts what is left", /You have 2, 3 to go/.test(copy.unlockText("discipline", { key: "trades", have: 2, need: 5 })));
+
+  // The lines handed to the AI card.
+  const graded = seen.find((rc) => rc.overall.state === "graded" && rc.pillars.market.state === "hidden" && rc.pillars.diversification.state === "locked");
+  const lines = copy.promptLines(graded);
+  ok("prompt lines: lead with the grade on screen", lines[0] === `Overall grade: ${graded.overall.grade} (${graded.overall.score}/100)`);
+  ok("prompt lines: a locked part is called locked, a hidden one is left out", lines.some((l) => /^Diversification.*locked/.test(l)) && !lines.some((l) => /Nifty/.test(l)));
+  ok("prompt lines: fit the server's limit of 24", lines.length <= 24 && lines.every((l) => l.length <= 240));
+  ok("prompt lines: ungraded card says so", /not graded yet/.test(copy.promptLines(seen[0])[0]));
+  ok("summary: a graded card names its strongest and weakest part", /Strongest: .*Most room to grow: /.test(copy.overallSummary({ state: "graded", best: "learning", worst: "discipline" })));
+}
+
+// ---- 16. Nothing scored in this file contains a broken number --------------------------------
+{
+  const broken = seen.map((rc) => clean(rc)).filter(Boolean);
+  ok("no NaN, Infinity or undefined in any card", broken.length === 0, broken.slice(0, 3).join(" | "));
+  ok("every score is a whole number from 0 to 100", seen.every((rc) => Object.values(rc.pillars).every((p) => p.state !== "scored" || (Number.isInteger(p.score) && p.score >= 0 && p.score <= 100))));
+  ok("every scored part shows 1 to 3 facts", seen.every((rc) => Object.values(rc.pillars).every((p) => p.state !== "scored" || (p.facts.length >= 1 && p.facts.length <= 3))));
+  ok("every locked part says what unlocks it", seen.every((rc) => Object.values(rc.pillars).every((p) => p.state !== "locked" || (p.unlock && p.unlock.key))));
+}
+
+console.log(`report card: ${pass}/${pass + fail} passing`);
+if (fail) process.exit(1);

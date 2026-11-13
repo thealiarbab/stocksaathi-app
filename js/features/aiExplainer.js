@@ -23,6 +23,7 @@
 // =============================================================================
 
 import { aiLang } from "./aiLang.js";
+import { logLearn } from "./learning.js";
 import { glossaryLookup } from "../data/glossary.js";
 
 const TOOLTIP_ID = "ai-term-tooltip";
@@ -256,6 +257,7 @@ function onPopKey(e) {
 async function openPop(target) {
   const term = target.dataset.term;
   if (!term) return;
+  logLearn("term", term);                   // counts as an explainer read on the report card
   hide();
   if (popEl) popEl.remove();
   popReturnFocus = target;
