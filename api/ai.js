@@ -2355,9 +2355,14 @@ async function adminReportCardV2(req, origin, { userId, profile, portfolio, hold
   const cash = Number(portfolio?.cash_paise) || 0;
   const ret = returnSummary({ cashPaise: cash, reservedPaise: reserved, startingCashPaise: Number(portfolio?.starting_cash_paise) || 0, stats, paperPaise: paper });
 
-  let activity = null;
-  const ar = await sbAdminFetch(`/rest/v1/rpc/_report_card_activity`, { method: "POST", body: JSON.stringify({ p_user: userId }) });
-  if (ar.ok) activity = { weeks: await ar.json() };
+  let activity = null, research = null, curve = null;
+  const ar = await sbAdminFetch(`/rest/v1/rpc/_report_card_signals`, { method: "POST", body: JSON.stringify({ p_user: userId }) });
+  if (ar.ok) {
+    const sg = await ar.json();
+    if (Array.isArray(sg?.w)) activity = { weeks: sg.w };
+    if (Array.isArray(sg?.r)) research = sg.r;
+    if (Array.isArray(sg?.cv)) curve = sg.cv;
+  }
 
   let market = null;
   if (trades.length) {
@@ -2375,7 +2380,8 @@ async function adminReportCardV2(req, origin, { userId, profile, portfolio, hold
 
   const rc = scoreReportCard({
     now: Date.now(), accountCreatedAt: Date.parse(profile?.created_at || "") || trades[0]?.ts || null,
-    trades, stats, portfolio: { cashPaise: cash + reserved, positions }, activity, market,
+    trades, stats, portfolio: { cashPaise: cash + reserved, positions }, activity, research, curve,
+    profit: { plPaise: ret.plPaise }, market,
   });
   return {
     grade: rc.overall.grade, score: rc.overall.score, state: rc.overall.state,

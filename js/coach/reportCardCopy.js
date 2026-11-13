@@ -21,6 +21,22 @@ export const PILLARS = {
       how: "Har note ka wazan is par hai ki aadat kitni serious hai aur signal kitna strong tha. 45 din baad note aadha gina jaata hai. Total ko tumhare trades se divide kiya jaata hai, isliye 300 trades me 2 note, 5 trades me 2 note se bahut kam ginte hain. Jab tak record 4 hafte purana nahi hota, score beech ke paas rehta hai: kuch din se kuch saabit nahi hota.",
       tryThis: "Agli baar bechne se pehle ek line likho ki kyun. Agar wajah sirf aaj ka price hai, kal ke close tak ruko aur line dobara padho." },
   },
+  results: {
+    en: { name: "Results", what: "What your money actually did: your profit or loss, booked and on paper, as a share of the most you ever had invested at once. Cash you kept aside does not water it down. Big falls along the way count too.",
+      how: "Breaking even is 50 out of 100. About +5% on the money you invested is 78, +10% is 92; -5% is 22. The curve flattens at both ends, so one huge win cannot carry the whole grade. If your account ever fell more than 10% of your invested money from an earlier high, half of the extra fall comes off. Until your record is 4 weeks old the score stays near 50: one lucky week is not a result yet.",
+      tryThis: "Look at your best and worst trade side by side. Was the difference the plan, or the luck?" },
+    hi: { name: "Results", what: "Tumhare paise ne asal me kya kiya: profit ya loss, booked aur paper par, us sabse zyada paise ke hisaab se jo kabhi ek saath laga tha. Alag rakha cash isko kam nahi karta. Beech ki badi girawat bhi gini jaati hai.",
+      how: "Barabar rehna 100 me 50 hai. Lagaye paise par lagbhag +5% matlab 78, +10% matlab 92; -5% matlab 22. Dono kinaron par curve flat hota hai, isliye ek bahut badi jeet poora grade nahi utha sakti. Agar account kabhi pichhle high se lagaye paise ke 10% se zyada gira, to extra girawat ka aadha kat jaata hai. Record 4 hafte purana hone tak score 50 ke paas rehta hai: ek lucky hafta abhi result nahi hai.",
+      tryThis: "Apna sabse achha aur sabse bura trade saath me dekho. Farak plan ka tha ya luck ka?" },
+  },
+  research: {
+    en: { name: "Research", what: "Whether you looked into a stock before putting money in. For every new buy, Saathi checks what you did in the two weeks before: opened the stock's page on an earlier day, used its chart, had it on your watchlist, or asked Saathi about it.",
+      how: "One of those is half marks for that buy, two or more is full marks. A buy with none of them, minutes after you first opened the stock, counts as an impulse buy. Topping up a stock you were already trading is not counted: only fresh decisions are. Recent buys count more than old ones.",
+      tryThis: "Before your next new stock, add it to your watchlist and come back the next day. If you still want it, check its 1-year chart first." },
+    hi: { name: "Research", what: "Paisa lagane se pehle tumne stock ko dekha ya nahi. Har naye buy ke liye Saathi dekhta hai ki pichhle do hafton me tumne kya kiya: stock ka page kisi pehle din khola, uska chart dekha, watchlist me rakha, ya Saathi se uske baare me pucha.",
+      how: "Inme se ek ho to us buy ke aadhe marks, do ya zyada ho to poore. Jisme koi nahi, aur stock pehli baar kholne ke kuch minute baad buy kiya, woh impulse buy gina jaata hai. Jis stock me already trade kar rahe the usme aur daalna nahi gina jaata: sirf naye faisle. Naye buys purane se zyada ginte hain.",
+      tryThis: "Agle naye stock se pehle use watchlist me daalo aur agle din wapas aao. Phir bhi chahiye ho to pehle uska 1 saal ka chart dekho." },
+  },
   diversification: {
     en: { name: "Diversification", what: "How spread out your money is right now: your biggest single stock, your biggest sector, how many real positions you hold, and cash that has sat idle.",
       how: "Biggest stock: full marks under 15% of all your money, none at 60%. Biggest sector (when you hold 2 or more stocks): full marks under 40% of your stock money, none at 90%. Positions: full marks at about 6 evenly sized ones. A mutual fund or ETF is already a basket, so it counts as 5. Cash is not judged in your first month, and only gently after that.",
@@ -86,6 +102,14 @@ export function unlockText(pillarKey, unlock, hi = false) {
       return hi ? "Jab tum koi stock ya fund hold karoge tab khulta hai." : "Unlocks when you hold a stock or fund.";
     case "small":
       return hi ? `Abhi sirf ${u.pct}% paisa laga hai, ek hi position me. ${u.need}% lagne par ya 2 holdings par khulta hai.` : `Only ${u.pct}% of your money is invested, in one position. Unlocks at ${u.need}% invested or 2 holdings.`;
+    case "first_buy":
+      return hi ? "Pehla stock ya fund kharidne par khulta hai." : "Unlocks with your first buy.";
+    case "research": {
+      const left = Math.max(1, u.need - u.have);
+      return hi
+        ? `${u.need} naye stock kharidne ke baad khulta hai (jisme pichhle 2 hafte trade nahi kiya). Abhi ${u.have}, ${left} aur.`
+        : `Unlocks after ${u.need} buys of stocks you were not already trading. You have ${u.have}, ${left} to go.`;
+    }
     case "learn":
       return hi
         ? `${u.need} learning actions par (crash replay, Saathi se sawaal, ya explainer) ya account 2 hafte purana hone par khulta hai. Abhi ${u.have}.`
@@ -128,6 +152,48 @@ export function factText(f, hi = false) {
       return hi ? `Tumhara record ${f.days} din purana hai. Yeh score ${f.full} din me pakka hota hai.` : `Your record is ${f.days} day${s(f.days)} old. This score settles over ${f.full} days.`;
     case "record":
       return hi ? `${f.days} din ke ${f.trades} trades gine gaye.` : `${f.trades} trades over ${f.days} days counted.`;
+    case "improving":
+      return hi
+        ? `Sudhar ho raha hai: pehle har 10 trades me ${f.before} note, pichhle 30 din me ${f.now}.`
+        : `Getting better: ${f.before} notes per 10 trades before, ${f.now} in the last 30 days.`;
+    case "slipping":
+      return hi
+        ? `Dhyan do: pehle har 10 trades me ${f.before} note, pichhle 30 din me ${f.now}.`
+        : `Watch this: ${f.before} notes per 10 trades before, ${f.now} in the last 30 days.`;
+    // ---- results
+    case "profit":
+      return hi
+        ? `Tumne ${rupees(f.plPaise)} banaye, sabse zyada lagaye paise (${rupees(f.peakPaise)}) par ${f.pct}%.`
+        : `You made ${rupees(f.plPaise)}, ${f.pct}% on the most you had invested at once (${rupees(f.peakPaise)}).`;
+    case "loss":
+      return hi
+        ? `Tumne ${rupees(f.plPaise)} gawaye, sabse zyada lagaye paise (${rupees(f.peakPaise)}) par ${f.pct}%.`
+        : `You lost ${rupees(f.plPaise)}, ${f.pct}% on the most you had invested at once (${rupees(f.peakPaise)}).`;
+    case "drawdown":
+      return hi
+        ? `Sabse buri girawat: account apne high se ${rupees(f.dropPaise)} neeche gaya (lagaye paise ka ${f.pct}%).`
+        : `Worst fall: your account dropped ${rupees(f.dropPaise)} below its high (${f.pct}% of the money invested).`;
+    case "closed":
+      return hi
+        ? `Band hui positions: ${f.wins} jeeti, ${f.losses} haari, ${f.evens} barabar.`
+        : `Closed positions: ${f.wins} won, ${f.losses} lost, ${f.evens} even.`;
+    case "results_young":
+      return hi ? `Record ${f.days} din purana hai. Yeh score ${f.full} din me pakka hota hai.` : `Your record is ${f.days} day${s(f.days)} old. This score settles over ${f.full} days.`;
+    // ---- research
+    case "researched":
+      return hi
+        ? `Pichhle ${f.of} naye buys me se ${f.n} se pehle tumne stock ko dekha-parkha.`
+        : `${f.n} of your last ${f.of} new buys came after you looked into the stock first.`;
+    case "impulse":
+      return hi
+        ? `${f.of} me se ${f.n} buys stock pehli baar kholne ke kuch minute me, bina research ke.`
+        : `${f.n} of ${f.of} were bought within minutes of first opening the stock, with no research.`;
+    case "research_ways": {
+      const bits = hi
+        ? [f.views ? `${f.views} baar pehle din page dekha` : "", f.chart ? `${f.chart} baar chart` : "", f.watch ? `${f.watch} baar watchlist` : "", f.asked ? `${f.asked} baar Saathi se pucha` : ""]
+        : [f.views ? `earlier visits ${f.views}` : "", f.chart ? `chart ${f.chart}` : "", f.watch ? `watchlist ${f.watch}` : "", f.asked ? `asked Saathi ${f.asked}` : ""];
+      return (hi ? "Kaise dekha: " : "How you looked: ") + bits.filter(Boolean).join(", ") + ".";
+    }
     // ---- diversification
     case "top_stock":
       return hi ? `Tumhara sabse bada stock, ${f.name}, poore paise ka ${f.pct}% hai.` : `Your biggest stock, ${f.name}, is ${f.pct}% of all your money.`;

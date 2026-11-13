@@ -39,6 +39,10 @@
 //                kind = "STOCK" | "ETF" | "MF"; value at a REAL price, else cost
 //   activity: { weeks: [[weekStart "YYYY-MM-DD", activeDays, replays,
 //                        questions, reads]] } | null     null = not loaded
+//   profit:  { plPaise }               booked + on paper (returnSummary) | null
+//   research: [[ts, symbol, viewDays, chart, watchlist, asked]] | null
+//            each BUY of the last 120 days (report_card_signals().r)
+//   curve:   [["YYYY-MM-DD", totalValuePaise]] daily account value | null
 //   market:  { userPlPaise,            profit: booked + on paper (returnSummary)
 //              benchPlPaise, peakInvestedPaise, sinceTs }   from benchmarkPl()
 //            | null
@@ -58,7 +62,12 @@ const pct = (frac) => Math.round(frac * 100);
 /** Straight line from (x0 -> y0) to (x1 -> y1), flat outside. */
 const lin = (x, x0, y0, x1, y1) => (x <= x0 ? y0 : x >= x1 ? y1 : y0 + ((x - x0) / (x1 - x0)) * (y1 - y0));
 
-export const WEIGHTS = { discipline: 45, diversification: 25, learning: 20, market: 10 };
+// v3 (13 Nov, owner's request): the card reads what the user DOES on the
+// site, not only the trades. Results (own profit, risk-adjusted) and
+// Research (did they look into a stock before buying it) joined. Measured on
+// real users, a grade with no money in it had no link to profit at all
+// (correlation 0.05), and traders up 30% to 170% were getting C and D.
+export const WEIGHTS = { discipline: 25, results: 25, research: 15, diversification: 15, learning: 10, market: 10 };
 
 // ---- Discipline ---------------------------------------------------------------
 // weight = how many ordinary trades one flag of this pattern is worth. A
@@ -97,6 +106,7 @@ export const DISCIPLINE = {
   // after a 1:2 split every buy looks 50% below cost. On the real trades of
   // 13 Nov, 2 of the 3 averaging-down notes were like this.
   splitGapPct: -40,
+  trendBonus: 8,         // points back, at most, for halving notes per trade lately
 };
 
 function scoreDiscipline(input) {
@@ -136,7 +146,40 @@ function scoreDiscipline(input) {
     }
   }
   const rate = penalty / (exposure + DISCIPLINE.priorTrades);
-  const raw = 100 * Math.exp(-DISCIPLINE.steepness * rate);
+  // Getting better counts: notes per trade in the last 30 days against the
+  // time before. Fewer notes now earns up to `trendBonus` points back; more
+  // is only said, the notes already cost what they cost.
+  const cut = now - 30 * DAY;
+  const half = (inRecent) => {
+    let n = 0, pen = 0, cnt = 0;
+    for (const t of trades) {
+      if ((t.ts >= cut) !== inRecent) continue;
+      n++;
+      const seen = new Set();
+      for (const f of t.flags || []) {
+        const p = PATTERNS[f?.bias];
+        const sev = clamp(num(f?.severity), 0, 1);
+        if (!p || sev <= 0 || seen.has(p.group)) continue;
+        if (f.bias === "anchoring" && num(f.evidence?.below_cost_pct) <= DISCIPLINE.splitGapPct) continue;
+        seen.add(p.group);
+        pen += p.weight * sev;
+        cnt++;
+      }
+    }
+    return { n, rate: n ? pen / n : 0, per10: n ? Math.round((cnt / n) * 100) / 10 : 0 };
+  };
+  const before = half(false), recent = half(true);
+  let trend = null, bonus = 0;
+  if (before.n >= DISCIPLINE.minTrades && recent.n >= DISCIPLINE.minTrades) {
+    if (before.rate > 0) {
+      const ratio = recent.rate / before.rate;
+      if (ratio <= 0.5) { trend = "improving"; bonus = DISCIPLINE.trendBonus * (1 - ratio); }
+      else if (ratio >= 1.5) trend = "slipping";
+    } else if (recent.per10 >= 2) {
+      trend = "slipping";          // a clean record that started picking up notes
+    }
+  }
+  const raw = Math.min(100, 100 * Math.exp(-DISCIPLINE.steepness * rate) + bonus);
   const spanDays = Math.max(0, (now - firstTs) / DAY);
   const confidence = clamp(spanDays / DISCIPLINE.fullDays, DISCIPLINE.minConfidence, 1);
   const score = DISCIPLINE.neutral + (raw - DISCIPLINE.neutral) * confidence;
@@ -152,16 +195,163 @@ function scoreDiscipline(input) {
       : { key: g.key + "_old", tone: "info", n: g.count, days: round((now - g.lastTs) / DAY) });
   }
   if (!ranked.length) facts.push({ key: "clean", tone: "good", trades: n, days: Math.max(1, round(spanDays)) });
-  if (confidence < 1) facts.push({ key: "young", tone: "info", days: Math.max(1, round(spanDays)), full: DISCIPLINE.fullDays });
-  else if (ranked.length < 2) facts.push({ key: "record", tone: "info", trades: n, days: round(spanDays) });
+  if (trend) facts.push({ key: trend, tone: trend === "improving" ? "good" : "warn", before: before.per10, now: recent.per10 });
+  if (facts.length < 3) {
+    if (confidence < 1) facts.push({ key: "young", tone: "info", days: Math.max(1, round(spanDays)), full: DISCIPLINE.fullDays });
+    else if (ranked.length < 2) facts.push({ key: "record", tone: "info", trades: n, days: round(spanDays) });
+  }
 
   return {
     state: "scored", score: clamp(round(score), 0, 100), facts,
     detail: {
       trades: n, flags: ranked.reduce((s, g) => s + g.count, 0), rate, raw: round(raw),
-      confidence, spanDays: round(spanDays),
+      confidence, spanDays: round(spanDays), trend, bonus: Math.round(bonus * 10) / 10,
       groups: ranked.map((g) => ({ key: g.key, count: g.count, recent: g.recent })),
     },
+  };
+}
+
+// ---- Results ------------------------------------------------------------------
+// The user's own profit (booked + on paper) as a share of the most money they
+// ever had in stocks and funds at once. Cash kept aside is not counted
+// against them: 1 lakh invested that made 10,000 is +10%, whether 9 lakh more
+// sat in cash or not. Breaking even is 50; the curve flattens at both ends so
+// one huge win or loss cannot run the whole grade. Like Discipline, a record
+// younger than 4 weeks is pulled towards the middle: a lucky first week is
+// not a result yet.
+export const RESULTS = {
+  // score = 50 + 50 * tanh(return% / 8): +5% -> 78, +10% -> 92, -5% -> 22.
+  // Measured 13 Nov: 15 left profit almost no pull on the grade (rank
+  // correlation 0.31), 5 made a 3% week worth 26 points; 8 gave 0.40.
+  scalePct: 8,
+  fullDays: 28,
+  minConfidence: 0.3,
+  calmDrawdownPct: 10,   // a fall up to this share of the money invested is ordinary
+  drawdownWeight: 0.5,   // each point of fall beyond it takes half a point of return
+};
+
+// ---- Research -----------------------------------------------------------------
+// Did they look into a stock before putting money in? For every NEW buy (no
+// trade in that stock in the 14 days before; topping up or re-buying a stock
+// they were just trading is not a fresh decision) the server reports what the
+// user did first: opened the stock's page on an earlier day, used its chart,
+// had it on the watchlist, asked Saathi about it. One of those is half
+// marks, two or more is full marks; none, within minutes of first opening
+// the stock, is an impulse buy. Recent buys count more (45-day half-life).
+export const RESEARCH = {
+  minBuys: 3,
+  freshDays: 14,
+  halfLifeDays: 45,
+};
+
+function scoreResearch(input) {
+  if (!Array.isArray(input.research)) return { state: "pending", facts: [] };
+  const now = input.now;
+  const trades = (input.trades || []).filter((t) => t && t.symbol && Number.isFinite(t.ts));
+  const fresh = [];
+  for (const row of input.research) {
+    if (!Array.isArray(row)) continue;
+    const [ts, symbol, viewDays, chart, watch, asked] = row;
+    if (!Number.isFinite(Number(ts)) || !symbol) continue;
+    const t0 = Number(ts);
+    const recentTrade = trades.some((t) => t.symbol === symbol && t.ts < t0 - 60_000 && t.ts >= t0 - RESEARCH.freshDays * DAY);
+    if (recentTrade) continue;
+    const ways = { views: num(viewDays) > 0, chart: !!chart, watch: !!watch, asked: !!asked };
+    const depth = ways.views + ways.chart + ways.watch + ways.asked + (num(viewDays) >= 2 ? 1 : 0);
+    fresh.push({ ts: t0, symbol, depth, ways });
+  }
+  if (fresh.length < RESEARCH.minBuys) {
+    return { state: "locked", unlock: { key: "research", have: fresh.length, need: RESEARCH.minBuys }, facts: [] };
+  }
+  const hl = RESEARCH.halfLifeDays * DAY;
+  let w = 0, s = 0;
+  const count = { researched: 0, impulse: 0, views: 0, chart: 0, watch: 0, asked: 0 };
+  for (const b of fresh) {
+    const rec = Math.pow(0.5, Math.max(0, now - b.ts) / hl);
+    w += rec;
+    s += rec * Math.min(b.depth, 2) / 2;
+    if (b.depth > 0) count.researched++; else count.impulse++;
+    for (const k of ["views", "chart", "watch", "asked"]) if (b.ways[k]) count[k]++;
+  }
+  const score = w > 0 ? (100 * s) / w : 0;
+  const share = count.researched / fresh.length;
+  const facts = [{ key: "researched", tone: share >= 0.6 ? "good" : share >= 0.3 ? "warn" : "bad", n: count.researched, of: fresh.length }];
+  if (count.impulse > 0) facts.push({ key: "impulse", tone: count.impulse / fresh.length > 0.5 ? "bad" : "warn", n: count.impulse, of: fresh.length });
+  if (count.researched > 0) facts.push({ key: "research_ways", tone: "info", views: count.views, chart: count.chart, watch: count.watch, asked: count.asked });
+  return {
+    state: "scored", score: clamp(round(score), 0, 100), facts,
+    detail: { buys: fresh.length, ...count },
+  };
+}
+
+/** Most money (at cost) the user had in stocks and funds at once, first in first out. */
+export function peakInvested(trades) {
+  const list = (trades || []).filter((t) => t && t.symbol && num(t.qty) > 0 && num(t.pricePaise) > 0 && Number.isFinite(t.ts))
+    .slice().sort((a, b) => a.ts - b.ts);
+  const lots = {};
+  let invested = 0, peak = 0;
+  for (const t of list) {
+    const book = lots[t.symbol] || (lots[t.symbol] = []);
+    if (t.side === "BUY") {
+      book.push({ qty: num(t.qty), px: num(t.pricePaise) });
+      invested += num(t.qty) * num(t.pricePaise);
+      if (invested > peak) peak = invested;
+    } else if (t.side === "SELL") {
+      let left = num(t.qty);
+      while (left > 1e-9 && book.length) {
+        const lot = book[0];
+        const part = Math.min(left, lot.qty);
+        invested -= part * lot.px;
+        lot.qty -= part;
+        left -= part;
+        if (lot.qty <= 1e-9) book.shift();
+      }
+    }
+  }
+  return Math.round(peak);
+}
+
+function scoreResults(input) {
+  const trades = (input.trades || []).filter((t) => t && t.symbol && num(t.qty) > 0 && Number.isFinite(t.ts));
+  if (!trades.some((t) => t.side === "BUY")) {
+    return { state: "locked", unlock: { key: "first_buy" }, facts: [] };
+  }
+  const pl = input.profit?.plPaise;
+  const peak = peakInvested(trades);
+  if (!Number.isFinite(pl) || !(peak > 0)) return { state: "pending", facts: [] };
+  const r = (pl / peak) * 100;
+  // Risk: the deepest fall of the account's value from an earlier high (daily
+  // values, real prices), against the money that was in stocks. Up to 10% is
+  // normal market life; past that, half of the extra fall comes off.
+  let dropPaise = 0, top = -Infinity;
+  for (const [, v] of (input.curve || [])) {
+    const x = num(v);
+    if (!(x > 0)) continue;
+    if (x > top) top = x;
+    else if (top - x > dropPaise) dropPaise = top - x;
+  }
+  const ddPct = (dropPaise / peak) * 100;
+  const riskCut = Math.max(0, ddPct - RESULTS.calmDrawdownPct) * RESULTS.drawdownWeight;
+  const raw = 50 + 50 * Math.tanh((r - riskCut) / RESULTS.scalePct);
+  const firstTs = trades.reduce((m, t) => Math.min(m, t.ts), Infinity);
+  const spanDays = Math.max(0, (input.now - firstTs) / DAY);
+  const confidence = clamp(spanDays / RESULTS.fullDays, RESULTS.minConfidence, 1);
+  const score = 50 + (raw - 50) * confidence;
+  const r1 = Math.round(r * 10) / 10;
+  const facts = [{
+    key: pl >= 0 ? "profit" : "loss",
+    tone: r >= 2 ? "good" : r > -2 ? "info" : r > -10 ? "warn" : "bad",
+    plPaise: Math.round(pl), pct: r1, peakPaise: peak,
+  }];
+  if (ddPct >= 5) facts.push({ key: "drawdown", tone: ddPct > RESULTS.calmDrawdownPct ? "warn" : "info", dropPaise: Math.round(dropPaise), pct: Math.round(ddPct * 10) / 10 });
+  const st = input.stats;
+  if (st && num(st.wins) + num(st.losses) + num(st.evens) > 0) {
+    facts.push({ key: "closed", tone: "info", wins: num(st.wins), losses: num(st.losses), evens: num(st.evens) });
+  }
+  if (confidence < 1) facts.push({ key: "results_young", tone: "info", days: Math.max(1, round(spanDays)), full: RESULTS.fullDays });
+  return {
+    state: "scored", score: clamp(round(score), 0, 100), facts: facts.slice(0, 3),
+    detail: { plPaise: Math.round(pl), peakPaise: peak, pct: r1, drawdownPct: Math.round(ddPct * 10) / 10, riskCut: Math.round(riskCut * 10) / 10, raw: round(raw), confidence, spanDays: round(spanDays) },
   };
 }
 
@@ -424,17 +614,17 @@ function scoreMarket(input) {
 }
 
 // ---- Overall --------------------------------------------------------------------
-// Cut points chosen from the measured spread of the 957 real users with 5+
-// trades on 13 Nov 2026 (overall score p5 50, p10 55, p30 64, p50 69, p80 77,
-// p95 83). They gave 6% A+, 15% A, 28% B+, 25% B, 20% C, 7% D. AGENTS.md
-// says how to re-measure. Fixed numbers, not a curve: a user's grade never
-// moves because other users changed.
+// Cut points chosen from the measured spread of the 987 real users with 5+
+// trades on 13 Nov 2026 with all six parts (v3; overall score p5 45, p10 49,
+// p30 56, p50 62, p80 69, p95 76), aiming near 6% A+, 15% A, 27% B+, 25% B,
+// 20% C, 7% D. AGENTS.md says how to re-measure. Fixed numbers, not a curve:
+// a user's grade never moves because other users changed.
 export const GRADES = [
-  { grade: "A+", min: 83 },
-  { grade: "A",  min: 77 },
-  { grade: "B+", min: 70 },
-  { grade: "B",  min: 63 },
-  { grade: "C",  min: 53 },
+  { grade: "A+", min: 75 },
+  { grade: "A",  min: 69 },
+  { grade: "B+", min: 62 },
+  { grade: "B",  min: 55 },
+  { grade: "C",  min: 47 },
   { grade: "D",  min: 0 },
 ];
 export function gradeFor(score) {
@@ -445,6 +635,8 @@ export function scoreReportCard(input) {
   const inp = { ...input, now: Number.isFinite(input?.now) ? input.now : Date.now() };
   const pillars = {
     discipline: scoreDiscipline(inp),
+    results: scoreResults(inp),
+    research: scoreResearch(inp),
     diversification: scoreDiversification(inp),
     learning: scoreLearning(inp),
     market: scoreMarket(inp),

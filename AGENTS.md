@@ -332,20 +332,33 @@ effort for A/B runs; unset to restore the per-op settings.
   only, never advice). The owner floated "grey out the screen" with the
   note: NOT built, confirm with him first.
 
-## Report card v2 (13 Nov 2026)
+## Report card (v2 13 Nov 2026, v3 same day: reads what users DO on the site)
 
 - Score: `js/coach/reportCardCore.js`, pure with no imports (like biasCore).
-  Pillars and weights: Discipline 45 (detector flags on the user's own
-  trades, weighted by pattern, severity and a 45-day half-life, divided by
-  how much they trade, pulled to the middle until the record is 28 days
-  old), Diversification 25 (biggest stock, biggest sector, effective number
-  of positions with funds/ETFs counting as 5, idle cash judged gently after
-  30 days), Learning and activity 20 (8 steady weeks: showing up, crash
-  replays, Saathi questions, explainers read; trade count never counts),
-  Against the Nifty 50 10 (same rupees on the same days in the index, FIFO;
-  hidden before 28 days and 10 trades). A pillar without enough data is
-  locked and says what unlocks it; its weight goes to the others. No grade
-  before 5 trades. Fixed cut points A+ 83, A 77, B+ 70, B 63, C 53.
+  Six parts and weights:
+  - Discipline 25: detector flags on the user's own trades, weighted by
+    pattern, severity and a 45-day half-life, divided by how much they
+    trade, pulled to the middle until the record is 28 days old; up to 8
+    points back when notes per trade halved in the last 30 days.
+  - Results 25: own profit (booked + paper) on the most ever invested at
+    once, 50 + 50·tanh(r/8); a fall of the daily account value deeper than
+    10% of invested money costs half the extra; young records pulled to 50.
+  - Research 15: for each fresh BUY (no trade in that stock in the 14 days
+    before) what the user did first: stock page on an earlier day, its
+    chart, watchlist, asked Saathi (coach_open on its page or a chat naming
+    it). One = half marks, two+ = full. None = impulse buy.
+  - Diversification 15: biggest stock, biggest sector, effective number of
+    positions (funds/ETFs count as 5), idle cash judged gently after 30 days.
+  - Learning and activity 10: 8 steady weeks of showing up, crash replays,
+    Saathi questions, explainers, /learn pages, news opened.
+  - Against the Nifty 50 10: same rupees on the same days in the index,
+    FIFO; hidden before 28 days and 10 trades.
+  A part without enough data is locked and says what unlocks it; its weight
+  goes to the others. No grade before 5 trades. Fixed cut points A+ 75, A 69,
+  B+ 62, B 55, C 47.
+- Server inputs: `report_card_signals()` (migration `2026-11-13d`) returns
+  learning weeks, per-buy research and the daily account value in one call;
+  `js/features/learning.js` caches it.
 - Inputs: `js/coach/biasLedger.js` (stored flags for taps since 24 Oct; for
   matcher fills and older trades it re-runs the ledger-only detectors:
   churning, averaging down, overtrading), `js/data/indexCloses.js` (real
@@ -359,9 +372,10 @@ effort for A/B runs; unset to restore the per-op settings.
   achievements). The AI card gets the scored card as text (`card` in the
   `report-card` op; effort unchanged).
 - Tests: `scripts/test-report-card.mjs` (in perf-syntax.yml, with
-  test-bias-core.mjs). Calibrated on 957 real graded users (5+ trades) on
-  13 Nov: A+ 6%, A 15%, B+ 28%, B 25%, C 20%, D 7% (v1 had 69% B+ and no C/D,
-  because its bias counts were always 0 after a reload). To re-measure,
+  test-bias-core.mjs). v3 calibrated on 987 real graded users (5+ trades) on
+  13 Nov: A+ 6%, A 17%, B+ 27%, B 23%, C 20%, D 7%; A/A+ 96-100% in profit,
+  D 32%; rank correlation of the grade with return 0.40 (v2 without Results:
+  0.05; v1 gave 69% B+ and no C/D because its bias counts were always 0). To re-measure,
   export trades/holdings/activity per user (anonymised), feed them through
   the same modules and look at the score percentiles before moving a cut
   point. Never make the cut points a live curve.

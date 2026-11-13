@@ -1,13 +1,16 @@
 // =============================================================================
-// LEARNING — what the report card's "Learning and activity" pillar reads.
+// LEARNING + SIGNALS — what the report card reads beyond the trades.
 //
 // logLearn(): one row in public.learn_events each time a signed-in user opens
 // an explainer (a finance term, the "What is ...?" sheet of an after-trade
-// note). Nothing recorded this per account before.
+// note). Nothing recorded this per account before 13 Nov.
 //
-// loadActivity(): the user's last 12 weeks from report_card_activity() as
-// { weeks: [[weekStart, activeDays, replays, questions, reads]] }: one small
-// call, kept in the browser for a few minutes so the page opens fast.
+// loadActivity(): one call to report_card_signals() for the signed-in user:
+//   weeks     [[weekStart, activeDays, replays, questions, reads]]  (Learning)
+//   research  [[ts, symbol, viewDays, chart, watchlist, asked]]     (Research)
+//   curve     [["YYYY-MM-DD", totalValuePaise]]                     (Results)
+// kept in the browser for a few minutes so the page opens fast. Falls back to
+// report_card_activity() (weeks only) if the newer call fails.
 //
 // Like track.js, nothing here may throw into a click handler.
 // =============================================================================
@@ -15,7 +18,7 @@
 import { sb } from "../db/supabase.js";
 import { currentUser } from "../auth/accounts.js";
 
-const KEY = "ss.rcActivity.v1";
+const KEY = "ss.rcSignals.v1";
 const FRESH_MS = 10 * 60_000;
 const PAINT_MS = 24 * 3_600_000;
 const _recent = new Map();          // `${kind}:${subject}` -> ts
@@ -25,7 +28,8 @@ function saved(maxAgeMs) {
     const uid = currentUser()?.id || null;
     const o = JSON.parse(localStorage.getItem(KEY) || "null");
     if (!uid || !o || o.uid !== uid || !Array.isArray(o.weeks)) return null;
-    return Date.now() - (o.at || 0) < maxAgeMs ? { weeks: o.weeks } : null;
+    if (!(Date.now() - (o.at || 0) < maxAgeMs)) return null;
+    return { weeks: o.weeks, research: Array.isArray(o.research) ? o.research : null, curve: Array.isArray(o.curve) ? o.curve : null };
   } catch { return null; }
 }
 
@@ -51,7 +55,7 @@ export function cachedActivity() {
   return saved(PAINT_MS);
 }
 
-/** Fresh activity, or the last copy if the call fails, or null. */
+/** Fresh signals, or the last copy if the call fails, or null. */
 export async function loadActivity() {
   const fresh = saved(FRESH_MS);
   if (fresh) return fresh;
@@ -59,10 +63,17 @@ export async function loadActivity() {
     const uid = currentUser()?.id || null;
     const client = await sb();
     if (!uid || !client) return saved(PAINT_MS);
-    const { data, error } = await client.rpc("report_card_activity");
-    if (error || !Array.isArray(data)) return saved(PAINT_MS);
-    try { localStorage.setItem(KEY, JSON.stringify({ uid, at: Date.now(), weeks: data })); } catch {}
-    return { weeks: data };
+    let out = null;
+    const sig = await client.rpc("report_card_signals");
+    if (!sig.error && sig.data && Array.isArray(sig.data.w)) {
+      out = { weeks: sig.data.w, research: Array.isArray(sig.data.r) ? sig.data.r : null, curve: Array.isArray(sig.data.cv) ? sig.data.cv : null };
+    } else {
+      const act = await client.rpc("report_card_activity");
+      if (!act.error && Array.isArray(act.data)) out = { weeks: act.data, research: null, curve: null };
+    }
+    if (!out) return saved(PAINT_MS);
+    try { localStorage.setItem(KEY, JSON.stringify({ uid, at: Date.now(), ...out })); } catch {}
+    return out;
   } catch {
     return saved(PAINT_MS);
   }

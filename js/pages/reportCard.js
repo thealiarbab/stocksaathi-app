@@ -21,7 +21,7 @@ import { getInstrument, ensureUniverseLoaded } from "../data/universe.js";
 import { getQuoteBatch } from "../data/marketData.js";
 import { computeTradeStats } from "../data/tradeStats.js";
 import { aiLang } from "../features/aiLang.js";
-import { scoreReportCard, benchmarkPl, GRADES } from "../coach/reportCardCore.js";
+import { scoreReportCard, benchmarkPl, GRADES, WEIGHTS } from "../coach/reportCardCore.js";
 import { tradesWithFlags } from "../coach/biasLedger.js";
 import { factText, unlockText, pillarName, pillarCopy, gradeTitle, overallSummary, promptLines } from "../coach/reportCardCopy.js";
 import { niftyCloses, cachedNiftyCloses } from "../data/indexCloses.js";
@@ -116,14 +116,21 @@ function buildInput(state, extras) {
     positions.push({ symbol, name: inst?.name || symbol, valuePaise: Math.round(h.qty * px), kind: kindOf(symbol), sector: inst?.sector || null });
   }
   const bench = extras.nifty ? benchmarkPl(trades, extras.nifty) : null;
+  const plPaise = getReturnSummary(state).plPaise;
+  const sig = extras.activity;      // { weeks, research, curve } from report_card_signals()
   return {
     now: Date.now(),
     accountCreatedAt: createdAtOf(state),
     trades,
     stats: computeTradeStats(tx),
     portfolio: { cashPaise: (state.portfolio?.cashPaise || 0) + getReservedCashPaise(state), positions },
-    activity: extras.activity,
-    market: bench ? { userPlPaise: getReturnSummary(state).plPaise, ...bench } : null,
+    activity: sig ? { weeks: sig.weeks } : null,
+    research: sig?.research ?? null,
+    curve: sig?.curve ?? null,
+    // Only once real prices are in: a holding valued at cost would read as
+    // breaking even.
+    profit: extras.pricesReady ? { plPaise } : null,
+    market: bench ? { userPlPaise: plPaise, ...bench } : null,
   };
 }
 
@@ -134,7 +141,7 @@ export function renderReportCard(main) {
   const first = getState();
   const firstTs = (first.transactions || []).reduce((m, t) => Math.min(m, t.ts), Infinity);
   const since = Number.isFinite(firstTs) ? firstTs : Date.now();
-  const extras = { activity: cachedActivity(), nifty: cachedNiftyCloses(since), universeReady: false };
+  const extras = { activity: cachedActivity(), nifty: cachedNiftyCloses(since), universeReady: false, pricesReady: false };
   let last = null;             // { input, rc } of the latest draw
 
   if (aiCardUser !== (first.user?.id || null)) { aiCard = null; aiCardSignature = null; aiCardUser = first.user?.id || null; }
@@ -147,7 +154,7 @@ export function renderReportCard(main) {
   const held = Object.entries(first.holdings || {}).filter(([s, h]) => h?.qty > 0 && !s.startsWith("MF_")).map(([s]) => s);
   Promise.allSettled([
     ensureUniverseLoaded().then(() => { extras.universeReady = true; }),
-    held.length ? getQuoteBatch(held) : null,
+    (held.length ? getQuoteBatch(held) : Promise.resolve()).then(() => { extras.pricesReady = true; }),
     loadActivity().then((a) => { if (a) extras.activity = a; }),
     Number.isFinite(firstTs) ? niftyCloses(since).then((n) => { if (n) extras.nifty = n; }) : null,
   ]).then(() => { if (!alive) return; ready = true; render(); askAi(); });
@@ -370,8 +377,9 @@ function openHow(rc) {
     <div class="modal rc-dlg" role="dialog" aria-modal="true" aria-labelledby="rc-dlg-title">
       <div class="rc-dlg-top"><span class="rc-kicker">${T("Report card", "Report card")}</span>${closeBtn()}</div>
       <h2 id="rc-dlg-title">${T("How this is scored", "Score kaise banta hai")}</h2>
-      <p>${T("Three things make the grade: how you decide (Discipline, 45%), how spread out your money is (Diversification, 25%) and how steadily you learn (Learning and activity, 20%). After 4 weeks or 10 trades, your result against the Nifty 50 joins as a small part (10%).",
-        "Grade teen cheezon se banta hai: tum decide kaise karte ho (Discipline, 45%), paisa kitna phaila hai (Diversification, 25%), aur kitna lagataar seekhte ho (Seekhna aur activity, 20%). 4 hafte ya 10 trades ke baad Nifty 50 ke saamne tumhara result chhote hisse (10%) ke roop me judta hai.")}</p>
+      <p>${T("The grade reads what you do on StockSaathi, not just how many trades you place: your habits around each trade, what your money actually made, whether you looked into a stock before buying it (its page on earlier days, its chart, your watchlist, questions to Saathi), how spread out you are, and how steadily you learn. After 4 weeks or 10 trades, your result against the Nifty 50 joins too.",
+        "Grade woh padhta hai jo tum StockSaathi par karte ho, sirf trades ki ginti nahi: har trade ke aas paas tumhari aadatein, paise ne asal me kya banaya, kharidne se pehle stock ko dekha ya nahi (pehle din uska page, chart, watchlist, Saathi se sawaal), paisa kitna phaila hai, aur kitna lagataar seekhte ho. 4 hafte ya 10 trades ke baad Nifty 50 ke saamne tumhara result bhi judta hai.")}</p>
+      <p>${Object.entries(WEIGHTS).map(([k, w]) => `${esc(pillarName(k, hinglish()))} ${w}%`).join(" · ")}</p>
       <table class="rc-parts"><thead><tr><th>${T("Part", "Hissa")}</th><th>${T("Share today", "Aaj ka hissa")}</th><th>${T("Score", "Score")}</th></tr></thead><tbody>${rows}</tbody></table>
       <p>${T("A part without enough history is left out and the others share its weight, so being new never lowers a grade. The overall grade needs Discipline, which unlocks after 5 trades.",
         "Jis hisse ka data kam hai woh chhod diya jaata hai aur uska wazan baakiyon me bant jaata hai, isliye naya hone se grade kam nahi hota. Overall grade ke liye Discipline chahiye, jo 5 trades ke baad khulta hai.")}</p>

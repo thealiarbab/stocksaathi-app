@@ -322,7 +322,9 @@ function clean(x, pathName = "rc") {
     market: { ...m, userPlPaise: userPl },
   }));
   const lo = full(-900_000), hi = full(900_000);
-  ok("Nifty part is a tenth of the grade", lo.pillars.market.share === 10 && near(hi.overall.score - lo.overall.score, 10, 1), `${lo.overall.score}..${hi.overall.score}`);
+  const scoredW = Object.values(lo.pillars).filter((x) => x.state === "scored").reduce((s, x) => s + x.weight, 0);
+  const share = Math.round((core.WEIGHTS.market / scoredW) * 100);
+  ok("Nifty part carries only its weight of the grade", lo.pillars.market.share === share && near(hi.overall.score - lo.overall.score, share, 1), `${share} ${lo.overall.score}..${hi.overall.score}`);
 
   // benchmarkPl: the same rupees on the same days.
   const closes = [["2026-10-05", 100], ["2026-10-06", 102], ["2026-10-20", 105], ["2026-11-12", 110]];
@@ -358,11 +360,84 @@ function clean(x, pathName = "rc") {
   ok("one more day with nothing new moves discipline by 1 at most", Math.abs(a.pillars.discipline.score - b.pillars.discipline.score) <= 1);
 }
 
+// ---- 13b. Results: own profit, risk-adjusted ----------------------------------------------
+{
+  // 10 lakh bought 40 days ago, still held. Profit decides; cash on the side does not dilute it.
+  const trades = [tr(40, "R", "BUY", 100, 10_000_00), ...spread(6, 35, 2, "Q")];
+  const res = (plPaise, extra = {}) => score(base({ trades, profit: { plPaise }, ...extra })).pillars.results;
+  const peak = core.peakInvested(trades);
+  ok("results: breaking even is 50", res(0).score === 50);
+  ok("results: +5% on the money invested is about 78", near(res(Math.round(peak * 0.05)).score, 78, 1), String(res(Math.round(peak * 0.05)).score));
+  ok("results: -5% is about 22", near(res(-Math.round(peak * 0.05)).score, 22, 1));
+  ok("results: a huge win flattens out below 100", res(peak * 5).score <= 100 && res(peak * 5).score >= 99);
+  ok("results: more profit never scores lower", res(Math.round(peak * 0.02)).score < res(Math.round(peak * 0.04)).score);
+  ok("results: the fact says rupees and percent of money invested", res(Math.round(peak * 0.05)).facts[0].key === "profit" && res(Math.round(peak * 0.05)).facts[0].pct === 5);
+  ok("results: a loss is a loss fact", res(-100_00).facts[0].key === "loss");
+  ok("results: cash kept aside does not change it",
+    score(base({ trades, profit: { plPaise: 50_000_00 }, portfolio: { cashPaise: 1, positions: [] } })).pillars.results.score
+    === score(base({ trades, profit: { plPaise: 50_000_00 }, portfolio: { cashPaise: 900_000_000, positions: [] } })).pillars.results.score);
+  ok("results: no buy yet is locked, not zero", score(base({ trades: [tr(3, "X", "SELL", 1, 100)], profit: { plPaise: 0 } })).pillars.results.state === "locked");
+  ok("results: no profit figure is left out, not scored", score(base({ trades })).pillars.results.state === "pending");
+
+  // Risk: a fall deeper than 10% of the money invested costs part of the return.
+  const P = Math.round(peak * 0.06);
+  const calm = res(P, { curve: [["2026-10-01", 100_000_000], ["2026-10-20", 100_000_000 - Math.round(peak * 0.05)], ["2026-11-12", 100_000_000 + P]] });
+  const wild = res(P, { curve: [["2026-10-01", 100_000_000], ["2026-10-20", 100_000_000 - Math.round(peak * 0.30)], ["2026-11-12", 100_000_000 + P]] });
+  ok("results: a 5% dip along the way costs nothing", calm.score === res(P).score && calm.facts.some((f) => f.key === "drawdown" && f.pct === 5));
+  ok("results: a 30% fall along the way costs points", wild.score < calm.score - 10 && wild.facts.some((f) => f.key === "drawdown" && f.tone === "warn"), `${wild.score} vs ${calm.score}`);
+
+  // A young record is pulled to 50: one lucky week is not a result.
+  const young = score(base({ accountCreatedAt: NOW - 3 * DAY, trades: [tr(2, "Y", "BUY", 10, 1000_00)], profit: { plPaise: 300_00 } })).pillars.results;
+  ok("results: a 2-day-old 30% win stays near the middle", young.score <= 65 && young.facts.some((f) => f.key === "results_young"), String(young.score));
+  ok("peakInvested: sells take money back out", core.peakInvested([tr(5, "A", "BUY", 10, 100), tr(4, "A", "SELL", 10, 150), tr(3, "B", "BUY", 5, 100)]) === 1000);
+}
+
+// ---- 13c. Research: did they look before buying ----------------------------------------------
+{
+  const ts = (d) => NOW - d * DAY;
+  const buys = (rows) => rows.map(([d, sym]) => tr(d, sym, "BUY", 1, 100_00));
+  const rs = (rows, research) => score(base({ trades: buys(rows), research })).pillars.research;
+  const rows = [[30, "A"], [20, "B"], [10, "C"], [5, "D"]];
+  const all = rs(rows, rows.map(([d, s]) => [ts(d), s, 2, true, true, true]));
+  const none = rs(rows, rows.map(([d, s]) => [ts(d), s, 0, false, false, false]));
+  const one = rs(rows, rows.map(([d, s]) => [ts(d), s, 0, true, false, false]));
+  ok("research: looked in several ways before every buy is 100", all.state === "scored" && all.score === 100);
+  ok("research: never looked is 0, all impulse", none.score === 0 && none.facts.some((f) => f.key === "impulse" && f.n === 4 && f.tone === "bad"));
+  ok("research: one way of looking is half marks", one.score === 50);
+  ok("research: the facts count the user's own buys", all.facts[0].key === "researched" && all.facts[0].n === 4 && all.facts[0].of === 4 && all.facts.some((f) => f.key === "research_ways" && f.asked === 4));
+  ok("research: under 3 fresh buys is locked", rs(rows.slice(0, 2), rows.slice(0, 2).map(([d, s]) => [ts(d), s, 1, false, false, false])).state === "locked");
+  ok("research: no data is left out", rs(rows, null).state === "pending");
+
+  // Re-buying a stock already being traded is not a fresh decision.
+  const churn = [[30, "A"], [29, "A"], [28, "A"], [27, "A"], [20, "B"]];
+  const c = rs(churn, churn.map(([d, s]) => [ts(d), s, 0, false, false, false]));
+  ok("research: repeat buys in a stock traded days before are not judged", c.state === "locked" && c.unlock.have === 2);
+  // Recent buys count more.
+  const oldBad = rs(rows, rows.map(([d, s], i) => [ts(d), s, i < 2 ? 0 : 2, false, i >= 2, false]));
+  const newBad = rs(rows, rows.map(([d, s], i) => [ts(d), s, i >= 2 ? 0 : 2, false, i < 2, false]));
+  ok("research: recent buys weigh more than old ones", oldBad.score > newBad.score, `${oldBad.score} vs ${newBad.score}`);
+}
+
+// ---- 13d. Discipline: getting better counts --------------------------------------------------
+{
+  const chase = [flag("fomo", 0.8)];
+  const t = (flagsOld, flagsNew) => {
+    const old = Array.from({ length: 10 }, (_, i) => tr(90 - i * 5, "O" + i, "BUY", 1, 100_00, i < flagsOld ? chase : []));
+    const fresh = Array.from({ length: 10 }, (_, i) => tr(25 - i * 2, "N" + i, "BUY", 1, 100_00, i < flagsNew ? chase : []));
+    return score(base({ accountCreatedAt: NOW - 120 * DAY, trades: [...old, ...fresh] })).pillars.discipline;
+  };
+  const better = t(4, 0), same = t(2, 2), worse = t(0, 4);
+  ok("discipline: fewer notes lately says so", better.facts.some((f) => f.key === "improving" && f.before === 4 && f.now === 0));
+  ok("discipline: improving earns points back", better.detail.bonus > 0 && better.score > t(4, 4).score);
+  ok("discipline: more notes lately is flagged", worse.facts.some((f) => f.key === "slipping"));
+  ok("discipline: steady record has no trend fact", !same.facts.some((f) => f.key === "improving" || f.key === "slipping"));
+}
+
 // ---- 14. Grades -----------------------------------------------------------------------------
 {
   const g = core.gradeFor;
-  ok("grade cut points", g(100) === "A+" && g(83) === "A+" && g(82) === "A" && g(77) === "A" && g(76) === "B+" && g(70) === "B+"
-    && g(69) === "B" && g(63) === "B" && g(62) === "C" && g(53) === "C" && g(52) === "D" && g(0) === "D");
+  ok("grade cut points", g(100) === "A+" && g(75) === "A+" && g(74) === "A" && g(69) === "A" && g(68) === "B+" && g(62) === "B+"
+    && g(61) === "B" && g(55) === "B" && g(54) === "C" && g(47) === "C" && g(46) === "D" && g(0) === "D");
   ok("cut points go down and end at 0", core.GRADES.every((x, i, arr) => i === 0 || x.min < arr[i - 1].min) && core.GRADES[core.GRADES.length - 1].min === 0);
   ok("weights add up to 100, discipline largest, Nifty smallest", Object.values(core.WEIGHTS).reduce((s, x) => s + x, 0) === 100
     && core.WEIGHTS.discipline === Math.max(...Object.values(core.WEIGHTS)) && core.WEIGHTS.market === Math.min(...Object.values(core.WEIGHTS)));
@@ -380,6 +455,10 @@ function clean(x, pathName = "rc") {
     cash: { pct: 60, days: 12 }, cash_idle: { pct: 88, days: 70 },
     weeks: { active: 5, of: 8 }, actions: { replays: 1, questions: 4, reads: 2, weeks: 3, of: 8 }, no_actions: { of: 8 }, untried: { replays: true, questions: false, reads: false },
     vs_nifty: { youPaise: -123450, niftyPaise: 678900, diff: -8.1, sinceTs: Date.UTC(2026, 9, 5, 6, 0) },
+    improving: { before: 4, now: 0.5 }, slipping: { before: 1, now: 3 },
+    profit: { plPaise: 1234567, pct: 6.2, peakPaise: 19912345 }, loss: { plPaise: -50000, pct: -1.4, peakPaise: 3571428 },
+    drawdown: { dropPaise: 2500000, pct: 12.5 }, closed: { wins: 47, losses: 8, evens: 43 }, results_young: { days: 6, full: 28 },
+    researched: { n: 3, of: 5 }, impulse: { n: 2, of: 5 }, research_ways: { views: 2, chart: 1, watch: 0, asked: 1 },
   };
   const bad = /undefined|NaN|null|\[object/;
   for (const [key, f] of Object.entries(sample)) {
@@ -410,7 +489,7 @@ function clean(x, pathName = "rc") {
       ok(`copy: ${key} explains itself (${hi ? "Hinglish" : "English"})`, c && c.name && c.what.length > 40 && c.how.length > 40 && c.tryThis.length > 20);
     }
   }
-  const unlocks = [["trades", { have: 2, need: 5 }], ["no_holdings", {}], ["small", { pct: 10, need: 20 }], ["learn", { have: 1, need: 3 }], ["other", {}]];
+  const unlocks = [["trades", { have: 2, need: 5 }], ["no_holdings", {}], ["small", { pct: 10, need: 20 }], ["learn", { have: 1, need: 3 }], ["first_buy", {}], ["research", { have: 1, need: 3 }], ["other", {}]];
   for (const [key, u] of unlocks) {
     const en = copy.unlockText("discipline", { key, ...u }), hi = copy.unlockText("discipline", { key, ...u }, true);
     ok(`copy: unlock "${key}" in both languages`, en.length > 12 && hi.length > 12 && en !== hi && !bad.test(en + hi), en);
