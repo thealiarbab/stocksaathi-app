@@ -18,8 +18,13 @@ import { getState, setSetting } from "../state.js";
 import { biasCopy } from "../coach/biasCopy.js";
 import { NOTE_THRESHOLD } from "../coach/biasCore.js";
 import { onBackdropClick } from "./backdrop.js";
-import { track } from "../features/track.js";
+import { logEvent } from "../features/telemetry.js";
 import { logLearn } from "../features/learning.js";
+
+// The note's events go to web_events (op=ev, kind bias_note). They used to
+// go through track(), whose kind list and the user_events CHECK do not have
+// bias_note, so every one was dropped (found 13 Nov).
+const track = (kind, subject, props) => logEvent(kind, subject, props);
 
 const SEEN_KEY = "ss.biasnote.v1";
 const H = 3_600_000;
