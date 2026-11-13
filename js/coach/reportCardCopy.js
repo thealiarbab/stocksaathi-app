@@ -181,13 +181,18 @@ export function factText(f, hi = false) {
       return hi ? `Record ${f.days} din purana hai. Yeh score ${f.full} din me pakka hota hai.` : `Your record is ${f.days} day${s(f.days)} old. This score settles over ${f.full} days.`;
     // ---- research
     case "researched":
+      if (!f.n) {
+        return hi
+          ? `Pichhle ${f.of} naye buys me se kisi se pehle bhi tumne stock ko dekha-parkha nahi.`
+          : `None of your last ${f.of} new buys came after looking into the stock first.`;
+      }
       return hi
         ? `Pichhle ${f.of} naye buys me se ${f.n} se pehle tumne stock ko dekha-parkha.`
         : `${f.n} of your last ${f.of} new buys came after you looked into the stock first.`;
     case "impulse":
       return hi
-        ? `${f.of} me se ${f.n} buys stock pehli baar kholne ke kuch minute me, bina research ke.`
-        : `${f.n} of ${f.of} were bought within minutes of first opening the stock, with no research.`;
+        ? `${f.of} me se ${f.n} buy${s(f.n)} stock pehli baar kholne ke kuch minute me, bina research ke.`
+        : `${f.n} of ${f.of} ${s(f.n, "was", "were")} bought within minutes of first opening the stock, with no research.`;
     case "research_ways": {
       const bits = hi
         ? [f.views ? `${f.views} baar pehle din page dekha` : "", f.chart ? `${f.chart} baar chart` : "", f.watch ? `${f.watch} baar watchlist` : "", f.asked ? `${f.asked} baar Saathi se pucha` : ""]
@@ -209,6 +214,7 @@ export function factText(f, hi = false) {
       return hi ? `${f.pct}% ek mahine se zyada se cash me pada hai.` : `${f.pct}% has sat in cash for over a month.`;
     // ---- learning
     case "weeks":
+      if (!f.active) return hi ? `Pichhle ${f.of} hafte me app nahi khula.` : `The app was not opened in the last ${f.of} week${s(f.of)}.`;
       return hi ? `Pichhle ${f.of} hafte${s(f.of, "", "")} me se ${f.active} me tumne app khola.` : `You opened the app in ${f.active} of the last ${f.of} week${s(f.of)}.`;
     case "actions": {
       const bits = hi

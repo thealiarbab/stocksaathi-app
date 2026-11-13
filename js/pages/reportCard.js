@@ -125,6 +125,7 @@ function buildInput(state, extras) {
     stats: computeTradeStats(tx),
     portfolio: { cashPaise: (state.portfolio?.cashPaise || 0) + getReservedCashPaise(state), positions },
     activity: sig ? { weeks: sig.weeks } : null,
+    activeNow: true,                 // the viewer is in the app this week
     research: sig?.research ?? null,
     curve: sig?.curve ?? null,
     // Only once real prices are in: a holding valued at cost would read as

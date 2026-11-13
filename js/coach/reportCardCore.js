@@ -486,6 +486,14 @@ function scoreLearning(input) {
   // Weeks judged: the finished weeks since the account began (up to 8), plus
   // this week only if something already happened in it.
   const thisWeek = istWeekStart(now);
+  // The user reading their own card is in the app this week, even when the
+  // cached activity was fetched before this visit was logged (453 of 3,399
+  // users would otherwise read "You opened the app in 0 of the last 4 weeks"
+  // while opening it). The admin view leaves activeNow unset.
+  if (input.activeNow) {
+    const w = byWeek.get(thisWeek) || { days: 0, replays: 0, questions: 0, reads: 0 };
+    byWeek.set(thisWeek, { ...w, days: Math.max(1, w.days) });
+  }
   const cur = byWeek.get(thisWeek);
   const curActive = !!cur && (cur.days > 0 || cur.replays + cur.questions + cur.reads > 0);
   const finished = clamp(Math.floor(ageDays / 7), 0, L.windowWeeks - (curActive ? 1 : 0));

@@ -511,6 +511,22 @@ function clean(x, pathName = "rc") {
   ok("summary: a graded card names its strongest and weakest part", /Strongest: .*Most room to grow: /.test(copy.overallSummary({ state: "graded", best: "learning", worst: "discipline" })));
 }
 
+// ---- 15b. Found by running all 3,399 real users' cards (13 Nov) --------------------------------
+{
+  // Old account, nothing logged this week yet: the reader is in the app now.
+  const quiet = weeksOf((i) => (i === 3 ? [2, 0, 0, 0] : [0, 0, 0, 0])).filter((w) => w[1] > 0);
+  const trades = spread(12, 60, 5);
+  const page = score(base({ trades, activity: { weeks: quiet }, activeNow: true })).pillars.learning;
+  const admin = score(base({ trades, activity: { weeks: quiet } })).pillars.learning;
+  const wPage = page.facts.find((f) => f.key === "weeks"), wAdmin = admin.facts.find((f) => f.key === "weeks");
+  ok("learning: the reader counts as here this week", wPage.active === 2 && wPage.of === 8, JSON.stringify(wPage));
+  ok("learning: the admin view keeps the real count", wAdmin.active === 1, JSON.stringify(wAdmin));
+  ok("learning: activeNow never lowers the score", page.score >= admin.score);
+  ok("copy: zero weeks is not '0 of'", !/\b0 of\b/.test(copy.factText({ key: "weeks", active: 0, of: 4 })) && /not opened in the last 4 weeks/.test(copy.factText({ key: "weeks", active: 0, of: 4 })));
+  ok("copy: zero researched buys reads 'None of'", /^None of your last 3 new buys/.test(copy.factText({ key: "researched", n: 0, of: 3 })) && !/ 0 /.test(copy.factText({ key: "researched", n: 0, of: 3 }, true)));
+  ok("copy: one impulse buy is singular", /1 of 5 was bought/.test(copy.factText({ key: "impulse", n: 1, of: 5 })) && /1 buy stock/.test(copy.factText({ key: "impulse", n: 1, of: 5 }, true)) && /2 of 5 were bought/.test(copy.factText({ key: "impulse", n: 2, of: 5 })));
+}
+
 // ---- 16. Nothing scored in this file contains a broken number --------------------------------
 {
   const broken = seen.map((rc) => clean(rc)).filter(Boolean);
