@@ -10,6 +10,8 @@ import { runDetectors, ALL_DETECTORS } from "../coach/biasDetectors.js";
 import { getInstrument, SECTORS } from "../data/universe.js";
 import { computeTradeStats } from "../data/tradeStats.js";
 import { aiLang } from "../features/aiLang.js";
+import { isOwner } from "../features/preview.js";
+import { achievementsCardHtml, mountAchievementsCard } from "../achievements/ui.js";
 
 let aiCard = null;           // { narrative, strengths, watchouts } | null
 let aiCardLoading = false;
@@ -132,24 +134,7 @@ export function renderReportCard(main) {
         </div>
       </div>
 
-      <div class="card" style="margin-top: var(--sp-6);">
-        <div class="card-head">
-          <h3>Badges</h3>
-          <span class="dim" style="font-size: var(--text-xs);">${earnedBadges.size} / ${BADGES.length} earned</span>
-        </div>
-        <div class="badges-grid">
-          ${BADGES.map(b => {
-            const earned = earnedBadges.has(b.code);
-            return `
-              <div class="badge-card ${earned ? "earned" : "locked"}" aria-label="${escapeHtml(b.title)}">
-                <div class="emoji">${b.emoji}</div>
-                <div class="title">${escapeHtml(b.title)}</div>
-                <div class="desc">${escapeHtml(b.desc)}</div>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
+      ${isOwner() ? achievementsCardHtml() : badgesCardHtml(earnedBadges)}
 
       ${state.transactions.length === 0 ? `
         <div class="card" style="margin-top: var(--sp-6); text-align: center; padding: var(--sp-8);">
@@ -160,6 +145,7 @@ export function renderReportCard(main) {
         </div>
       ` : ""}
     `;
+    if (isOwner()) mountAchievementsCard(main);
   }
 }
 
@@ -264,6 +250,30 @@ function computeBadges(state, analysis) {
   const viewedStocks = new Set(state.coachMessages.filter(m => m.eventType === "STOCK_INTRO").map(m => m.triggerSymbol));
   if (viewedStocks.size >= 10) earned.add("curious");
   return earned;
+}
+
+// Owners see achievements here instead (js/achievements/, 13 Nov); everyone
+// else keeps the 8 badges until the owner rolls achievements out.
+function badgesCardHtml(earnedBadges) {
+  return `
+      <div class="card" style="margin-top: var(--sp-6);">
+        <div class="card-head">
+          <h3>Badges</h3>
+          <span class="dim" style="font-size: var(--text-xs);">${earnedBadges.size} / ${BADGES.length} earned</span>
+        </div>
+        <div class="badges-grid">
+          ${BADGES.map(b => {
+            const earned = earnedBadges.has(b.code);
+            return `
+              <div class="badge-card ${earned ? "earned" : "locked"}" aria-label="${escapeHtml(b.title)}">
+                <div class="emoji">${b.emoji}</div>
+                <div class="title">${escapeHtml(b.title)}</div>
+                <div class="desc">${escapeHtml(b.desc)}</div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>`;
 }
 
 function renderBehaviorRow(name, count, tone, desc) {

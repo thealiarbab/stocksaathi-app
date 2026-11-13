@@ -1671,6 +1671,10 @@ async function route(req) {
       case "admin-ops-issue":     return await opAdminOpsIssue(req, origin, url);
       case "admin-ops-issues-set": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminOpsIssuesSet(req, origin);
       case "admin-ops-selftest":  return await opAdminOpsSelftest(req, origin);
+      case "ach-draft":           if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAchDraft(req, origin);
+      case "admin-achievements":  return await opAdminAchievements(req, origin);
+      case "admin-achievements-dry-run": return await opAdminAchievementsDryRun(req, origin);
+      case "admin-achievements-set": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminAchievementsSet(req, origin);
       case "signup-count":        return await opSignupCount(req, origin);
       case "admin-path-check":    return opAdminPathCheck(req, origin, url);
       case "admin-overview":      return await opAdminOverview(req, origin);
@@ -1870,6 +1874,96 @@ async function opAdminOpsIssuesSet(req, origin) {
   if (!res.ok) return j(502, { error: "query_failed", detail: `ops_admin_set ${res.status}: ${(await res.text()).slice(0, 200)}` }, origin);
   return j(200, await res.json(), origin);
 }
+// ---------------------------------------------------------------------------
+// ACHIEVEMENTS (13 Nov; tables and rules in 2026-11-13b_achievements.sql)
+//
+// ach-draft: the database asks (pg_cron achievements-drafts -> pg_net, bearer
+// CRON_SECRET) or the owner clicks "Draft now" on /a. The model proposes a
+// few seasonal achievements for ONE market event; admin_ach_draft_insert()
+// checks every field again (metric whitelist, no trade counts) and files the
+// good ones as status 'draft'. Nothing goes live until the owner approves.
+// ---------------------------------------------------------------------------
+const ACH_METRICS = {
+  visit_days: "days the app was opened in the window",
+  learn_actions: "questions to the coach + crash replays + news + lessons read",
+  stock_views: "different stocks looked at",
+  report_views: "times the report card was opened",
+  review_views: "times the portfolio or report card was opened",
+  held_through: "1 = kept at least one holding from before the window opened until after it closed",
+  questions: "questions asked to the coach",
+  replays: "crash replays finished",
+  news_reads: "news stories opened",
+};
+async function opAchDraft(req, origin) {
+  if (!checkCronSecret(req) && !checkAdmin(req).ok) return j(401, { error: "unauthorized" }, origin);
+  let b; try { b = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const eventId = Number(b?.event_id);
+  if (!Number.isInteger(eventId) || eventId < 1) return j(400, { error: "bad_event" }, origin);
+  const ctxRes = await sbAdminFetch(`/rest/v1/rpc/admin_ach_draft_context`, { method: "POST", body: JSON.stringify({ p_event: eventId }) });
+  if (!ctxRes.ok) return j(502, { error: "context_failed", status: ctxRes.status }, origin);
+  const ctx = await ctxRes.json();
+  if (!ctx?.event) return j(404, { error: "no_event" }, origin);
+  const ev = ctx.event;
+  const system = [
+    "You design seasonal achievements for StockSaathi, a virtual-money stock market learning app for Indian teenagers (13-19).",
+    "Return JSON only: {\"concepts\": [ ... 3 or 4 items ... ]}. Each item:",
+    "{\"name_en\": <=30 chars, \"name_hi\": Hinglish (Roman script) <=30 chars, \"emoji\": one emoji, \"tier\": 1|2|3,",
+    " \"desc_en\": what to do, <=120 chars, \"desc_hi\": same in Hinglish,",
+    " \"why_en\": what the user did, <=120 chars, may use {event} and {n}, \"why_hi\": same in Hinglish,",
+    " \"need\": {metric: minimum, ...} using ONLY these metrics: " + JSON.stringify(ACH_METRICS) + ",",
+    " \"pad\": [days before the event, days after] each 0-14, \"note\": one line for the owner on why this is a good habit}.",
+    "Rules: reward learning, patience, holding, diversifying and coming back to learn. NEVER reward trading, trade counts,",
+    "trading every day or speed. No pressure or fear of missing out, no 'don't lose your streak'. Keep minimums modest",
+    "(a curious beginner should manage tier 1). Plain words, warm, no hype, no financial advice. Do not repeat these existing ones:",
+    JSON.stringify((ctx.existing || []).slice(0, 60).map((x) => x.name)),
+  ].join("\n");
+  const user = `Event: ${ev.name} (${ev.kind}), ${ev.starts_on}${ev.ends_on !== ev.starts_on ? " to " + ev.ends_on : ""}.${ev.note ? " Note: " + ev.note : ""}`;
+  let parsed = null;
+  try {
+    const text = await callLlm({
+      op: "ach-draft", feature: "achievements",
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      max_tokens: 1400, temperature: 0.7, response_format: { type: "json_object" }, profile: "json", effort: "medium",
+    });
+    parsed = parseJsonLoose(text);
+  } catch (e) {
+    return j(502, { error: "model_failed", detail: String(e?.message || e).slice(0, 200) }, origin);
+  }
+  const concepts = Array.isArray(parsed?.concepts) ? parsed.concepts.slice(0, 6) : [];
+  if (!concepts.length) return j(502, { error: "no_concepts" }, origin);
+  const ins = await sbAdminFetch(`/rest/v1/rpc/admin_ach_draft_insert`, {
+    method: "POST", body: JSON.stringify({ p_event: eventId, p_concepts: concepts, p_model: "callLlm json" }),
+  });
+  if (!ins.ok) return j(502, { error: "insert_failed", status: ins.status, detail: (await ins.text()).slice(0, 200) }, origin);
+  return j(200, { ok: true, event: ev.name, ...(await ins.json()) }, origin);
+}
+async function opAdminAchievements(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const res = await sbAdminFetch(`/rest/v1/rpc/admin_ach_overview`, { method: "POST", body: "{}" });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `admin_ach_overview ${res.status}` }, origin);
+  return j(200, await res.json(), origin);
+}
+async function opAdminAchievementsDryRun(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const res = await sbAdminFetch(`/rest/v1/rpc/admin_ach_dry_run`, { method: "POST", body: "{}" });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `admin_ach_dry_run ${res.status}` }, origin);
+  return j(200, await res.json(), origin);
+}
+async function opAdminAchievementsSet(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  let b; try { b = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const action = String(b?.action || "");
+  if (!["approve", "reject", "retire", "restore", "edit_draft", "rollout", "auto_draft", "add_event", "request_drafts"].includes(action)) {
+    return j(400, { error: "bad_action" }, origin);
+  }
+  const res = await sbAdminFetch(`/rest/v1/rpc/admin_ach_set`, { method: "POST", body: JSON.stringify({ p: b }) });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `admin_ach_set ${res.status}: ${(await res.text()).slice(0, 200)}` }, origin);
+  return j(200, await res.json(), origin);
+}
+
 // Throws on purpose, so the owner can see one test issue travel the whole
 // path (report -> grouping -> Issues tab -> push + e-mail).
 async function opAdminOpsSelftest(req, origin) {
@@ -3365,6 +3459,7 @@ const EV_KINDS = new Set([
   "session_start", "page", "page_leave", "click", "rage_click", "form_start", "field",
   "form_submit", "form_abandon", "form_error", "toast", "error", "api", "perf", "search",
   "outbound", "copy", "net", "install", "visibility", "share", "media", "coach",
+  "achievement",
 ]);
 const EV_BOT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|whatsapp|python-requests|curl|wget/i;
 const EV_ID = /^[A-Za-z0-9_-]{8,40}$/;

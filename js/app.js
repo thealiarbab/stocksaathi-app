@@ -170,6 +170,18 @@ componentStylesReady.catch((error) => {
 // A small delay keeps it from competing with first paint.
 setTimeout(() => { showPendingNotices(); }, 1200);
 
+// Achievements (owner preview, 13 Nov): toasts for what the server awarded
+// while the user was away, and live ones after. Loaded only for owner
+// accounts; starts once the signed-in owner is known.
+setTimeout(() => {
+  const go = () => {
+    if (!getState()?.user?.isAdmin) return false;
+    import("./achievements/ui.js").then((m) => m.startAchievements()).catch(() => {});
+    return true;
+  };
+  if (!go()) { const off = subscribe(() => { if (go()) off(); }); }
+}, 2500);
+
 // Reactively sync theme
 subscribe((s) => {
   document.documentElement.setAttribute("data-theme", resolvedTheme(s.settings));

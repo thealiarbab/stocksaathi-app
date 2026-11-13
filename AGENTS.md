@@ -7,8 +7,9 @@ Vanilla-JS SPA + Python serverless (Vercel) + Postgres (Supabase). Virtual-money
 Handoff notes were kept OUTSIDE git (`docs/HANDOFF_claude-session-jolly-ptolemy_chat-notifications-portfolio_2026-10-19.md`, gitignored, owner has a copy). Summary: owner's standing rules, his UX
 decisions, the pending queue IN HIS ORDER, what shipped, root causes, and
 tooling traps. Done since: #6 Settings redesign (24 Oct), #1 bias detectors
-+ after-trade note (24 Oct). Next: #2 report card algorithm, then #3
-achievements (80+/seasonal). Commit 27b1c155 still needs his approval for a
++ after-trade note (24 Oct). Next: #2 report card algorithm (in progress,
+uncommitted on the PC as of 13 Nov), #3 achievements (DB live for owners 13 Nov,
+code in achievements-ship/ until pushed). Commit 27b1c155 still needs his approval for a
 history rewrite.
 
 ## Stack
@@ -256,6 +257,51 @@ effort for A/B runs; unset to restore the per-op settings.
 - ops_health_check also has `signup_spike` (alert only).
 - Vercel Firewall: no config existed and the API refused to create one;
   the owner must open the Firewall tab once before rules can be added.
+
+## Achievements (13 Nov 2026; owner preview, not rolled out)
+
+- **Tables:** `achievement_defs` (one row per tier: copy EN/Hinglish, `metric`
+  + `threshold`, or `metric='season'` + `rule` {event_kind|event_id, pad,
+  need}; `status` draft/active/retired/rejected; `source` core/ai),
+  `user_achievements` (user, code, evidence = the user's own numbers,
+  seen_at, backfilled, seeded), `market_events` (dated calendar),
+  `achievement_settings` (rollout owner|all, auto_draft), `user_achievement_state`
+  (ach_check throttle), `hist_daily_closes` + view `real_daily_closes`
+  (bhavcopy, else the Yahoo daily bars copied from zz_bias_eval_bars).
+  RLS: users SELECT their own `user_achievements`, nothing else, no writes.
+- **Awarding (server only):** `_ach_facts(users[])` derives every metric
+  from transactions (holding episodes, real closes, bias_flags), user_events,
+  coach_messages and learn_events; `_ach_season` counts market events a user
+  took part in; `_ach_eval` compares with active defs; `_ach_award` inserts,
+  then writes `notifications` (category `achievements`; 3+ new at once = ONE
+  summary row). pg_cron `achievements-sweep` (*/10) runs `ach_sweep()`:
+  users active since the last run, a full pass after 02:30 IST. Clients call
+  `ach_check()` (30 s throttle), `my_achievements()`, `ach_mark_seen()`.
+  Scope = `_ach_in_scope()`: admin accounts while rollout = 'owner'.
+- **Rules twin:** `js/achievements/core.js` (catalogue + `deriveFacts`, pure,
+  no imports). Change a rule in BOTH places; `scripts/test-achievements.mjs`
+  pins the JS side. Catalogue changes: `node scripts/achievements-seed.mjs`
+  prints the upsert for a new migration (status is never overwritten).
+  Never add an achievement that counts trades or asks for daily trading.
+- **UI:** `js/achievements/ui.js` (toasts, list sheet, report card card,
+  styles injected at runtime), started from `js/app.js` for owners only;
+  report card shows it instead of the 8 badges for owners. Telemetry:
+  web_events kind `achievement` (shown/opened/dismissed).
+- **Approval queue:** /a → Achievements. `op=ach-draft` (callLlm, op
+  `ach-draft`, recorded in llm_usage) drafts 3-4 seasonal concepts for ONE
+  event; `admin_ach_draft_insert` re-checks them (metric whitelist, no trade
+  counts) and files them as `draft`. Nothing is live until approved there.
+  pg_cron `achievements-drafts` (09:10 IST) asks for the next event within
+  21 days when `auto_draft` is on (off until the API op is deployed).
+- **Add a season's dates:** insert into `market_events` (kind
+  results_season / budget / rbi_policy / diwali / month_end / quarter_end /
+  fy_start / other, name, starts_on, ends_on), or /a → Achievements →
+  Market calendar → Add a date. Seasonal achievements match by kind, so
+  nothing else changes. Diwali 2027 and Budget 2028 are not in yet.
+- **Rollout:** /a switch sets rollout = 'all' (server awards everyone on the
+  next nightly pass, one summary each), AND lift the `isAdmin`/`isOwner()`
+  checks in `js/app.js` and `js/pages/reportCard.js`. Preview samples for
+  the owners are `seeded = true`; a real award replaces a sample.
 
 ## Behaviour detectors and the after-trade note (rewritten 24 Oct)
 

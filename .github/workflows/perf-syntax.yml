@@ -55,6 +55,14 @@ jobs:
       - name: NSE calendar — holiday and trading-day regression suite
         run: node scripts/test-nse-calendar.mjs
 
+      - name: Achievements — rules, catalogue and edge cases
+        run: node scripts/test-achievements.mjs
+
+      - name: Node parse — achievements UI and admin tab
+        run: |
+          node --check js/achievements/ui.js
+          node --check js/pages/adminAchievements.js
+
       - name: Node parse — pregen-crashes.mjs (only on branches that have it)
         run: |
           if [ -f scripts/pregen-crashes.mjs ]; then
