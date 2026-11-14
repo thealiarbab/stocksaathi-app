@@ -337,6 +337,8 @@ export async function gateSummary(env, deps) {
   return {
     waiting: waiting.slice(0, 15).map((g) => ({ issue: g.id, area: g.area, band: g.band, reason: g.reason })),
     waiting_count: waiting.length,
+    // What is serious and still happening right now (numbers only, no titles).
+    serious: rows.filter((g) => LIVE.has(g.sstate) && decideBand(g, now) === "serious").slice(0, 10).map((g) => ({ issue: g.id, fp: g.fp.slice(0, 8), area: g.area, opened: g.opened })),
     queued: rows.filter((g) => g.why === "queued").length,
     held_while_off: rows.filter((g) => g.why === "paused").length,
     with_agent: rows.filter((g) => g.state === "woken" || g.status === "fixing" || g.status === "fix_live").length,
