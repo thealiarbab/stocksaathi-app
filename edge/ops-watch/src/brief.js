@@ -65,9 +65,12 @@ export async function buildBrief(env, deps, { rows, usage, paused, log, origin }
     const r = await env.DB.prepare("SELECT vital, SUM(v) s, COUNT(*) n FROM vital_hour WHERE vital IN ('signups', 'trades', 'views') AND hour >= ?1 AND hour < ?2 GROUP BY vital").bind(from, to).all();
     return Object.fromEntries((r.results || []).map((x) => [x.vital, x]));
   };
-  const today = await sum(h0, h1), week = await sum(h0 - 168, h1 - 168);
-  const cmp = (k, word) => `${word} ${today[k] ? n0(today[k].s) : "?"}${week[k]?.n ? ` (${n0(week[k].s)} a week ago)` : ""}`;
-  out.push(`Today so far: ${cmp("signups", "sign-ups")}, ${cmp("trades", "trades")}, ${cmp("views", "page activity")}.${week.signups?.n ? "" : " No numbers from a week ago yet."}`);
+  const today = await sum(h0, h1), week = await sum(h0 - 168, h1 - 168), yest = await sum(h0 - 24, h1 - 24);
+  // Compared with the same hours a week ago; until a week of numbers exists,
+  // with the same hours yesterday.
+  const cmp = (k, word) => `${word} ${today[k] ? n0(today[k].s) : "?"}${week[k]?.n ? ` (${n0(week[k].s)} a week ago)` : yest[k]?.n ? ` (${n0(yest[k].s)} yesterday by this time)` : ""}`;
+  const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
+  out.push(`Today so far: ${cmp("signups", "sign-ups")}, ${cmp("trades", "trades")}, ${cmp("views", "page activity")}.${weekend ? " It is the weekend: the market is closed, so almost no trades is normal." : ""}`);
 
   const opened = await env.DB.prepare(
     "SELECT g.fp, g.area, g.state, g.why, g.reason, g.status, s.issue_id id, s.title FROM gate g JOIN sig s ON s.fp = g.fp WHERE g.opened >= ?1 ORDER BY g.opened LIMIT 15",
