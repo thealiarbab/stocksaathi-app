@@ -67,6 +67,26 @@ export function renderIssuesTab(host, { adminGet, adminPost }) {
   ctx.load();
 }
 
+// The agent's side: is waking switched on, how much of the Claude plan is
+// left as the watcher last heard, and what waits for an OK. The answer to a
+// waiting item is given from the daily brief e-mail (a signed link).
+function agentLine(d) {
+  const g = d.watcher?.gate;
+  if (!g) return "";
+  const waiting = g.waiting || [];
+  const head = `Agent: ${g.paused ? '<span class="is-bad">waking is switched off</span>' : '<b>on</b>, started only when the watcher asks'}`
+    + ` · Claude limits: ${e(g.usage || "no reading")}`
+    + ` · starts today: ${fmtInt(g.wakes_today || 0)}`
+    + (g.with_agent ? ` · with the agent now: ${fmtInt(g.with_agent)}` : "")
+    + (g.queued ? ` · queued for the next small batch: ${fmtInt(g.queued)}` : "");
+  const list = waiting.length
+    ? `<details class="is-wait"><summary>${fmtInt(g.waiting_count || waiting.length)} waiting for your OK</summary><ul>${waiting.map((x) =>
+      `<li>${x.issue ? `#${e(x.issue)}` : "(no number yet)"} <span class="dim">${e(x.area)}, ${e(x.band)}</span> · ${e(x.reason || "")}</li>`).join("")}</ul>
+      <div class="dim">Say yes or not now from the link in the 21:00 brief e-mail.</div></details>`
+    : "";
+  return `<div class="dim text-sm">${head}</div>${list}`;
+}
+
 function watcherLine(d) {
   const w = d.watcher || {};
   const seen = d.collector_seen?.at;
@@ -99,6 +119,7 @@ function paint(root, ctx) {
       <div>
         <h2 style="margin:0">Issues</h2>
         <div class="dim text-sm">${watcherLine(d)}</div>
+        ${agentLine(d)}
       </div>
       <div class="is-actions">
         <button class="btn btn-ghost btn-sm" data-act="selftest" title="Throws one test error on the server so you can watch it arrive here">Send a test error</button>
@@ -320,6 +341,9 @@ function ensureStyle() {
 .is-st { font-weight: 600; }
 .is-st-fixed, .is-good { color: var(--positive, #16a34a); }
 .is-st-needs_owner, .is-st-regressed, .is-bad { color: var(--negative, #dc2626); }
+.is-wait { margin-top: 4px; font-size: 13px; }
+.is-wait summary { cursor: pointer; }
+.is-wait ul { margin: 6px 0 4px; padding-left: 18px; }
 .is-st-ignored { color: var(--text-dim, #888); }
 .is-detail { padding: 10px 4px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .is-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
