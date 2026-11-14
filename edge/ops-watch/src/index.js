@@ -4,6 +4,8 @@
 
 import { ingest, kvGet, kvPut, mergeSignatures, splitSignature } from "./core.js";
 import { runPulse } from "./pulse.js";
+import { setUsage, setPaused, answer, addNote, gateView, gateSummary, testWake } from "./gaterun.js";
+import { page } from "./page.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
@@ -62,7 +64,7 @@ export function makeDeps(env) {
             await kvPut(env, "mail_last", { at: last.at, held: (last.held || 0) + 1 }, now()).run();
             return false;
           }
-          if (last?.held) body += `\n\n(${last.held} more alert(s) were held back in the last 10 minutes; see /a > Issues.)`;
+          if (last?.held) body += `\n\n(${last.held} more alert(s) were held back in the last 10 minutes; they are in the admin panel, Issues tab.)`;
         }
         await kvPut(env, "mail_last", { at: now(), held: 0 }, now()).run();
         if (env.RESEND_API_KEY) {
@@ -83,15 +85,51 @@ export function makeDeps(env) {
         return r.status >= 200 && r.status < 300;
       } catch { return false; }
     },
+    // Starts the agent: one call to the routine's own start address. Every
+    // call creates a new session, so there is no retry in here. `status: 0`
+    // without `why` means "no answer": it may or may not have started.
+    async wake(text) {
+      if (!env.AGENT_FIRE_URL || !env.AGENT_FIRE_TOKEN) return { ok: false, status: 0, why: "no_token" };
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      try {
+        const r = await fetch(env.AGENT_FIRE_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.AGENT_FIRE_TOKEN}`, "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01", "anthropic-beta": "experimental-cc-routine-2026-04-01",
+          },
+          body: JSON.stringify({ text: String(text).slice(0, 6000) }),
+          signal: ctrl.signal,
+        });
+        let id = null;
+        try { const j = await r.json(); id = j?.claude_code_session_id || j?.session_id || j?.id || null; } catch {}
+        return { ok: r.ok, status: r.status, id };
+      } catch (e) {
+        return { ok: false, status: 0, err: String(e?.message || e).slice(0, 120) };
+      } finally { clearTimeout(timer); }
+    },
   };
 }
+
+// The collector's own public address, learned from the first signed-in request
+// (the site posts here all day). Used only to build links in the daily brief.
+let selfKnown = false;
 
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (url.pathname === "/" || url.pathname === "/favicon.ico") return new Response("ok", { status: 200 });
+    // Signed links from the daily brief: no password, the signature is the key.
+    if (url.pathname === "/p") {
+      try { return await page(req, env, makeDeps(env)); } catch { return new Response(null, { status: 500 }); }
+    }
     if (!authed(req, env)) return new Response(null, { status: 404 });
     const deps = makeDeps(env);
+    if (!selfKnown) {
+      selfKnown = true;
+      ctx.waitUntil(kvPut(env, "self", { origin: url.origin }, Date.now()).run().catch(() => {}));
+    }
     try {
       if (req.method === "POST" && url.pathname === "/e") {
         let body;
@@ -132,6 +170,17 @@ export default {
           await kvPut(env, "state", st, Date.now()).run();
           return json(200, { ok: true, test: { ...st.test, site: !!st.test.site, api: !!st.test.api } });
         }
+        // The plan meter: posted by the meter script and by the owner's sessions.
+        if (b.op === "usage") return json(200, await setUsage(env, deps, b));
+        // A short note from a work session: what changed and why.
+        if (b.op === "work") return json(200, await addNote(env, deps, b));
+        if (b.op === "approve") return json(200, await answer(env, deps, { fp: b.fp, issue: b.issue, action: b.action === "later" ? "later" : "approve" }));
+        // The judge: what it would do now (always), plus switches.
+        if (b.op === "gate") {
+          if (typeof b.paused === "boolean") await setPaused(env, deps, b.paused);
+          if (b.fire_test === true) return json(200, { ok: true, test: await testWake(env, deps) });
+          return json(200, await gateView(env, deps));
+        }
         return json(400, { ok: false, why: "unknown_op" });
       }
       return new Response(null, { status: 404 });
@@ -171,6 +220,8 @@ async function status(env, deps) {
     waiting_to_send: outbox?.n || 0,
     last_24h: up || null,
     canary: { js: await kvGet(env, "canary:js"), py: await kvGet(env, "canary:py"), sent: st.canary_sent || null },
+    gate: await gateSummary(env, deps),
+    gate_error: await kvGet(env, "gate_error"),
     pulse_error: await kvGet(env, "pulse_error"),
     ingest_error: await kvGet(env, "ingest_error"),
   };

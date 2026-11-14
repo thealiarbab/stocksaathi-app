@@ -9,6 +9,12 @@
 #           OPS_MAIL_TO (where alerts go). Optional RESEND_API_KEY lets alerts
 #           go out even when Vercel is down. The pulse does nothing until the
 #           first three are set.
+#           AGENT_FIRE_URL + AGENT_FIRE_TOKEN: the start address of the ops
+#           agent and its token. Without them the judge still decides and
+#           records, and mails that it could not start anything.
+# Storage changes: run the schema file BEFORE deploying code that uses a new
+#           table (it is safe to re-run).
+# Waking is off until switched on:  POST /admin {"op":"gate","paused":false}
 # Tests:    npm test
 
 name = "stocksaathi-ops-watch"

@@ -5,7 +5,7 @@
   "description": "Outside watcher for stocksaathi.co.in: error intake, grouping, one-minute pulse.",
   "type": "module",
   "scripts": {
-    "test": "node --no-warnings --test test/signature.test.mjs test/collector.test.mjs",
+    "test": "node --no-warnings --test test/signature.test.mjs test/collector.test.mjs test/gate.test.mjs",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   }

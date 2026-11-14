@@ -71,3 +71,38 @@ CREATE TABLE IF NOT EXISTS outbox (
 -- Nightly copy of the casebook and recipes, so memory survives the main
 -- database being down.
 CREATE TABLE IF NOT EXISTS memo (kind TEXT NOT NULL, id INTEGER NOT NULL, data TEXT NOT NULL, t INTEGER NOT NULL, PRIMARY KEY (kind, id));
+
+-- The judge at the door: one row per open issue, saying whether the agent was
+-- woken for it, is waiting, or left it for the daily brief (see src/gate.js).
+--   state: new | waiting | woken | brief | hold | closed
+--   why:   short code of the last decision; reason: the same in words
+--   again: a time the agent asked to be woken for this issue again
+CREATE TABLE IF NOT EXISTS gate (
+  fp TEXT PRIMARY KEY,
+  area TEXT NOT NULL DEFAULT 'other',
+  sev TEXT NOT NULL DEFAULT 'medium',
+  opened INTEGER NOT NULL,
+  open_people INTEGER NOT NULL DEFAULT 0,
+  open_hits INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'new',
+  status TEXT,
+  why TEXT,
+  reason TEXT,
+  next_at INTEGER NOT NULL DEFAULT 0,
+  wakes INTEGER NOT NULL DEFAULT 0,
+  woken_at INTEGER,
+  wake_people INTEGER NOT NULL DEFAULT 0,
+  wake_hits INTEGER NOT NULL DEFAULT 0,
+  picked_at INTEGER,
+  nagged_at INTEGER,
+  approved_at INTEGER,
+  again INTEGER
+);
+CREATE INDEX IF NOT EXISTS gate_due ON gate (state, next_at);
+
+-- Short notes left by the owner's own work sessions (what changed and why),
+-- so the agent knows what happened today before it touches anything.
+CREATE TABLE IF NOT EXISTS note (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT, text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS note_at ON note (at);

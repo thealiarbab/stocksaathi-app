@@ -35,7 +35,8 @@ export function makeD1() {
 export function makeWorld(start = Date.UTC(2026, 10, 12, 6, 0, 0)) {
   const w = {
     t: start,
-    rpcs: [], mails: [], fetches: [],
+    rpcs: [], mails: [], fetches: [], wakes: [],
+    wakeReply: null,       // what the agent's start address answers; default: started
     dbUp: true, siteUp: true, apiUp: true,
     nextId: 100,
     pulse: null,           // function (p) -> data for ops_db_pulse
@@ -58,6 +59,7 @@ export function makeWorld(start = Date.UTC(2026, 10, 12, 6, 0, 0)) {
       return { ok: true, status: 200, ms: 20, data: { ok: true } };
     },
     async mail(title, body, opts) { w.mails.push({ title, body, opts }); return true; },
+    async wake(text) { w.wakes.push(text); return w.wakeReply || { ok: true, status: 200, id: `sess${w.wakes.length}` }; },
   };
   w.calls = (name) => w.rpcs.filter((r) => r.name === name);
   w.tick = (ms = 60_000) => { w.t += ms; };

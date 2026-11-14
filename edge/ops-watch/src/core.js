@@ -4,6 +4,7 @@
 
 import { describe, fingerprint, sample, SIG_VERSION } from "./signature.js";
 import { decide, severityOf, istDay } from "./rules.js";
+import { areaOf } from "./gate.js";
 
 const SOURCE = { py: "server_py", js: "server_js", browser: "browser", cron: "cron", db: "db", pulse: "pulse", vital: "vital" };
 const DAY_CAP = 40_000;       // reports written per day before switching to count-only
@@ -200,9 +201,35 @@ export async function record(env, deps, items, opts = {}) {
               spike_day = CASE WHEN ?5 = 1 THEN ?6 ELSE spike_day END, fixed_at = CASE WHEN ?7 = 1 THEN NULL ELSE fixed_at END,
               dirty = 0, synced_at = ?3 WHERE fp = ?8`,
     ).bind(state, sent ? reply.data.id ?? null : null, now, t.day.people, event === "spike" || event === "unmute" ? 1 : 0, today, event === "regress" ? 1 : 0, t.row.fp));
+    // The judge at the door gets a row for every issue. A surge or a spread
+    // of an issue it already knows only asks it to look again now.
+    const fresh = event === "open" || event === "regress" || event === "unmute" || (event === "spike" && t.row.state === "baseline");
+    set.push(gateTouch(env, { fp: t.row.fp, area: areaOf(t.row), sev: payload.severity, now, people: t.day.people, hits: t.day.hits, fresh }));
     await env.DB.batch(set);
   }
   return out;
+}
+
+export function gateTouch(env, { fp, area, sev, now, people, hits, fresh }) {
+  return env.DB.prepare(
+    `INSERT INTO gate (fp, area, sev, opened, open_people, open_hits, state, status, next_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'new', 'open', ?4)
+     ON CONFLICT(fp) DO UPDATE SET
+       area = ?2, sev = ?3, next_at = ?4,
+       opened = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?4 ELSE opened END,
+       open_people = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?5 ELSE open_people END,
+       open_hits = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?6 ELSE open_hits END,
+       wakes = CASE WHEN ?7 = 1 OR state = 'closed' THEN 0 ELSE wakes END,
+       woken_at = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE woken_at END,
+       picked_at = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE picked_at END,
+       nagged_at = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE nagged_at END,
+       approved_at = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE approved_at END,
+       again = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE again END,
+       status = CASE WHEN ?7 = 1 OR state = 'closed' THEN 'open' ELSE status END,
+       why = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE why END,
+       reason = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE reason END,
+       state = CASE WHEN ?7 = 1 OR state = 'closed' THEN 'new' ELSE state END`,
+  ).bind(fp, area, sev, now, people || 0, hits || 0, fresh ? 1 : 0);
 }
 
 async function familyFor(env, row) {
@@ -253,7 +280,7 @@ export function mailBody(p) {
     p.title,
     `Seen ${p.hits} time(s)${p.people ? ` by ${p.people} people` : ""}. First ${p.first_seen}, last ${p.last_seen}.`,
     s ? `Latest report: ${JSON.stringify(s).slice(0, 700)}` : "",
-    "Open /a > Issues for the full evidence.",
+    "The full evidence is in the admin panel, Issues tab.",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -297,18 +324,40 @@ const LOCAL = { open: "open", regressed: "open", needs_owner: "open", needs_pc: 
 export async function applyIssueChanges(env, deps, changes) {
   const now = deps.now();
   const set = [];
+  let n = 0;
   for (const c of (changes || []).slice(0, 50)) {
     const state = LOCAL[c.status];
     if (!state || typeof c.fp !== "string") continue;
+    n++;
     set.push(env.DB.prepare(
       `UPDATE sig SET state = ?1, issue_id = COALESCE(?2, issue_id),
               fixed_at = CASE WHEN ?1 = 'fixed' THEN COALESCE(?3, ?4) WHEN ?1 = 'open' THEN NULL ELSE fixed_at END,
               fix_deploy = CASE WHEN ?1 = 'fixed' THEN ?5 ELSE fix_deploy END
         WHERE fp = ?6 AND state NOT IN ('alias')`,
     ).bind(state, c.id ?? null, c.fixed_at ? Date.parse(c.fixed_at) || null : null, now, c.fix_deploy || null, c.fp));
+    // Keep the judge in step. Any change to an issue the agent was woken for
+    // counts as "picked up", and a wake is picked up as a whole: the other
+    // issues from the same start are not "ignored" just because the agent
+    // began with this one. A comeback or a reopen is judged afresh.
+    set.push(env.DB.prepare(
+      `UPDATE gate SET picked_at = ?1 WHERE state = 'woken' AND picked_at IS NULL
+          AND woken_at = (SELECT woken_at FROM gate WHERE fp = ?2 AND state = 'woken')`,
+    ).bind(now, c.fp));
+    set.push(env.DB.prepare(
+      `UPDATE gate SET
+         picked_at = CASE WHEN state = 'woken' AND picked_at IS NULL THEN ?2 ELSE picked_at END,
+         opened = CASE WHEN ?1 = 'regressed' OR (?1 = 'open' AND state = 'closed') THEN ?2 ELSE opened END,
+         wakes = CASE WHEN ?1 = 'regressed' OR (?1 = 'open' AND state = 'closed') THEN 0 ELSE wakes END,
+         woken_at = CASE WHEN ?1 = 'regressed' OR (?1 = 'open' AND state = 'closed') THEN NULL ELSE woken_at END,
+         state = CASE WHEN ?1 IN ('fixed', 'ignored') THEN 'closed'
+                      WHEN ?1 = 'regressed' OR (?1 = 'open' AND state = 'closed') THEN 'new'
+                      ELSE state END,
+         status = ?1, next_at = ?2
+       WHERE fp = ?3`,
+    ).bind(c.status, now, c.fp));
   }
   if (set.length) await env.DB.batch(set);
-  return set.length;
+  return n;
 }
 
 // A fixer found that several signatures are one problem (or the reverse).

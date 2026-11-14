@@ -8,6 +8,7 @@ import { scrub, fingerprint } from "./signature.js";
 import { parseCron, prevRun } from "./cronexpr.js";
 import { baseline, farOff, silentTooLong, fixVerdict, watchWindow, hourOfWeek, istDay, marketOpen } from "./rules.js";
 import { isNseTradingDay } from "../../../js/data/nseCalendar.js";
+import { runGate } from "./gaterun.js";
 
 const MIN = 60_000, HOUR = 3600_000;
 const LOW_VITALS = ["signups", "trades", "views"];
@@ -168,6 +169,12 @@ export async function runPulse(env, deps) {
     await syncCounts(env, deps);
     if (minute % 5 === 0) await learnDeploys(env, deps, st, now);
   }
+  // The judge at the door runs every minute, database or no database: an
+  // outage is exactly when the agent has to be woken. Its own failure must
+  // never take the pulse down with it.
+  let gate = null;
+  try { gate = await runGate(env, deps, { dbOk: db.ok, drill: !!test }); }
+  catch (e) { try { await kvPut(env, "gate_error", { at: now, err: String(e?.stack || e).slice(0, 600) }, now).run(); } catch {} }
   if (mm === 35 && new Date(now).getUTCHours() === 20) await nightly(env, deps, st, now);
   if (st.learning_until && now >= st.learning_until && !st.learning_done && db.ok) await baselineReview(env, deps, st);
 
@@ -177,7 +184,7 @@ export async function runPulse(env, deps) {
       .bind(minute * MIN, site.ok ? 1 : 0, site.ms, api.ok ? 1 : 0, api.ms, db.ok ? 1 : 0, db.ms, JSON.stringify(row)),
     kvPut(env, "state", st, now),
   ]);
-  return { site: site.ok, api: api.ok, db: db.ok, items: items.length };
+  return { site: site.ok, api: api.ok, db: db.ok, items: items.length, gate };
 }
 
 function streak(st, key, bad, need, fire) {
