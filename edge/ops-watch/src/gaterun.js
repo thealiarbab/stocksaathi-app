@@ -79,7 +79,7 @@ async function backfill(env, now) {
 }
 
 // Reasons that mean "this waits for the owner or for a limit".
-const ASKS = new Set(["tight", "cap", "blind_cap", "five", "paused", "nowake", "limit_full", "needs_you", "max_wakes"]);
+const ASKS = new Set(["tight", "cap", "blind_cap", "five", "nowake", "limit_full", "needs_you", "max_wakes"]);
 // Decisions that stand until a set time, whatever happens in between.
 const UNTIL = new Set(["snoozed", "nowake", "backlog"]);
 const SMALL_BATCH = 5;
@@ -308,6 +308,7 @@ export async function gateSummary(env, deps) {
     waiting: waiting.slice(0, 15).map((g) => ({ issue: g.id, area: g.area, band: g.band, reason: g.reason })),
     waiting_count: waiting.length,
     queued: rows.filter((g) => g.why === "queued").length,
+    held_while_off: rows.filter((g) => g.why === "paused").length,
     with_agent: rows.filter((g) => g.state === "woken" || g.status === "fixing" || g.status === "fix_live").length,
     paused, usage: usageLine(u, now), weekly: u.weekly, five: u.five, reading_age_min: u.age == null ? null : Math.round(u.age / MIN),
     states: Object.fromEntries((c.results || []).map((r) => [r.state, r.n])),

@@ -42,7 +42,7 @@ export function briefDue(now) {
   return m >= 15 * 60 + 30 && m < 18 * 60 + 30;
 }
 
-const WAITS = new Set(["tight", "cap", "blind_cap", "five", "paused", "nowake", "limit_full"]);
+const WAITS = new Set(["tight", "cap", "blind_cap", "five", "nowake", "limit_full"]);
 const NEEDS = new Set(["needs_you", "max_wakes"]);
 const AREA = { signup: "sign-up", core: "site/API/database", trading: "trading", saathi: "Saathi", other: "other" };
 const name = (g) => (g.id ? `#${g.id}` : "(no number yet)");
@@ -108,7 +108,8 @@ export async function buildBrief(env, deps, { rows, usage, paused, log, origin }
     ? `Agent starts today: ${runs.length}\n${runs.map((w) => `  ${istClock(w.at).slice(-9)} ${w.mode}: ${w.ids?.length ? w.ids.map((x) => (typeof x === "number" ? `#${x}` : x)).join(", ") : "test"}${w.ok === false ? ` (refused: ${w.why})` : w.ok === null ? " (no answer from the start call)" : ""}`).join("\n")}`
     : "Agent starts today: none.");
   out.push(`Claude limits: ${usageLine(usage, now)}.`);
-  if (paused) out.push("Note: waking the agent is switched off, so nothing is fixed automatically.");
+  const held = rows.filter((g) => g.why === "paused").length;
+  if (paused) out.push(`Note: waking the agent is switched off, so nothing is fixed automatically.${held ? ` ${held} issue(s) would have gone to the agent by now.` : ""}`);
   return { title: `StockSaathi daily brief: ${openedRows.length} new, ${waiting.length} waiting${needs.length ? `, ${needs.length} need you` : ""}`, body: out.join("\n\n") };
 }
 

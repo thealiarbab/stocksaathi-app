@@ -74,7 +74,7 @@ function agentLine(d) {
   const g = d.watcher?.gate;
   if (!g) return "";
   const waiting = g.waiting || [];
-  const head = `Agent: ${g.paused ? '<span class="is-bad">waking is switched off</span>' : '<b>on</b>, started only when the watcher asks'}`
+  const head = `Agent: ${g.paused ? `<span class="is-bad">waking is switched off</span>${g.held_while_off ? ` (${fmtInt(g.held_while_off)} would have gone to it by now)` : ""}` : '<b>on</b>, started only when the watcher asks'}`
     + ` · Claude limits: ${e(g.usage || "no reading")}`
     + ` · starts today: ${fmtInt(g.wakes_today || 0)}`
     + (g.with_agent ? ` · with the agent now: ${fmtInt(g.with_agent)}` : "")
