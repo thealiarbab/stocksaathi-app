@@ -49,12 +49,13 @@ export async function loadGate(env, now, where = "AND ?1 > 0") {
 }
 
 async function readState(env) {
-  const r = await env.DB.prepare("SELECT k, v FROM kv WHERE k IN ('gate', 'usage', 'gate_paused', 'self')").all();
+  const r = await env.DB.prepare("SELECT k, v FROM kv WHERE k IN ('gate', 'usage', 'gate_paused', 'self', 'owner_active')").all();
   const m = {};
   for (const x of r.results || []) { try { m[x.k] = JSON.parse(x.v); } catch {} }
   const G = m.gate || {};
   G.log ||= [];
   // Off until someone switches it on: a first deploy must never wake anything.
+  G.ownerActiveAt = Number(m.owner_active?.at) || 0;
   return { G, usage: m.usage || null, paused: m.gate_paused !== false, origin: m.self?.origin || null };
 }
 
@@ -86,8 +87,15 @@ const SMALL_BATCH = 5;
 
 const context = (G, u, now) => ({
   now, usage: u, lastWakeAt: G.last || 0, lastSeriousWakeAt: G.last_serious || 0, lastSmallWakeAt: G.last_small || 0,
-  wakesToday: G.n || 0, blindToday: G.blind || 0,
+  wakesToday: G.n || 0, blindToday: G.blind || 0, ownerActiveAt: G.ownerActiveAt || 0,
 });
+
+// Called on every prompt the owner sends in Claude on his PC.
+export async function setActive(env, deps) {
+  const now = deps.now();
+  await kvPut(env, "owner_active", { at: now }, now).run();
+  return { ok: true };
+}
 
 // The start call has no "same request" key: two calls are two sessions. So
 // two checks that overlap must not both make it. Whoever gets this row first
@@ -108,7 +116,7 @@ export async function runGate(env, deps, opts = {}) {
   if (!G.backfilled) { await backfill(env, now); G.backfilled = now; dirty = true; }
   const u = usageNow(usage, G.log, now);
   const ctx = context(G, u, now);
-  const save = () => kvPut(env, "gate", G, now);
+  const save = () => { const { ownerActiveAt, ...keep } = G; return kvPut(env, "gate", keep, now); };
 
   // Every open issue is judged every minute; a row is only written when the
   // decision changes.

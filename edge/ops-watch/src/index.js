@@ -4,7 +4,7 @@
 
 import { ingest, kvGet, kvPut, mergeSignatures, splitSignature } from "./core.js";
 import { runPulse } from "./pulse.js";
-import { setUsage, setPaused, answer, addNote, gateView, gateSummary, testWake } from "./gaterun.js";
+import { setActive, setUsage, setPaused, answer, addNote, gateView, gateSummary, testWake } from "./gaterun.js";
 import { page } from "./page.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
@@ -182,6 +182,7 @@ export default {
           return json(200, { ok: true, test: { ...st.test, site: !!st.test.site, api: !!st.test.api } });
         }
         // The plan meter: posted by the meter script and by the owner's sessions.
+        if (b.op === "active") return json(200, await setActive(env, deps));
         if (b.op === "usage") return json(200, await setUsage(env, deps, b));
         // A short note from a work session: what changed and why.
         if (b.op === "work") return json(200, await addNote(env, deps, b));

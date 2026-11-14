@@ -98,7 +98,9 @@ export function usageNow(u, log, now) {
   return { known: true, fresh: age <= 36 * HOUR, weekly: clamp(weekly), five: clamp(five), weeklyReset, fiveReset, age, src: u.src || null };
 }
 
-const WAITING = new Set(["tight", "cap", "blind_cap", "five", "queued", "paused", "nowake"]);
+const WAITING = new Set(["tight", "cap", "blind_cap", "five", "queued", "paused", "nowake", "owner_busy"]);
+// How long after the owner's last prompt the agent leaves the limit to him.
+export const OWNER_QUIET = 45 * 60 * 1000;
 
 const pct = (x) => `${Math.round(x)}%`;
 const daysText = (d) => (d >= 1 ? `${Math.round(d * 10) / 10} day(s)` : `${Math.max(1, Math.round(d * 24))} hour(s)`);
@@ -155,6 +157,10 @@ export function decide(g, c) {
 
   const gapUntil = c.lastWakeAt ? c.lastWakeAt + 10 * MIN : 0;
   const start = (mode, why, reason, capped = true) => {
+    // The owner's own Claude sessions and the agent share one limit. While he
+    // is working, nothing that is not serious starts; his OK still does.
+    const busyUntil = (c.ownerActiveAt || 0) + OWNER_QUIET;
+    if (mode !== "approved" && now < busyUntil) return out("hold", "owner_busy", "you are working in Claude right now: waits until you have been quiet for 45 minutes", busyUntil);
     if (fiveKnown && u.five >= 95) return out("hold", "five", `5-hour limit at ${pct(u.five)}: waits for its reset`, fiveBack);
     if (capped && (c.wakesToday || 0) >= 6) return out("brief", "cap", "6 agent runs today already: waits for tomorrow or your OK", now + HOUR);
     if (now < gapUntil) return out("wait", "gap", "another run started less than 10 minutes ago", gapUntil);

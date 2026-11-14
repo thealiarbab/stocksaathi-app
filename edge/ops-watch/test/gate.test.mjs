@@ -4,7 +4,7 @@ import { makeWorld } from "./d1.mjs";
 import { ingest, applyIssueChanges, kvPut } from "../src/core.js";
 import { runPulse } from "../src/pulse.js";
 import { areaOf, bandOf, decide, usageNow, nextWeeklyReset, wakeText, EST } from "../src/gate.js";
-import { runGate, setUsage, setPaused, answer, addNote, gateView } from "../src/gaterun.js";
+import { runGate, setActive, setUsage, setPaused, answer, addNote, gateView } from "../src/gaterun.js";
 import { linkFor, checkLink, briefDue } from "../src/brief.js";
 import { page } from "../src/page.js";
 
@@ -383,6 +383,18 @@ test("issues that were open before the judge existed go to the brief, not into a
   assert.equal(w.wakes.length, 0);
   const rows = (await w.env.DB.prepare("SELECT fp, state, why, sev, area FROM gate ORDER BY fp").all()).results;
   assert.deepEqual(rows.map((r) => [r.state, r.why, r.sev, r.area]), [["brief", "backlog", "high", "other"], ["brief", "backlog", "medium", "trading"]]);
+});
+
+test("while the owner is working in Claude, only serious things start the agent", async () => {
+  const w = makeWorld(); await on(w);
+  await setActive(w.env, w.deps);
+  await browserError(w, 12);
+  for (let i = 0; i < 40; i++) { w.tick(); await runGate(w.env, w.deps); }
+  assert.equal(w.wakes.length, 0, "a look waits while he is working");
+  await threeCrashes(w);
+  await runGate(w.env, w.deps);
+  assert.equal(w.wakes.length, 1, "serious does not wait");
+  assert.ok(w.wakes[0].includes("mode=fix"));
 });
 
 test("two checks in the same minute: one start, not two", async () => {
