@@ -385,7 +385,7 @@ test("issues that were open before the judge existed go to the brief, not into a
   assert.deepEqual(rows.map((r) => [r.state, r.why, r.sev, r.area]), [["brief", "backlog", "high", "other"], ["brief", "backlog", "medium", "trading"]]);
 });
 
-test("while the owner is working in Claude, only serious things start the agent", async () => {
+test("while the owner is working in Claude, nothing starts the agent, serious or not", async () => {
   const w = makeWorld(); await on(w);
   await setActive(w.env, w.deps);
   await browserError(w, 12);
@@ -393,7 +393,9 @@ test("while the owner is working in Claude, only serious things start the agent"
   assert.equal(w.wakes.length, 0, "a look waits while he is working");
   await threeCrashes(w);
   await runGate(w.env, w.deps);
-  assert.equal(w.wakes.length, 1, "serious does not wait");
+  assert.equal(w.wakes.length, 0, "serious waits too");
+  for (let i = 0; i < 12; i++) { w.tick(); await ingest(w.env, w.deps, { src: "py", events: [crash()] }); await runGate(w.env, w.deps); }
+  assert.equal(w.wakes.length, 1, "once he has been quiet for 45 minutes it starts");
   assert.ok(w.wakes[0].includes("mode=fix"));
 });
 

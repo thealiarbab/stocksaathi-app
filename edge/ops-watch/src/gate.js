@@ -147,6 +147,11 @@ export function decide(g, c) {
   }
 
   if (serious) {
+    // Owner's rule (15 Nov): while he is working in Claude nothing starts,
+    // serious or not. He gets the popup and the mail and decides himself;
+    // his OK on the issue still starts it.
+    const quietAt = (c.ownerActiveAt || 0) + OWNER_QUIET;
+    if (!g.approvedAt && now < quietAt) return out("hold", "owner_busy", "serious, but you are working in Claude right now: it starts when you have been quiet for 45 minutes, or when you approve it", quietAt);
     // Only a reading from the last few hours may hold back a serious wake.
     if (recent && Number.isFinite(u.five) && u.five >= 98) return out("hold", "limit_full", "serious, but the 5-hour limit is full", fiveBack, { alert: true });
     if (recent && u.weekly >= 99) return out("hold", "limit_full", "serious, but the weekly limit is used up", Math.min(u.weeklyReset, now + 6 * HOUR), { alert: true });
