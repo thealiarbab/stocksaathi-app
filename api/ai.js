@@ -1688,6 +1688,7 @@ async function route(req) {
       case "admin-ops-issue":     return await opAdminOpsIssue(req, origin, url);
       case "admin-ops-issues-set": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminOpsIssuesSet(req, origin);
       case "admin-ops-selftest":  return await opAdminOpsSelftest(req, origin);
+      case "admin-ops-memory":    return await opAdminOpsMemory(req, origin);
       case "ach-draft":           if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAchDraft(req, origin);
       case "admin-achievements":  return await opAdminAchievements(req, origin);
       case "admin-achievements-dry-run": return await opAdminAchievementsDryRun(req, origin);
@@ -1878,6 +1879,15 @@ async function opAdminOpsIssue(req, origin, url) {
   if (!Number.isInteger(id) || id < 1) return j(400, { error: "bad_id" }, origin);
   const res = await sbAdminFetch(`/rest/v1/rpc/ops_briefing`, { method: "POST", body: JSON.stringify({ p_issue: id }) });
   if (!res.ok) return j(502, { error: "query_failed", detail: `ops_briefing ${res.status}` }, origin);
+  return j(200, await res.json(), origin);
+}
+// What the agent did on each run and everything it knows (casebook, lessons,
+// skills, system map). Read only.
+async function opAdminOpsMemory(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const res = await sbAdminFetch(`/rest/v1/rpc/ops_memory_admin`, { method: "POST", body: "{}" });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `ops_memory_admin ${res.status}` }, origin);
   return j(200, await res.json(), origin);
 }
 async function opAdminOpsIssuesSet(req, origin) {

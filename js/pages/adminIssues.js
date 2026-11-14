@@ -6,14 +6,15 @@
 // problem; the raw error stream lives on the watcher, not in the database)
 // plus the watcher's own status. Buttons go to op=admin-ops-issues-set →
 // ops_admin_set(). Opening a row loads op=admin-ops-issue → ops_briefing(),
-// the same packet a fixer session reads.
+// the same packet a fixer session reads. "What the agent did" and the
+// Casebook load only when opened: op=admin-ops-memory → ops_memory_admin().
 // =============================================================================
 
 import { escapeHtml, fmtInt } from "./adminCharts.js";
 
 const e = escapeHtml;
 const PREF_KEY = "ss.adminIssuesPrefs.v1";
-const st = { show: "active", data: null, open: null, detail: null, busy: false };
+const st = { show: "active", data: null, open: null, detail: null, busy: false, memOpen: false, mem: null, memTab: "cards", memQ: "", memCard: null };
 try { Object.assign(st, JSON.parse(localStorage.getItem(PREF_KEY) || "{}"), { data: null, open: null, detail: null, busy: false }); } catch {}
 const savePrefs = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify({ show: st.show })); } catch {} };
 
@@ -160,6 +161,8 @@ function paint(root, ctx) {
       </div>
     </div>
 
+    ${memoryCards()}
+
     <div class="is-card">
       <div class="is-h">Report a problem the watcher missed</div>
       <div class="dim text-sm" style="margin-bottom:6px">It becomes an issue for the fixers, and closing it must add a rule so the same kind of thing is caught next time.</div>
@@ -211,7 +214,7 @@ async function openDetail(root, ctx, id) {
             <b>${e(String(a.change_kind).replace(/_/g, " "))}</b> by ${e(String(a.actor).replace("_", " "))}, ${e(ist(a.started_at))}
             · <span class="${a.verdict === "held" ? "is-good" : a.verdict && a.verdict !== "abandoned" ? "is-bad" : "dim"}">${e(a.verdict ? a.verdict.replace("_", " ") : a.live_at ? (a.watch_ok_at ? "live, waiting to be proven" : "live, in its 10-minute watch") : "planned")}</span>
             <div class="dim">${e(a.hypothesis || "")}</div>${a.verdict_note ? `<div class="dim">Checked: ${e(a.verdict_note)}</div>` : ""}</div>`).join("")}` : ""}
-        ${cases.length ? `<div class="is-sub">Related cases from memory</div>${cases.slice(0, 6).map((c) => `<div class="is-att"><b>${e(c.title)}</b> <span class="dim">(${e(c.outcome)}, ${e(c.confidence)})</span><div class="dim">${e(c.cause)}</div></div>`).join("")}` : ""}
+        ${cases.length ? `<div class="is-sub">Related cases from memory</div>${cases.slice(0, 6).map((c) => `<div class="is-att"><b>${e(c.title)}</b> <span class="dim">(${c.raw ? `history, ${e(c.kind)}` : `${e(OUTCOME[c.outcome] || c.outcome)}, ${e(c.confidence)}`})</span><div class="dim">${e(c.cause || c.text || "")}</div></div>`).join("")}` : ""}
       </div>
       <div>
         <div class="is-sub">Timeline</div>
@@ -288,7 +291,8 @@ function wire(root, ctx) {
   }));
   root.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     const a = b.dataset.act;
-    if (a === "reload") ctx.load();
+    if (a === "mem") openMemory(root, ctx);
+    else if (a === "reload") ctx.load();
     else if (a === "freeze") {
       const on = !st.data?.freeze?.on;
       if (on) { const note = prompt("Stop all automatic fixes? Problems are still caught and diagnosed. Reason (optional):", ""); if (note != null) ctx.act({ action: "freeze", note }); }
@@ -306,6 +310,118 @@ function wire(root, ctx) {
       setTimeout(() => ctx.load(true), 20000);
     }
   }));
+  wireMemory(root);
+}
+
+// ---- memory: what the agent did on each run, and what it knows ----
+const OUTCOME = { held: "fix held", did_not_hold: "fix did not hold", pending: "not judged yet", seeded: "from history" };
+const DECISION = { fixed: "fixed", rolled_back: "rolled back", muted: "ignored as noise", not_now: "not now", watching: "watching", handed_to_owner: "handed to you", diagnosed: "cause found, nothing changed", no_action: "no action" };
+const MODE = { fix: "serious, act now", look: "a look", small: "small fixes", approved: "you said go", recheck: "second look", review: "weekly review", test: "wiring test" };
+const runUrl = (ref) => (ref ? `https://claude.ai/code/session_${encodeURIComponent(String(ref).replace(/^(cse|session)_/, ""))}` : null);
+
+async function openMemory(root, ctx) {
+  st.memOpen = true;
+  paint(root, ctx);
+  try { st.mem = await ctx.adminGet("/api/ai?op=admin-ops-memory"); }
+  catch (err) { st.mem = { error: String(err.message || err) }; }
+  paint(root, ctx);
+}
+
+function memoryCards() {
+  if (!st.memOpen) {
+    return `<div class="is-card"><div class="is-top">
+      <div><div class="is-h" style="margin:0">What the agent did, and what it knows</div>
+        <div class="dim text-sm">Every start with its decisions and a link to the run, and the casebook it searches before it touches anything.</div></div>
+      <button class="btn btn-ghost btn-sm" data-act="mem">Open</button></div></div>`;
+  }
+  const m = st.mem;
+  if (!m) return `<div class="is-card"><div class="muted text-sm">Loading…</div></div>`;
+  if (m.error) return `<div class="is-card" style="color:var(--negative)">${e(m.error)}</div>`;
+  const c = m.counts || {};
+  const runs = m.activity || [];
+  const run = (r) => {
+    const url = runUrl(r.run);
+    const dec = Array.isArray(r.decisions) ? r.decisions : [];
+    const mins = r.ended ? Math.max(1, Math.round((new Date(r.ended) - new Date(r.at)) / 60000)) : null;
+    return `<div class="is-att">
+      <b>${e(ist(r.at))}</b> <span class="dim">${e(MODE[r.mode] || r.mode || "start")}${mins ? ` · ${mins} min` : " · no report written by the agent"}</span>${url ? ` · <a href="${e(url)}" target="_blank" rel="noopener">Open the run</a>` : ""}
+      ${r.summary ? `<div style="white-space:pre-wrap">${e(r.summary)}</div>` : ""}
+      ${dec.length
+        ? dec.map((d) => `<div class="is-li"><span>${d.issue ? `<b>#${e(d.issue)}</b> ` : ""}${e(DECISION[d.decision] || d.decision)}${d.confidence ? ` <span class="dim">(${e(d.confidence)} confidence)</span>` : ""}: ${e(d.reason || "")}</span></div>`).join("")
+        : (r.issues || []).length ? `<div class="dim">Started for ${r.issues.map((i) => `#${e(i.id)}`).join(", ")}</div>` : ""}
+      ${r.changed ? `<div class="dim">Changed: ${e(r.changed)}</div>` : ""}
+    </div>`;
+  };
+  const tabs = [["cards", "Cards", c.cards], ["lessons", "Lessons", c.lessons], ["skills", "Skills", c.skills], ["map", "System map", c.map]];
+  return `<div class="is-card">
+      <div class="is-h">What the agent did</div>
+      <div class="dim text-sm" style="margin-bottom:6px">One entry per start, newest first: when, for which issues, what it decided and why.</div>
+      ${runs.length ? runs.map(run).join("") : `<div class="muted text-sm">No runs recorded yet.</div>`}
+    </div>
+    <div class="is-card">
+      <div class="is-top" style="margin-bottom:6px">
+        <div class="is-h" style="margin:0">Casebook</div>
+        <div class="is-seg">${tabs.map(([k, l, n]) => `<button data-mem="${k}" class="${st.memTab === k ? "on" : ""}">${l} <span class="dim">${fmtInt(n || 0)}</span></button>`).join("")}</div>
+      </div>
+      <input class="is-report is-mem-q" type="search" placeholder="Filter by any word" value="${e(st.memQ)}">
+      <div class="is-mem-list">${memoryList()}</div>
+      <div class="dim text-sm" style="margin-top:8px">${fmtInt(c.history_items || 0)} pieces of history (fix commits, session notes, audits) are kept as they were written; ${fmtInt(c.history_not_yet_cards || 0)} are not cards yet and become one the first time the agent needs them. ${fmtInt(c.searchable_by_meaning || 0)} things can be found by meaning, not only by word. Normal traffic is known from ${fmtInt(c.profile_hours || 0)} hours of history.</div>
+    </div>`;
+}
+
+function memoryList() {
+  const m = st.mem || {};
+  const q = st.memQ.trim().toLowerCase();
+  const has = (...parts) => !q || parts.some((p) => String(p == null ? "" : typeof p === "string" ? p : JSON.stringify(p)).toLowerCase().includes(q));
+  const none = `<div class="muted text-sm" style="padding:8px 0">Nothing matches.</div>`;
+  const field = (label, text) => (text ? `<div class="is-sub">${label}</div><div style="white-space:pre-wrap">${e(text)}</div>` : "");
+  if (st.memTab === "lessons") {
+    const rows = (m.lessons || []).filter((l) => has(l.lesson, l.why, l.area));
+    return rows.map((l) => `<div class="is-att"><b>${e(l.lesson)}</b>${l.status === "retired" ? ` <span class="is-bad">retired</span>` : ""}
+      ${l.why ? `<div class="dim">${e(l.why)}</div>` : ""}
+      <div class="dim">Confidence ${e(l.confidence)} · helped ${fmtInt(l.helped || 0)}, misled ${fmtInt(l.misled || 0)}${Array.isArray(l.cases) && l.cases.length ? ` · from cards ${l.cases.map((x) => `#${e(x)}`).join(", ")}` : ""}</div></div>`).join("") || none;
+  }
+  if (st.memTab === "skills") {
+    const rows = (m.skills || []).filter((s) => has(s.name, s.when_to_use, s.steps));
+    return rows.map((s) => `<div class="is-att"><b>${e(s.name)}</b> <span class="${s.stage === "suspended" ? "is-bad" : "dim"}">(${e(s.stage)}; used ${fmtInt(s.uses || 0)}, held ${fmtInt(s.held || 0)}, bad ${fmtInt(s.bad || 0)})</span>
+      <div class="dim">${e(s.when_to_use)}</div>
+      <ol style="margin:4px 0 0;padding-left:20px">${(Array.isArray(s.steps) ? s.steps : []).map((x) => `<li>${e(x)}</li>`).join("")}</ol>
+      ${s.undo ? `<div class="dim">Undo: ${e(s.undo)}</div>` : ""}</div>`).join("") || none;
+  }
+  if (st.memTab === "map") {
+    const rows = (m.map || []).filter((x) => has(x.component, x.what, x.weak_spots));
+    return rows.map((x) => `<div class="is-att"><b>${e(x.component)}</b><div>${e(x.what)}</div>
+      ${(x.depends_on || []).length ? `<div class="dim">Depends on: ${e(x.depends_on.join(", "))}</div>` : ""}
+      ${x.logs ? `<div class="dim">Logs: ${e(x.logs)}</div>` : ""}
+      ${x.weak_spots ? `<div class="dim">Weak spots: ${e(x.weak_spots)}</div>` : ""}</div>`).join("") || none;
+  }
+  const rows = (m.cards || []).filter((x) => has(x.title, x.symptom, x.cause, x.fix, x.evidence, x.component, x.area));
+  return rows.slice(0, 150).map((x) => `<div class="is-att is-click" data-card="${e(x.id)}">
+      <b>${e(x.title)}</b> <span class="dim">(${e(x.area || "other")} · ${e(ist(x.when).replace(/,.*$/, ""))} · ${e(OUTCOME[x.outcome] || x.outcome)}${x.confirmed ? ` · helped ${fmtInt(x.confirmed)}×` : ""}${x.contradicted ? ` · wrong ${fmtInt(x.contradicted)}×` : ""})</span>
+      ${st.memCard === x.id ? `<div style="cursor:default">
+        ${field("What was seen", x.symptom)}${field("Cause", x.cause)}${field("What proves the cause", x.evidence)}${field("Fix", x.fix)}${field("Dead ends", x.dead_ends)}
+        <div class="dim" style="margin-top:6px">Card #${e(x.id)}${x.issue ? ` · issue #${e(x.issue)}` : ""}${x.commit ? ` · commit ${e(x.commit)}` : ""} · written by ${e(String(x.by || "").replace("_", " "))} · sureness: ${e(x.confidence === "seeded" ? "from history" : x.confidence)}</div>
+      </div>` : ""}
+    </div>`).join("") + (rows.length > 150 ? `<div class="dim text-sm" style="padding:6px 0">${fmtInt(rows.length - 150)} more: type a word to narrow the list.</div>` : "") || none;
+}
+
+function wireMemory(root) {
+  const list = root.querySelector(".is-mem-list");
+  if (!list) return;
+  const redraw = () => { list.innerHTML = memoryList(); };
+  root.querySelectorAll("[data-mem]").forEach((b) => b.addEventListener("click", () => {
+    st.memTab = b.dataset.mem; st.memCard = null;
+    root.querySelectorAll("[data-mem]").forEach((x) => x.classList.toggle("on", x === b));
+    redraw();
+  }));
+  root.querySelector(".is-mem-q")?.addEventListener("input", (ev) => { st.memQ = ev.target.value; redraw(); });
+  list.addEventListener("click", (ev) => {
+    const row = ev.target.closest("[data-card]");
+    if (!row || ev.target.closest("[data-card] > div")) return;
+    const id = Number(row.dataset.card);
+    st.memCard = st.memCard === id ? null : id;
+    redraw();
+  });
 }
 
 function ensureStyle() {
@@ -351,6 +467,9 @@ function ensureStyle() {
 .is-li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; border-bottom: 1px dashed var(--border); }
 .is-li span { overflow-wrap: anywhere; }
 .is-att { padding: 5px 0; border-bottom: 1px dashed var(--border); }
+.is-click { cursor: pointer; }
+.is-mem-q { margin-bottom: 6px; }
+.is-mem-list { font-size: 13px; }
 .is-pre { max-height: 320px; overflow: auto; font-size: 12px; background: var(--surface-2, rgba(127,127,127,.08)); padding: 8px; border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
 .is-report { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: inherit; }
 .is-flash { border: 1px solid var(--positive, #16a34a); border-radius: 4px; padding: 8px 10px; font-size: 13px; }

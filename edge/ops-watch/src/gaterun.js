@@ -211,6 +211,16 @@ export async function runGate(env, deps, opts = {}) {
       } else {
         entry.ok = reply?.ok ? true : null;
         if (reply?.id) entry.session = String(reply.id).slice(0, 80);
+        // Opens this run's row in the database, so the owner's activity list
+        // shows the start even if the agent never writes a word. Best effort.
+        if (reply?.ok) {
+          try {
+            await deps.rpc("ops_run_start", {
+              session: entry.session || null, mode, issues: waking.map((g) => g.id).filter(Boolean),
+              limits: u ? { weekly: u.weekly ?? null, five: u.five ?? null } : null,
+            });
+          } catch {}
+        }
       }
       dirty = true;
       fired = { ok: !!reply?.ok, refused, mode, issues: waking.length };
