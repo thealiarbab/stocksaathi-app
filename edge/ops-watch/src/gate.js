@@ -14,7 +14,7 @@ export const FOUR = new Set(["signup", "core", "trading", "saathi"]);
 // Kinds that mean "it does not work", as opposed to slow or a user's own typo.
 const FAIL = new Set(["exc", "http", "timeout", "error", "api5", "net", "cron_failed", "cron_failed_minutely", "cron_missed", "pulse", "vital"]);
 
-const RE_SIGNUP = /(^|[\s/])(register|signup|sign-up|login|onboarding|reset-password|verify)(\b|$)|auth\/v1|auth-login-hint|send-email|accounts\.google|gsi\b/;
+const RE_SIGNUP = /(^|[\s/])(register|signup|sign-up|login|onboarding|reset-password|verify)(\b|$)|auth\/v(\d+|n)\b|auth-login-hint|send-email|accounts\.google|gsi\b/;
 const RE_SAATHI = /\/api\/chat|(^|[\s/])chat(\b|$)|coach|chat_threads|chat_projects|op=(report-card|explain)/;
 const RE_TRADING = /match-orders|limit_orders|limit-orders|place_limit_order|live-quote|quote|portfolio|holdings|transactions|snapshot|order|history|fundamentals|(^|[\s/])(stock|stocks|markets|mf)(\b|\/|$)/;
 const RE_TRADING_JOB = /order|snapshot|eod|nav|quote|match/;

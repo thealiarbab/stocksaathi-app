@@ -89,6 +89,16 @@ const context = (G, u, now) => ({
   wakesToday: G.n || 0, blindToday: G.blind || 0,
 });
 
+// The start call has no "same request" key: two calls are two sessions. So
+// two checks that overlap must not both make it. Whoever gets this row first
+// may call; the other one marks nothing and judges again a minute later.
+async function takeFireLock(env, now) {
+  const r = await env.DB.prepare(
+    "INSERT INTO kv (k, v, t) VALUES ('gate_lock', '1', ?1) ON CONFLICT(k) DO UPDATE SET t = ?1 WHERE kv.t <= ?2",
+  ).bind(now, now - 45 * 1000).run();
+  return !!r?.meta?.changes;
+}
+
 export async function runGate(env, deps, opts = {}) {
   const now = deps.now();
   const { G, usage, paused, origin } = await readState(env);
@@ -153,6 +163,8 @@ export async function runGate(env, deps, opts = {}) {
   let fired = null;
   if (waking.length && paused) {
     for (const g of waking) settle(g, { why: "paused", reason: `wakes are switched off; it would have been woken (${g.v.why})`, next: now + 15 * MIN }, "brief");
+  } else if (waking.length && fire && !(await takeFireLock(env, now))) {
+    // Another check started the agent seconds ago.
   } else if (waking.length) {
     const before = { last: G.last, last_serious: G.last_serious, last_small: G.last_small, n: G.n, blind: G.blind };
     for (const g of waking) {
@@ -323,5 +335,5 @@ export async function testWake(env, deps) {
   const reply = await deps.wake(wakeText({ now, rows: [], usage: usageNow(usage, G.log, now), test: true }));
   G.log.push({ at: now, mode: "test", ids: [], ok: reply?.ok ? true : reply?.status ? false : null, why: reply?.why || (reply?.ok ? undefined : String(reply?.status || 0)) });
   await kvPut(env, "gate", G, now).run();
-  return { ok: !!reply?.ok, status: reply?.status || 0, why: reply?.why || null, session: reply?.id || null };
+  return { ok: !!reply?.ok, status: reply?.status || 0, why: reply?.why || reply?.err || null, session: reply?.id || null };
 }

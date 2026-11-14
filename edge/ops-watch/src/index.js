@@ -93,18 +93,29 @@ export function makeDeps(env) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 10000);
       try {
-        const r = await fetch(env.AGENT_FIRE_URL, {
+        const r = await fetch(String(env.AGENT_FIRE_URL).trim(), {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${env.AGENT_FIRE_TOKEN}`, "Content-Type": "application/json",
+            Authorization: `Bearer ${String(env.AGENT_FIRE_TOKEN).trim()}`, "Content-Type": "application/json",
             "anthropic-version": "2023-06-01", "anthropic-beta": "experimental-cc-routine-2026-04-01",
           },
           body: JSON.stringify({ text: String(text).slice(0, 6000) }),
           signal: ctrl.signal,
         });
-        let id = null;
-        try { const j = await r.json(); id = j?.claude_code_session_id || j?.session_id || j?.id || null; } catch {}
-        return { ok: r.ok, status: r.status, id };
+        let id = null, err = null;
+        try {
+          const raw = await r.text();
+          let j = null;
+          try { j = JSON.parse(raw); } catch {}
+          id = j?.claude_code_session_id || j?.session_id || j?.id || null;
+          if (!r.ok) err = String(j?.error?.message || j?.error?.type || j?.message || raw || "").slice(0, 300) || null;
+          // Says nothing about the token except its shape, which is what a bad paste breaks.
+          if (!r.ok && !err) {
+            const t = String(env.AGENT_FIRE_TOKEN);
+            err = `refused with no reason given; token is ${t.length} characters${/^[!-~]+$/.test(t) ? "" : ", and holds spaces or unprintable characters"}; address ${/^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9]+\/fire$/.test(String(env.AGENT_FIRE_URL)) ? "looks right" : "looks wrong"}`;
+          }
+        } catch {}
+        return { ok: r.ok, status: r.status, id, err };
       } catch (e) {
         return { ok: false, status: 0, err: String(e?.message || e).slice(0, 120) };
       } finally { clearTimeout(timer); }

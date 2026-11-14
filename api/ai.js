@@ -1844,8 +1844,8 @@ async function opOpsMail(req, origin) {
     body: JSON.stringify({
       from: env.OPS_EMAIL_FROM || "StockSaathi Ops <orders@stocksaathi.co.in>",
       to, subject: title,
-      text: `${body}\n\nDashboard: https://stocksaathi.co.in/a`,
-      html: `<p style="font:15px/1.5 system-ui,sans-serif;white-space:pre-wrap">${esc(body)}</p><p style="font:14px system-ui,sans-serif"><a href="https://stocksaathi.co.in/a">Open the dashboard</a></p>`,
+      text: body,
+      html: `<p style="font:15px/1.5 system-ui,sans-serif;white-space:pre-wrap">${esc(body)}</p>`,
     }),
   }).catch(() => null);
   if (!r || !r.ok) return j(502, { error: "send_failed", status: r?.status || 0 }, origin);

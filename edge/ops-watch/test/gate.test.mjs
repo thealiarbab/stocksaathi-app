@@ -22,6 +22,7 @@ test("which part of the product an error belongs to", () => {
   assert.equal(areaOf({ sig: "br|error|x|y", kind: "error", route: "/register" }), "signup");
   assert.equal(areaOf({ sig: "br|api|db /auth/v1/token|5xx:500", kind: "api5", route: "db /auth/v1/token" }), "signup");
   assert.equal(areaOf({ sig: "js|exc|/api/ai?op=auth-login-hint|E", kind: "exc", route: "/api/ai?op=auth-login-hint" }), "signup");
+  assert.equal(areaOf({ sig: "br|slow|db /auth/vN/settings", kind: "slow", route: "db /auth/vN/settings" }), "signup");
   assert.equal(areaOf({ sig: "pulse|db_down", kind: "pulse" }), "core");
   assert.equal(areaOf({ sig: "db|deadlocks", kind: "net" }), "core");
   assert.equal(areaOf({ sig: "vital|signups|zero", kind: "vital" }), "signup");
@@ -382,6 +383,15 @@ test("issues that were open before the judge existed go to the brief, not into a
   assert.equal(w.wakes.length, 0);
   const rows = (await w.env.DB.prepare("SELECT fp, state, why, sev, area FROM gate ORDER BY fp").all()).results;
   assert.deepEqual(rows.map((r) => [r.state, r.why, r.sev, r.area]), [["brief", "backlog", "high", "other"], ["brief", "backlog", "medium", "trading"]]);
+});
+
+test("two checks in the same minute: one start, not two", async () => {
+  const w = makeWorld(); await on(w);
+  await threeCrashes(w);
+  await Promise.all([runGate(w.env, w.deps), runGate(w.env, w.deps)]);
+  assert.equal(w.wakes.length, 1);
+  await runGate(w.env, w.deps);
+  assert.equal(w.wakes.length, 1);
 });
 
 test("an outage seen by the pulse wakes the agent, database or no database", async () => {
