@@ -9,6 +9,8 @@
 #           OPS_MAIL_TO (where alerts go). Optional RESEND_API_KEY lets alerts
 #           go out even when Vercel is down. The pulse does nothing until the
 #           first three are set.
+#           ROBOT_PASSWORD: the journey robot's test account. Without it the
+#           robot does nothing.
 #           AGENT_FIRE_URL + AGENT_FIRE_TOKEN: the start address of the ops
 #           agent and its token. Without them the judge still decides and
 #           records, and mails that it could not start anything.
@@ -24,7 +26,9 @@ workers_dev = true
 preview_urls = false
 
 [triggers]
-crons = ["* * * * *"]
+# Every minute: the pulse. Minute 4 of every ten: the journey robot; minute 5:
+# its second try when a step failed.
+crons = ["* * * * *", "4-59/10 * * * *", "5-59/10 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
@@ -35,6 +39,9 @@ database_id = "275b7535-b2cf-492f-8da3-9a27db561d06"
 SITE_URL = "https://stocksaathi.co.in"
 SUPABASE_URL = "https://hwlmwraowcylxzdpumca.supabase.co"
 OPS_MAIL_FROM = "StockSaathi Ops <orders@stocksaathi.co.in>"
+# The robot's permanent test account (marked in ops_test_accounts; its
+# password is the secret ROBOT_PASSWORD and exists nowhere else).
+ROBOT_EMAIL = "ops-robot@stocksaathi.co.in"
 
 [observability]
 enabled = true

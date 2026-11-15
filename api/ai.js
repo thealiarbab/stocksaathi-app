@@ -60,7 +60,7 @@ function recordUsage(row) {
 import { liveGeminiModel, isGemini3 } from "./_models.js";
 import { lastSessionIst } from "./_session.js";
 import { handleAuthEmailHook, handleAuthEmailFromDb } from "./_authEmail.js";
-import { withOps, opsSecretOk, opsCaught, opsForwardBrowser, opsCanary, opsStatus } from "./_ops.js";
+import { withOps, opsSecretOk, opsCaught, opsForwardBrowser, opsSignupFlow, opsCanary, opsStatus } from "./_ops.js";
 import { scoreReportCard, benchmarkPl } from "../js/coach/reportCardCore.js";
 import { tradesWithFlags } from "../js/coach/biasLedger.js";
 import { factText, unlockText, pillarName, overallSummary } from "../js/coach/reportCardCopy.js";
@@ -3713,6 +3713,7 @@ async function opEv(req, origin) {
         body: JSON.stringify({ p: rows, p_uid: uid, p_country: cc }),
       }),
       broken.length ? opsForwardBrowser(vid, broken) : null,
+      opsSignupFlow(rows),
     ]);
   } catch { /* tracking must never break the page */ }
   return none();

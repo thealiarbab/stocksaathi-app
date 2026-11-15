@@ -167,6 +167,29 @@ export async function opsForwardBrowser(vid, rows) {
   await send(t, { src: "browser", vid: await shortHash(`v|${vid}`), deploy: deploy(), events });
 }
 
+// Sign-up truth. The watcher compares what people did on the sign-up page
+// (as their browsers report it, the moment it happens) with the accounts the
+// database really created. Only counts leave here: no ids, no text.
+let flowWin = { at: 0, n: 0 };
+export async function opsSignupFlow(rows) {
+  const t = target();
+  if (!t || !rows.length) return;
+  const flow = {};
+  const add = (k) => { flow[k] = (flow[k] || 0) + 1; };
+  for (const r of rows) {
+    if (r.kind === "page" && (r.path === "/register" || r.path === "/register/")) add("view");
+    else if (r.kind === "form_start" && r.target === "reg-form") add("start");
+    else if (r.kind === "form_submit" && r.target === "reg-form") add("submit");
+    else if (r.kind === "form_submit" && r.target === "otp-form") add("otp");
+    else if (r.kind === "form_error" && (r.target === "reg-form" || r.target === "otp-form")) add("error");
+  }
+  if (!Object.keys(flow).length) return;
+  const now = Date.now();
+  if (now - flowWin.at > 60_000) flowWin = { at: now, n: 0 };
+  if (++flowWin.n > 120) return;
+  await send(t, { src: "js", flow, events: [] });
+}
+
 // Hourly test report asked for by the watcher: proves this path still works.
 export async function opsCanary() {
   const t = target();

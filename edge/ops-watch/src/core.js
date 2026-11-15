@@ -5,6 +5,7 @@
 import { describe, fingerprint, sample, SIG_VERSION } from "./signature.js";
 import { decide, severityOf, istDay } from "./rules.js";
 import { areaOf } from "./gate.js";
+import { blameOf, outsideNote } from "./outside.js";
 
 const SOURCE = { py: "server_py", js: "server_js", browser: "browser", cron: "cron", db: "db", pulse: "pulse", vital: "vital" };
 const DAY_CAP = 40_000;       // reports written per day before switching to count-only
@@ -48,6 +49,7 @@ export async function ingest(env, deps, body) {
   const pre = [];
   if (body.tally && typeof body.tally === "object") pre.push(...tallyStatements(env, now, body.tally));
   if (deploy) pre.push(env.DB.prepare("INSERT INTO kv (k, v, t) VALUES (?1, ?2, ?3) ON CONFLICT(k) DO NOTHING").bind(`deploy:${deploy}`, JSON.stringify({ src }), now));
+  if (body.flow && typeof body.flow === "object") pre.push(...flowStatements(env, now, body.flow));
 
   const groups = new Map();
   let canary = false, serverEvents = 0;
@@ -94,7 +96,29 @@ function tallyStatements(env, now, tally) {
   return out;
 }
 
-// items: [{ fp?, d: {sig, src, kind, route, title, trusted, severity?, extra?}, n, who:Set, first, last }]
+// The sign-up flow as the site sees it happen (register page views, form
+// starts, submits, errors, code entries), in 10-minute buckets.
+const FLOW_KEYS = new Set(["view", "start", "submit", "error", "otp"]);
+function flowStatements(env, now, flow) {
+  const bucket = Math.floor(now / 600_000);
+  const out = [];
+  for (const [k, v] of Object.entries(flow)) {
+    const n = Math.max(0, Math.min(1000, Math.floor(Number(v) || 0)));
+    if (!FLOW_KEYS.has(k) || !n) continue;
+    out.push(env.DB.prepare("INSERT INTO flow (bucket, k, n) VALUES (?1, ?2, ?3) ON CONFLICT(bucket, k) DO UPDATE SET n = n + ?3").bind(bucket, k, n));
+  }
+  return out;
+}
+
+// Sends now, or queues for the next minute the database answers.
+export async function sendOrQueue(env, deps, rpc, body) {
+  const r = await deps.rpc(rpc, body);
+  if (r.ok && r.data?.ok !== false) return r;
+  await env.DB.prepare("INSERT INTO outbox (rpc, body, created) VALUES (?1, ?2, ?3)").bind(rpc, JSON.stringify(body), deps.now()).run();
+  return r;
+}
+
+// items: [{ fp?, d: {sig, src, kind, route, title, trusted, severity?, extra?, outside?}, n, who:Set, first, last }]
 export async function record(env, deps, items, opts = {}) {
   const now = deps.now();
   const today = istDay(now);
@@ -179,9 +203,14 @@ export async function record(env, deps, items, opts = {}) {
   }
   if (follow.length) await env.DB.batch(follow);
 
+  // Whose fault: an outside service's own failure is marked on the issue, so
+  // the judge does not start the agent for something we cannot change.
+  const theirs = todo.length ? await kvGet(env, "outside") : null;
   for (const t of todo) {
     const event = t.verdict.action === "open" ? (t.verdict.spike ? "spike" : "open") : t.verdict.action;
-    const payload = await issuePayload(env, t.row, t.day, event, t.g.d);
+    const service = t.g.d.outside || blameOf(t.row, t.g.last, theirs, now);
+    const outside = service ? outsideNote(service, theirs) : null;
+    const payload = await issuePayload(env, t.row, t.day, event, { ...t.g.d, outside });
     let reply = null;
     if (out.opened < MAX_RPC) reply = await deps.rpc("ops_issue_upsert", payload);
     const sent = !!(reply && reply.ok && reply.data && reply.data.ok);
@@ -204,18 +233,19 @@ export async function record(env, deps, items, opts = {}) {
     // The judge at the door gets a row for every issue. A surge or a spread
     // of an issue it already knows only asks it to look again now.
     const fresh = event === "open" || event === "regress" || event === "unmute" || (event === "spike" && t.row.state === "baseline");
-    set.push(gateTouch(env, { fp: t.row.fp, area: areaOf(t.row), sev: payload.severity, now, people: t.day.people, hits: t.day.hits, fresh }));
+    set.push(gateTouch(env, { fp: t.row.fp, area: areaOf(t.row), sev: payload.severity, now, people: t.day.people, hits: t.day.hits, fresh, outside: service || null }));
     await env.DB.batch(set);
   }
   return out;
 }
 
-export function gateTouch(env, { fp, area, sev, now, people, hits, fresh }) {
+export function gateTouch(env, { fp, area, sev, now, people, hits, fresh, outside = null }) {
   return env.DB.prepare(
-    `INSERT INTO gate (fp, area, sev, opened, open_people, open_hits, state, status, next_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'new', 'open', ?4)
+    `INSERT INTO gate (fp, area, sev, opened, open_people, open_hits, state, status, next_at, outside)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'new', 'open', ?4, ?8)
      ON CONFLICT(fp) DO UPDATE SET
        area = ?2, sev = ?3, next_at = ?4,
+       outside = COALESCE(?8, CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE outside END),
        opened = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?4 ELSE opened END,
        open_people = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?5 ELSE open_people END,
        open_hits = CASE WHEN ?7 = 1 OR state = 'closed' THEN ?6 ELSE open_hits END,
@@ -229,7 +259,7 @@ export function gateTouch(env, { fp, area, sev, now, people, hits, fresh }) {
        why = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE why END,
        reason = CASE WHEN ?7 = 1 OR state = 'closed' THEN NULL ELSE reason END,
        state = CASE WHEN ?7 = 1 OR state = 'closed' THEN 'new' ELSE state END`,
-  ).bind(fp, area, sev, now, people || 0, hits || 0, fresh ? 1 : 0);
+  ).bind(fp, area, sev, now, people || 0, hits || 0, fresh ? 1 : 0, outside);
 }
 
 async function familyFor(env, row) {
@@ -270,6 +300,7 @@ export async function issuePayload(env, row, day, event, d = {}) {
       first_samples: parse(row.first_samples),
       last_samples: parse(row.last_samples),
       ...(d.extra ? { extra: d.extra } : {}),
+      ...(d.outside ? { outside: d.outside } : {}),
     },
   };
 }

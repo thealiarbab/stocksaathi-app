@@ -9,13 +9,16 @@ import { parseCron, prevRun } from "./cronexpr.js";
 import { baseline, farOff, silentTooLong, fixVerdict, watchWindow, hourOfWeek, istDay, marketOpen } from "./rules.js";
 import { isNseTradingDay } from "../../../js/data/nseCalendar.js";
 import { runGate } from "./gaterun.js";
+import { areaOf } from "./gate.js";
+import { signupCheck, nightlySenses, deployWatch, noteDeploy, windowStats } from "./senses.js";
+import { robotSince } from "./robot.js";
 
 const MIN = 60_000, HOUR = 3600_000;
 const LOW_VITALS = ["signups", "trades", "views"];
 const HIGH_VITALS = ["db_ms", "site_ms", "api_ms", "err_share", "conns"];
 
 const item = (kind, sig, title, sampleObj, extra = {}) => ({
-  d: { sig, src: sig.split("|")[0], kind, route: extra.route || null, title, trusted: 1, severity: extra.severity, extra: extra.extra },
+  d: { sig, src: sig.split("|")[0], kind, route: extra.route || null, title, trusted: 1, severity: extra.severity, extra: extra.extra, outside: extra.outside },
   n: extra.n || 1, who: new Set(), first: sampleObj, last: sampleObj,
 });
 
@@ -103,6 +106,14 @@ export async function runPulse(env, deps) {
       delta[k] = Number.isFinite(x) && x >= 0 ? x : null;   // negative = counters were reset
     }
     st.counters = cur;
+    // The robot's own hourly paper trade is not a student's trade.
+    if (delta.trades > 0 || st.robot_owed > 0) {
+      const made = (await kvGet(env, "robot"))?.tr || 0;
+      st.robot_owed = (st.robot_owed || 0) + Math.max(0, made - (st.robot_tr_seen ?? 0));
+      st.robot_tr_seen = made;
+      const mine = Math.min(st.robot_owed, delta.trades || 0);
+      delta.trades -= mine; st.robot_owed -= mine;
+    }
     st.total_views = (st.total_views || 0) + (delta.views || 0);
   }
   st.ring.push([minute, delta.signups, delta.trades, delta.views]);
@@ -120,6 +131,12 @@ export async function runPulse(env, deps) {
   if (site.ok && api.ok && db.ok) { a.okn++; a.db_ms += db.ms; a.site_ms += site.ms; a.api_ms += api.ms; a.conns = Math.max(a.conns, d.conns || 0); }
   if (Object.keys(st.down).length) a.incident = 1;
   if (db.ok && minute % 10 === 3) await silentCheck(env, st, now, items);
+  // Sign-up truth: what the site saw people do against what the database
+  // really created. And every new build is watched.
+  const found = [];
+  if (db.ok && minute % 10 === 6 && !test) { try { found.push(...await signupCheck(env, deps, now)); } catch {} }
+  if (db.ok) { try { found.push(...await deployWatch(env, st, now, { down: !site.ok || !api.ok })); } catch {} }
+  for (const f of found) items.push(item(f.kind, f.sig, f.title, f.sample, { severity: f.severity, outside: f.outside }));
 
   // --- error reporting itself: an hourly test report must arrive ---
   const mm = new Date(now).getUTCMinutes();
@@ -354,6 +371,16 @@ async function judgeWatches(env, deps, st, watches, cur) {
         { ms: now - s.t0, hits: snap.hits - s.hits0, activity: (st.total_views || 0) - s.views0 },
       );
       if (v.verdict) {
+        // "Held" needs more than silence: the robot's own journey through
+        // that part of the site has to be clean as well.
+        if (v.verdict === "held") {
+          const srow = await env.DB.prepare("SELECT sig, kind, route FROM sig WHERE fp = ?1").bind(w.fp || "").first();
+          const rc = srow ? await robotSince(env, areaOf(srow), liveAt) : { clean: true };
+          if (!rc.clean) {
+            if (now - s.t0 < 48 * HOUR) continue;
+            v.verdict = "no_effect"; v.why = `the errors stopped, but ${rc.why}`;
+          } else if (rc.known) v.why += `; the robot's journey there is clean (${rc.runs} runs)`;
+        }
         await send(env, deps, "ops_attempt_verdict", { attempt_id: w.attempt_id, verdict: v.verdict, after: { hits_since: snap.hits - s.hits0, hours: Math.round((now - s.t0) / HOUR), at: now }, note: v.why });
         s.stage = "done";
       }
@@ -362,13 +389,6 @@ async function judgeWatches(env, deps, st, watches, cur) {
   for (const id of Object.keys(st.watch)) if (!live.has(id)) delete st.watch[id];
 }
 
-async function windowStats(env, from, to) {
-  const p = await env.DB.prepare("SELECT AVG(site_ms) s, AVG(db_ms) d, COUNT(*) n FROM pulse WHERE t >= ?1 AND t < ?2 AND site = 1 AND db = 1").bind(from, to).first();
-  const e = await env.DB.prepare("SELECT COALESCE(SUM(CAST(v AS INTEGER)), 0) n FROM kv WHERE k >= ?1 AND k < ?2")
-    .bind(`m:${Math.floor(from / MIN)}`, `m:${Math.floor(to / MIN)}`).first();
-  const mins = Math.max((to - from) / MIN, 1);
-  return { errRate: (e?.n || 0) / mins, siteMs: p?.s || 0, dbMs: p?.d || 0 };
-}
 async function sigTotals(env, fps) {
   if (!fps.length) return { hits: 0, first: Date.now(), last0: null };
   const marks = fps.map((_, i) => `?${i + 1}`).join(",");
@@ -383,6 +403,7 @@ async function learnDeploys(env, deps, st, now) {
     const ref = row.k.slice(7);
     const reply = await deps.rpc("ops_change_note", { kind: "deploy", ref, at: new Date(row.t).toISOString(), summary: "New build first seen serving traffic", actor: "collector" });
     if (reply.ok) await kvPut(env, row.k, { told: 1 }, row.t).run();
+    noteDeploy(st, ref, row.t, now);
   }
 }
 
@@ -394,7 +415,12 @@ async function nightly(env, deps, st, now) {
     env.DB.prepare("DELETE FROM sig_day WHERE day < ?1").bind(day(60)),
     env.DB.prepare("DELETE FROM tally WHERE hour < ?1").bind(Math.floor(now / HOUR) - 24 * 30),
     env.DB.prepare("DELETE FROM vital_hour WHERE hour < ?1").bind(Math.floor(now / HOUR) - 24 * 70),
-    env.DB.prepare("DELETE FROM kv WHERE (k LIKE 'm:%' OR k LIKE 'n:%') AND t < ?1").bind(now - 3 * 86400_000),
+    env.DB.prepare("DELETE FROM kv WHERE k LIKE 'n:%' AND t < ?1").bind(now - 3 * 86400_000),
+    // Per-minute error counts stay six days: the first market open after a
+    // build is compared with the open before it, across a long weekend.
+    env.DB.prepare("DELETE FROM kv WHERE k LIKE 'm:%' AND t < ?1").bind(now - 6 * 86400_000),
+    env.DB.prepare("DELETE FROM robot_run WHERE t < ?1").bind(now - 14 * 86400_000),
+    env.DB.prepare("DELETE FROM flow WHERE bucket < ?1").bind(Math.floor((now - 3 * 86400_000) / 600_000)),
     env.DB.prepare("DELETE FROM kv WHERE k LIKE 'deploy:%' AND t < ?1").bind(now - 30 * 86400_000),
     env.DB.prepare("UPDATE sig SET first_samples = '[]', last_samples = '[]' WHERE last_seen < ?1 AND state IN ('watch', 'baseline', 'fixed', 'ignored', 'alias')").bind(now - 30 * 86400_000),
     env.DB.prepare("UPDATE sig SET peak_day = COALESCE((SELECT MAX(hits) FROM sig_day WHERE sig_day.fp = sig.fp AND day >= ?1 AND day < ?2), 0) WHERE last_seen > ?3")
@@ -412,6 +438,11 @@ async function nightly(env, deps, st, now) {
   const b = await env.DB.prepare("SELECT vital, COUNT(*) n, AVG(v) mean, MIN(v) lo, MAX(v) hi FROM vital_hour WHERE incident = 0 AND hour >= ?1 GROUP BY vital")
     .bind(Math.floor(now / HOUR) - 24 * 28).all();
   await deps.rpc("ops_baseline_put", { at: new Date(now).toISOString(), vitals: b.results || [] });
+  // Funnels by source and returning users, each against its own history.
+  try {
+    const found = await nightlySenses(env, deps, now);
+    if (found.length) await record(env, deps, found.map((f) => item(f.kind, f.sig, f.title, f.sample, { severity: f.severity })), {});
+  } catch {}
 }
 
 // End of the first day: everything that already existed is handed over as one

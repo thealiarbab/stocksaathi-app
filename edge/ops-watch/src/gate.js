@@ -19,14 +19,19 @@ const RE_SAATHI = /\/api\/chat|(^|[\s/])chat(\b|$)|coach|chat_threads|chat_proje
 const RE_TRADING = /match-orders|limit_orders|limit-orders|place_limit_order|live-quote|quote|portfolio|holdings|transactions|snapshot|order|history|fundamentals|(^|[\s/])(stock|stocks|markets|mf)(\b|\/|$)/;
 const RE_TRADING_JOB = /order|snapshot|eod|nav|quote|match/;
 
+// The journey robot's steps (see robot.js).
+const ROBOT_AREA = { register: "signup", login: "signup", portfolio: "trading", prices: "trading", order: "trading", trade: "trading", saathi: "saathi", page: "core" };
+const OUTSIDE = { yahoo: "Yahoo Finance", google_ai: "Google AI", supabase: "Supabase", vercel: "Vercel", resend: "Resend" };
+
 // Which part of the product a signature belongs to.
 export function areaOf({ sig = "", kind = "", route = "" } = {}) {
   const s = String(sig), r = String(route || "").toLowerCase();
+  if (s.startsWith("robot|")) return ROBOT_AREA[s.split("|")[1]] || "core";
   if (s.startsWith("pulse|")) return /^pulse\|(canary_|baseline_review)/.test(s) ? "other" : "core";
   if (s.startsWith("db|")) return "core";
   if (s.startsWith("vital|")) {
     const v = s.split("|")[1];
-    return v === "signups" ? "signup" : v === "trades" ? "trading" : "core";
+    return v === "signups" ? "signup" : v === "trades" ? "trading" : v === "returning" ? "other" : "core";
   }
   if (s.startsWith("cron|")) return RE_TRADING_JOB.test(s.split("|")[1]?.toLowerCase() || "") ? "trading" : "other";
   if (r === "/api/health") return "core";
@@ -124,6 +129,21 @@ export function decide(g, c) {
   if (g.status === "fixing" || g.status === "fix_live") return out("idle", "working", "the agent is on it", now + 30 * MIN);
   if (g.status === "needs_owner" || g.status === "needs_pc") return out("brief", "needs_you", "it cannot go further without you", now + 6 * HOUR);
 
+  // The cause is an outside service: nothing of ours to change, so the agent
+  // is not started and the owner reads it in the brief. If it is still
+  // happening two hours later and nobody has looked, it gets one look: maybe
+  // we can route around it. The owner's OK always starts it.
+  let outsideLong = false;
+  if (g.outside && !g.approvedAt && g.state !== "woken") {
+    const who = OUTSIDE[g.outside] || g.outside;
+    outsideLong = now - g.lastSeen < 20 * MIN && now - g.opened >= 2 * HOUR && (g.wakes || 0) === 0;
+    if (!outsideLong) return out("brief", "outside", `the cause is at ${who}, not in our code: nothing of ours to change`, now + 30 * MIN);
+  }
+  // A low trading number on a day the market is closed is the calendar, not a fault.
+  if (c.tradingDay === false && g.area === "trading" && g.kind === "vital" && g.sev !== "critical" && !g.approvedAt) {
+    return out("brief", "market_closed", "the market is closed today: a low trading number is expected", now + 6 * HOUR);
+  }
+
   // Serious means serious now. Something that broke and has been quiet for
   // half an hour is worth a look, not an alarm; quiet for six hours, it is
   // history for the brief.
@@ -149,7 +169,7 @@ export function decide(g, c) {
     skipWait = true;
   }
 
-  if (serious) {
+  if (serious && !outsideLong) {
     // Owner's rule (15 Nov): while he is working in Claude nothing starts,
     // serious or not. He gets the popup and the mail and decides himself;
     // his OK on the issue still starts it.
@@ -175,6 +195,7 @@ export function decide(g, c) {
     return out("wake", why, reason, now + 15 * MIN, { mode });
   };
 
+  if (outsideLong) return start("look", "outside_long", `the cause is at ${OUTSIDE[g.outside] || g.outside}, but it has gone on for 2 hours: the agent checks whether we can work around it`);
   if (recheck) return start("recheck", "again", "the agent asked to look again now");
   if (g.approvedAt) return start("approved", "approved", "you approved it", false);
   if (!serious && g.band === "serious" && quiet >= 6 * HOUR) return out("brief", "stopped", "stopped by itself", now + HOUR);
@@ -227,18 +248,19 @@ export function usageLine(u, now) {
 // What the agent is told when it is started. Numbers and fixed words only:
 // issue titles come from error text anyone can cause, so they never go in.
 //   rows: [{ id, fp, area, band, sev, mode, people, hits, opened, lastSeen }]
-export function wakeText({ now, rows, nearby = [], more = 0, usage, dbOk = true, drill = false, test = false }) {
+export function wakeText({ now, rows, nearby = [], more = 0, usage, dbOk = true, drill = false, test = false, market = null }) {
   const name = (r) => (r.id ? `#${r.id}` : `fp:${r.fp}`);
   const ago = (t) => { const m = Math.max(0, Math.round((now - t) / MIN)); return m < 90 ? `${m} min` : `${Math.round(m / 60)} h`; };
   const lines = ["OPS WAKE v1", `sent: ${new Date(now).toISOString()} (${istClock(now)})`];
   if (test) lines.push("test: yes. This is a wiring test. Read the queue, change nothing, write one line saying the wake arrived, stop.");
   if (drill) lines.push("drill: yes. The collector is running an outage drill it started itself; confirm and stop.");
   for (const r of rows) {
-    lines.push(`issue ${name(r)}: mode=${r.mode} area=${r.area} band=${r.band} severity=${r.sev} people_today=${r.people} hits_today=${r.hits} opened=${ago(r.opened)} ago last_seen=${ago(r.lastSeen)} ago`);
+    lines.push(`issue ${name(r)}: mode=${r.mode} area=${r.area} band=${r.band} severity=${r.sev}${r.outside && OUTSIDE[r.outside] ? ` outside_cause=${r.outside}` : ""} people_today=${r.people} hits_today=${r.hits} opened=${ago(r.opened)} ago last_seen=${ago(r.lastSeen)} ago`);
   }
   if (more > 0) lines.push(`and ${more} more small issue(s) wait in the queue for a later run.`);
   if (nearby.length) lines.push(`opened in the same 20 minutes, possibly the same cause: ${nearby.map(name).join(", ")}`);
   lines.push(`limits: ${usageLine(usage, now)}`);
+  if (market) lines.push(`market: ${market}`);
   if (usage.known && usage.fresh && usage.weekly >= 85) lines.push("note: weekly use is above 85%. Fix what is serious; leave anything optional for the brief.");
   if (!dbOk) lines.push("note: the collector could not reach the main database this minute.");
   lines.push("modes: fix = serious, act now. look = judge first, fix only if worth it. small = small fix allowed by the limits. approved = the owner said go. recheck = you asked to look again.");

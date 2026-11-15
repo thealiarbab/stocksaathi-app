@@ -6,6 +6,9 @@ import { ingest, kvGet, kvPut, mergeSignatures, splitSignature } from "./core.js
 import { runPulse } from "./pulse.js";
 import { setActive, setUsage, setPaused, answer, addNote, gateView, gateSummary, testWake } from "./gaterun.js";
 import { page } from "./page.js";
+import { runRobot, robotView } from "./robot.js";
+import { flowSums } from "./senses.js";
+import { dayInfo } from "./calendar.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
@@ -33,6 +36,22 @@ export function makeDeps(env) {
   return {
     now,
     fetch: timedFetch,
+    // A full request for the journey robot: status, time and the (short) body.
+    async http(url, init = {}) {
+      const t0 = now();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), init.timeoutMs || 10000);
+      try {
+        const { timeoutMs, ...rest } = init;
+        const r = await fetch(url, { ...rest, signal: ctrl.signal, redirect: "manual" });
+        const text = (await r.text()).slice(0, 20000);
+        let json = null;
+        try { json = JSON.parse(text); } catch {}
+        return { status: r.status, ms: now() - t0, text, json };
+      } catch (e) {
+        return { status: 0, ms: now() - t0, err: String(e?.message || e).slice(0, 80), text: "", json: null };
+      } finally { clearTimeout(timer); }
+    },
     // Calls one function in the main database. The public (anon) key only
     // gets the request through the door; each function checks the collector's
     // own secret before doing anything.
@@ -167,6 +186,15 @@ export default {
         if (b.op === "merge") return json(200, await mergeSignatures(env, deps, b));
         if (b.op === "split") return json(200, await splitSignature(env, deps, b));
         if (b.op === "pulse") return json(200, await runPulse(env, deps));
+        // The journey robot, run now (Saathi only when asked: it costs AI money).
+        if (b.op === "robot") return json(200, await runRobot(env, deps, { force: true, saathi: b.saathi === true }));
+        if (b.op === "senses") {
+          const now = deps.now();
+          const runs = await env.DB.prepare("SELECT t, step, ok, ms, why, what FROM robot_run ORDER BY t DESC, step LIMIT 40").all();
+          return json(200, { ok: true, calendar: dayInfo(now), robot: await robotView(env, now), runs: runs.results, outside: await kvGet(env, "outside"),
+            signup_flow: { last_30_min: await flowSums(env, now, 30), last_60_min: await flowSums(env, now, 60), last_24_h: await flowSums(env, now, 1440) },
+            nightly: await kvGet(env, "senses"), builds_watched: ((await kvGet(env, "state")) || {}).dep || [] });
+        }
         if (b.op === "memo") {
           const r = await env.DB.prepare("SELECT kind, id, data FROM memo WHERE kind = ?1 LIMIT 300").bind(b.kind === "recipes" ? "recipes" : "cases").all();
           return json(200, { ok: true, rows: r.results });
@@ -205,6 +233,14 @@ export default {
     // Not configured yet (first deploy, before the secrets are set): do nothing
     // rather than report a false outage.
     if (!env.OPS_SECRET || !env.SUPABASE_ANON_KEY || !env.OPS_MAIL_TO) return;
+    // The robot has its own two slots (minute 4 of every ten, and minute 5 as
+    // a second try) and its own record, apart from the one-minute pulse.
+    if (event.cron && event.cron !== "* * * * *") {
+      ctx.waitUntil(runRobot(env, makeDeps(env)).catch(async (e) => {
+        try { await kvPut(env, "robot_error", { at: Date.now(), err: String(e?.stack || e).slice(0, 600) }, Date.now()).run(); } catch {}
+      }));
+      return;
+    }
     ctx.waitUntil(runPulse(env, makeDeps(env)).catch(async (e) => {
       // The watcher's own failures are recorded where the next pulse and the
       // status page can see them.
@@ -233,6 +269,10 @@ async function status(env, deps) {
     last_24h: up || null,
     canary: { js: await kvGet(env, "canary:js"), py: await kvGet(env, "canary:py"), sent: st.canary_sent || null },
     gate: await gateSummary(env, deps),
+    calendar: dayInfo(now).line,
+    robot: await robotView(env, now).catch(() => ({ state: "unknown", why: "could not be read" })),
+    robot_error: await kvGet(env, "robot_error"),
+    outside: await kvGet(env, "outside"),
     gate_error: await kvGet(env, "gate_error"),
     pulse_error: await kvGet(env, "pulse_error"),
     ingest_error: await kvGet(env, "ingest_error"),

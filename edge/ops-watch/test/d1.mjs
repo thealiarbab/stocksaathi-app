@@ -35,7 +35,9 @@ export function makeD1() {
 export function makeWorld(start = Date.UTC(2026, 10, 12, 6, 0, 0)) {
   const w = {
     t: start,
-    rpcs: [], mails: [], fetches: [], wakes: [],
+    rpcs: [], mails: [], fetches: [], wakes: [], https: [],
+    httpReply: null,       // function (url, init) -> { status, json, text } for the robot's requests
+    reply: null,           // function (rpcName, p) -> data, to script any other database function
     wakeReply: null,       // what the agent's start address answers; default: started
     dbUp: true, siteUp: true, apiUp: true,
     nextId: 100,
@@ -54,9 +56,16 @@ export function makeWorld(start = Date.UTC(2026, 10, 12, 6, 0, 0)) {
     async rpc(name, p) {
       w.rpcs.push({ name, p });
       if (!w.dbUp) return { ok: false, status: 0, ms: 7000 };
+      if (w.reply) { const x = w.reply(name, p); if (x !== undefined) return { ok: true, status: 200, ms: 20, data: x }; }
       if (name === "ops_db_pulse") return { ok: true, status: 200, ms: 40, data: w.pulse ? w.pulse(p) : { ok: true, now: new Date(w.t).toISOString(), conns: 20, max_conn: 60, longest_s: 0, dead: 0, hit: 1, read: 1, ins: { signups: 0, trades: 0, views: 0 } } };
       if (name === "ops_issue_upsert") return { ok: true, status: 200, ms: 30, data: { ok: true, id: w.nextId++, status: "open" } };
       return { ok: true, status: 200, ms: 20, data: { ok: true } };
+    },
+    // The robot's full requests: `w.httpReply(url, init)` scripts the site.
+    async http(url, init) {
+      w.https.push({ url, init });
+      const r = w.httpReply ? w.httpReply(url, init) : null;
+      return { status: 200, ms: 5, text: "", json: null, ...(r || {}) };
     },
     async mail(title, body, opts) { w.mails.push({ title, body, opts }); return true; },
     async wake(text) { w.wakes.push(text); return w.wakeReply || { ok: true, status: 200, id: `sess${w.wakes.length}` }; },

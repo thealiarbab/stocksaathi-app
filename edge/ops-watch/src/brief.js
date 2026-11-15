@@ -8,6 +8,10 @@
 
 import { usageLine, istClock } from "./gate.js";
 import { istDay } from "./rules.js";
+import { kvGet } from "./core.js";
+import { dayInfo } from "./calendar.js";
+import { robotView } from "./robot.js";
+import { SOURCE_NAME } from "./senses.js";
 
 const MIN = 60_000, HOUR = 3600_000, DAY = 86400_000, IST = 330 * MIN;
 const LINK_LIFE = 48 * HOUR;
@@ -68,9 +72,47 @@ export async function buildBrief(env, deps, { rows, usage, paused, log, origin }
   const today = await sum(h0, h1), week = await sum(h0 - 168, h1 - 168), yest = await sum(h0 - 24, h1 - 24);
   // Compared with the same hours a week ago; until a week of numbers exists,
   // with the same hours yesterday.
-  const cmp = (k, word) => `${word} ${today[k] ? n0(today[k].s) : "?"}${week[k]?.n ? ` (${n0(week[k].s)} a week ago)` : yest[k]?.n ? ` (${n0(yest[k].s)} yesterday by this time)` : ""}`;
-  const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
-  out.push(`Today so far: ${cmp("signups", "sign-ups")}, ${cmp("trades", "trades")}, ${cmp("views", "page activity")}.${weekend ? " It is the weekend: the market is closed, so almost no trades is normal." : ""}`);
+  const info = dayInfo(now);
+  // Every number carries one of three states. "unknown" is said out loud: a
+  // number measured for less than half of today's hours proves nothing.
+  const stateOf = (k) => {
+    const t = today[k], ref = week[k]?.n ? week[k] : yest[k]?.n ? yest[k] : null;
+    if (!t || t.n < (h1 - h0) / 2) return "unknown";
+    if (k === "trades" && !info.trading) return "ok";
+    if (!ref) return "unknown";
+    return ref.s >= 10 && t.s < 0.4 * ref.s ? "bad" : "ok";
+  };
+  const cmp = (k, word) => `${word} ${today[k] ? n0(today[k].s) : "?"} [${stateOf(k)}]${week[k]?.n ? ` (${n0(week[k].s)} a week ago)` : yest[k]?.n ? ` (${n0(yest[k].s)} yesterday by this time)` : ""}`;
+  out.push(`Today so far: ${cmp("signups", "sign-ups")}, ${cmp("trades", "trades")}, ${cmp("views", "page activity")}.\n(ok = in line with before, bad = far below, unknown = too little was measured to say.)`);
+  out.push(`Calendar: ${info.line}.${info.trading ? "" : " Almost no trades is normal today."}`);
+
+  // The robot's journey: sign-up page, login, portfolio, prices, a paper order, Saathi.
+  try {
+    const rv = await robotView(env, now);
+    out.push(rv.state === "unknown" ? `Robot journey [unknown]: ${rv.why}.`
+      : `Robot journey [${rv.state}]: ${rv.runs_24h} runs in 24 hours, ${rv.runs_with_failure_24h} with a failed step.${rv.failed?.length ? ` Failing now: ${rv.failed.map((s) => `${s} (${rv.failed_why?.[s] || "no reason given"})`).join(", ")}.` : ""}${rv.never_passed_yet?.length ? ` Not yet proven to work (never passed, so not judged): ${rv.never_passed_yet.join(", ")}.` : ""}`);
+  } catch {}
+
+  // Funnels by source and returning users, judged once a night.
+  try {
+    const sn = await kvGet(env, "senses");
+    if (sn?.funnel?.length) {
+      const by = new Map();
+      for (const f of sn.funnel) { if (!by.has(f.src)) by.set(f.src, []); by.get(f.src).push(f); }
+      const pc = (x) => (Number.isFinite(x) ? `${Math.round(x * 1000) / 10}%` : "?");
+      const word = { register: "reach sign-up", account: "make an account", trade: "first trade" };
+      const parts = [...by].sort((a, b) => (b[1][0].visitors || 0) - (a[1][0].visitors || 0)).map(([src, fs]) => {
+        const bad = fs.filter((f) => f.state === "bad");
+        const state = bad.length ? "bad" : fs.every((f) => f.state === "unknown") ? "unknown" : "ok";
+        return `${SOURCE_NAME[src] || src} [${state}] ${n0(fs[0].visitors)} visitors${bad.length ? ` (${bad.map((f) => `${word[f.step]} ${pc(f.value)}, usual ${pc(f.usual)}`).join("; ")})` : ""}`;
+      });
+      out.push(`Sign-up funnel by source, visitors of ${sn.funnel[0].day}: ${parts.join("; ")}.${[...by.values()].every((fs) => fs.every((f) => f.state === "unknown")) ? " All unknown: a source needs 7 earlier days before it can be judged." : ""}`);
+    }
+    if (sn?.returning?.length) {
+      const pc = (x) => (Number.isFinite(x) ? `${Math.round(x * 1000) / 10}%` : "?");
+      out.push(`New users who came back: ${sn.returning.map((f) => `day ${f.k} ${f.value == null ? "" : `${pc(f.value)} `}[${f.state}]${f.state === "bad" ? ` (usual ${pc(f.usual)})` : ""}`).join(", ")}. Judged once a week.`);
+    }
+  } catch {}
 
   const opened = await env.DB.prepare(
     "SELECT g.fp, g.area, g.state, g.why, g.reason, g.status, s.issue_id id, s.title FROM gate g JOIN sig s ON s.fp = g.fp WHERE g.opened >= ?1 ORDER BY g.opened LIMIT 15",
@@ -93,6 +135,9 @@ export async function buildBrief(env, deps, { rows, usage, paused, log, origin }
     }
     out.push(`Waiting for your OK: ${waiting.length}\n${items.join("\n")}${origin ? "\n  (Links work for 48 hours.)" : ""}`);
   } else out.push("Waiting for your OK: nothing.");
+
+  const theirs = rows.filter((g) => g.outside);
+  if (theirs.length) out.push(`Caused by an outside service (nothing of ours to change, so the agent was not started): ${theirs.length}\n${theirs.slice(0, 12).map((g) => `  ${line(g)}\n      ${g.reason || g.outside}`).join("\n")}`);
 
   const needs = rows.filter((g) => NEEDS.has(g.why) || g.status === "needs_owner" || g.status === "needs_pc");
   if (needs.length) out.push(`Needs you: ${needs.length}\n${needs.slice(0, 12).map((g) => `  ${line(g)}\n      ${g.reason || "see the Issues tab"}`).join("\n")}`);

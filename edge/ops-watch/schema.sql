@@ -96,7 +96,11 @@ CREATE TABLE IF NOT EXISTS gate (
   picked_at INTEGER,
   nagged_at INTEGER,
   approved_at INTEGER,
-  again INTEGER
+  again INTEGER,
+  -- Set when the cause is an outside service (yahoo, google_ai, supabase,
+  -- vercel, resend): nothing of ours to change, so the agent is not started.
+  -- Live databases made before this column: ALTER TABLE gate ADD COLUMN outside TEXT;
+  outside TEXT
 );
 CREATE INDEX IF NOT EXISTS gate_due ON gate (state, next_at);
 
@@ -106,3 +110,16 @@ CREATE TABLE IF NOT EXISTS note (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS note_at ON note (at);
+
+-- The journey robot: one row per step of each run (login, portfolio, prices,
+-- order, Saathi, register page). Kept 14 days.
+CREATE TABLE IF NOT EXISTS robot_run (
+  t INTEGER NOT NULL, step TEXT NOT NULL, ok INTEGER NOT NULL, ms INTEGER NOT NULL DEFAULT 0, why TEXT, what TEXT,
+  PRIMARY KEY (t, step)
+) WITHOUT ROWID;
+-- Sign-up flow counted from the site's own events as they happen, in
+-- 10-minute buckets: view, start, submit, error, otp.
+CREATE TABLE IF NOT EXISTS flow (
+  bucket INTEGER NOT NULL, k TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (bucket, k)
+) WITHOUT ROWID;

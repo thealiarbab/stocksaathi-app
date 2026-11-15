@@ -10,6 +10,7 @@ import { kvGet, kvPut } from "./core.js";
 import { areaOf, bandOf, decide, usageNow, usageLine, wakeText, istClock } from "./gate.js";
 import { severityOf, istDay } from "./rules.js";
 import { sendBrief, briefDue } from "./brief.js";
+import { dayInfo } from "./calendar.js";
 
 const MIN = 60_000, HOUR = 3600_000, DAY = 86400_000;
 const LIVE = new Set(["open", "fixing", "fix_live"]);
@@ -37,6 +38,7 @@ function shape(x, now, today) {
     openPeople: x.open_people, openHits: x.open_hits, totalPeople: x.t_people || 0, totalHits: x.t_hits || 0,
     wakes: x.wakes, wokenAt: x.woken_at, wakePeople: x.wake_people, wakeHits: x.wake_hits,
     pickedAt: x.picked_at, naggedAt: x.nagged_at, approvedAt: x.approved_at, again: x.again,
+    outside: x.outside || null, sig: x.sig,
   };
   g.band = bandOf(g);
   return g;
@@ -88,6 +90,7 @@ const SMALL_BATCH = 5;
 const context = (G, u, now) => ({
   now, usage: u, lastWakeAt: G.last || 0, lastSeriousWakeAt: G.last_serious || 0, lastSmallWakeAt: G.last_small || 0,
   wakesToday: G.n || 0, blindToday: G.blind || 0, ownerActiveAt: G.ownerActiveAt || 0,
+  tradingDay: dayInfo(now).trading,
 });
 
 // Called on every prompt the owner sends in Claude on his PC.
@@ -194,7 +197,7 @@ export async function runGate(env, deps, opts = {}) {
       await env.DB.batch([...set, save()]);
       set.length = 0; dirty = false;
       const text = wakeText({
-        now, usage: u, dbOk: opts.dbOk !== false, drill: !!opts.drill,
+        now, usage: u, dbOk: opts.dbOk !== false, drill: !!opts.drill, market: dayInfo(now).line,
         rows: waking.map((g) => ({ ...g, mode: g.v.mode || "small" })), nearby, more,
       });
       const reply = await deps.wake(text);
@@ -320,7 +323,7 @@ export async function gateView(env, deps) {
   const ctx = context(G, u, now);
   const rows = (await loadGate(env, now)).map((g) => {
     const v = decide(g, ctx);
-    return { issue: g.id, fp: g.fp, area: g.area, band: g.band, sev: g.sev, kind: g.kind, state: g.state, status: g.status, people: g.people, hits: g.hits,
+    return { issue: g.id, fp: g.fp, area: g.area, band: g.band, sev: g.sev, kind: g.kind, state: g.state, status: g.status, people: g.people, hits: g.hits, outside: g.outside,
       opened: new Date(g.opened).toISOString(), last_seen: new Date(g.lastSeen).toISOString(), stored: g.reason, next_check: new Date(g.nextAt).toISOString(),
       now_would: v.act, mode: v.mode || null, because: v.reason };
   });
