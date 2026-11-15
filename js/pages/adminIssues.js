@@ -154,7 +154,7 @@ function paint(root, ctx) {
             <span>${e(SOURCE[i.source] || i.source)}<br><span class="dim">${e(i.component || "")}</span></span>
             <span class="tabular">${fmtInt(i.hits)}×${i.people ? `<br><span class="dim">${fmtInt(i.people)} people</span>` : ""}</span>
             <span>${e(ist(i.first_seen))}<br><span class="dim">${e(ago(i.last_seen))}</span></span>
-            <span><span class="is-st is-st-${e(i.status)}">${e(STATUS[i.status] || i.status)}</span>${i.claimed_by ? `<br><span class="dim">${e(i.claimed_by.replace("_", " "))}</span>` : ""}${i.reopened ? `<br><span class="dim">came back ${i.reopened}×</span>` : ""}</span>
+            <span><span class="is-st is-st-${e(i.status)}">${e(STATUS[i.status] || i.status)}</span>${i.claimed_by ? `<br><span class="dim">${e(i.claimed_by.replace("_", " "))}</span>` : ""}${i.reopened ? `<br><span class="dim">came back ${i.reopened}×</span>` : ""}${i.cause && (i.status === "open" || i.status === "regressed") ? `<br><span class="dim">looked at: cause found, not fixed yet</span>` : ""}</span>
           </div>
           ${st.open === i.id ? `<div class="is-detail" data-detail="${i.id}"><div class="muted text-sm">Loading…</div></div>` : ""}`).join("")
           || `<div class="muted text-sm" style="padding:10px 4px">${st.show === "active" ? "Nothing open. The watcher is still checking every minute." : "Nothing here."}</div>`}
