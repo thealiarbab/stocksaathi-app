@@ -291,7 +291,7 @@ test("ask box: answer comes from the site's AI, with live numbers; capped per da
   const sent = JSON.parse(w.https[0].init.body);
   assert.equal(sent.q, "What is open right now?");
   assert.equal(sent.live.reflexes.mode, "tell_only");
-  assert.ok("open_issues" in sent.live && "claude_limits" in sent.live);
+  assert.ok("open_issues" in sent.live && "claude_limits_percent_already_used" in sent.live);
   assert.doesNotMatch(JSON.stringify(sent), /s3cret/, "the secret travels in the header only");
   assert.equal(w.wakes.length, 0, "asking never starts the agent");
   assert.equal((await w.env.DB.prepare("SELECT q, a, ok FROM ask").first()).a, "Nothing is open right now.");

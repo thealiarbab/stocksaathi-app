@@ -41,7 +41,7 @@ export async function liveNumbers(env, deps) {
     last_check: last ? { seconds_ago: Math.round((now - last.t) / 1000), website_ok: !!last.site, api_ok: !!last.api, database_ok: !!last.db, website_ms: last.site_ms, api_ms: last.api_ms, database_ms: last.db_ms } : null,
     checks_24h: up ? { total: up.n, website_ok: up.site, api_ok: up.api, database_ok: up.db } : null,
     today_so_far: Object.fromEntries((vit.results || []).map((x) => [x.vital, Math.round(x.s)])),
-    claude_limits: usageLine({ known: g.weekly != null, weekly: g.weekly, five: g.five, age: (g.reading_age_min || 0) * 60_000, fresh: (g.reading_age_min || 0) < 36 * 60, weeklyReset: now }, now).replace(/ \(resets[^)]*\)/, ""),
+    claude_limits_percent_already_used: usageLine({ known: g.weekly != null, weekly: g.weekly, five: g.five, age: (g.reading_age_min || 0) * 60_000, fresh: (g.reading_age_min || 0) < 36 * 60, weeklyReset: now }, now).replace(/ \(resets[^)]*\)/, ""),
     waking_the_agent: g.paused ? "switched off" : "on",
     agent_starts_today: g.wakes_today, with_agent_now: g.with_agent, waiting_for_owner: g.waiting_count,
     last_agent_start: g.last_log ? { at: istClock(g.last_log.at), mode: g.last_log.mode, issues: g.last_log.ids, started: g.last_log.ok } : null,
