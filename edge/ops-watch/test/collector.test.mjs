@@ -255,3 +255,16 @@ test("fingerprints are stable", async () => {
   assert.equal(await fingerprint("pulse|site_down"), await fingerprint("pulse|site_down"));
   assert.match(await fingerprint("x"), /^[0-9a-f]{20}$/);
 });
+
+test("visitor-side slowness and load failures need the server to agree", async () => {
+  const { visitorSide, serverAgrees } = await import("../src/rules.js");
+  assert.equal(visitorSide({ src: "browser", kind: "apislow", sig: "br|api|/api/quote|slow" }), "slow");
+  assert.equal(visitorSide({ src: "browser", kind: "api5", sig: "br|api|/api/quote|network" }), "network");
+  assert.equal(visitorSide({ src: "browser", kind: "api5", sig: "br|api|/api/quote|5xx:502" }), null);
+  assert.equal(visitorSide({ src: "py", kind: "slow", sig: "py|slow|/api/history" }), null);
+  assert.equal(serverAgrees("slow", { people: 200 }, { serverHits: 0, badMinutes: 2 }), false);
+  assert.equal(serverAgrees("slow", { people: 15 }, { serverHits: 1, badMinutes: 0 }), true);
+  assert.equal(serverAgrees("slow", { people: 15 }, { serverHits: 0, badMinutes: 3 }), true);
+  assert.equal(serverAgrees("network", { people: 29 }, { serverHits: 0, badMinutes: 0 }), false);
+  assert.equal(serverAgrees("network", { people: 30 }, { serverHits: 0, badMinutes: 0 }), true);
+});

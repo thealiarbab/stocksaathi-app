@@ -3,7 +3,7 @@
 // in through `deps`, so the tests run this exact code against a local SQLite.
 
 import { describe, fingerprint, sample, SIG_VERSION } from "./signature.js";
-import { decide, severityOf, istDay } from "./rules.js";
+import { decide, severityOf, istDay, visitorSide, serverAgrees } from "./rules.js";
 import { areaOf } from "./gate.js";
 import { blameOf, outsideNote } from "./outside.js";
 
@@ -118,6 +118,25 @@ export async function sendOrQueue(env, deps, rpc, body) {
   return r;
 }
 
+// What we measured ourselves in the last hour about the thing a browser
+// complains of: server-side reports for the same API path, and minutes in
+// which the watcher's own check found the API or the database slow or down.
+async function ownEvidence(env, row, now) {
+  const since = now - 3600_000;
+  const route = String(row.route || "");
+  const isDb = route.startsWith("db ");
+  let serverHits = 0;
+  if (route.startsWith("/api/")) {
+    const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM sig WHERE src IN ('js','py') AND kind IN ('slow','timeout','http','exc') AND last_seen > ?1 AND route LIKE ?2")
+      .bind(since, route.split("?")[0] + "%").first();
+    serverHits = r?.n || 0;
+  }
+  const p = await env.DB.prepare(isDb
+    ? "SELECT COUNT(*) AS n FROM pulse WHERE t > ?1 AND (db = 0 OR db_ms > 3000)"
+    : "SELECT COUNT(*) AS n FROM pulse WHERE t > ?1 AND (api = 0 OR site = 0 OR api_ms > 2500)").bind(since).first();
+  return { serverHits, badMinutes: p?.n || 0 };
+}
+
 // items: [{ fp?, d: {sig, src, kind, route, title, trusted, severity?, extra?, outside?}, n, who:Set, first, last }]
 export async function record(env, deps, items, opts = {}) {
   const now = deps.now();
@@ -196,7 +215,11 @@ export async function record(env, deps, items, opts = {}) {
         continue;
       }
     }
-    const verdict = decide(row, day, { now, today, learning: now < learningUntil, deploy: opts.deploy || null });
+    let verdict = decide(row, day, { now, today, learning: now < learningUntil, deploy: opts.deploy || null });
+    const side = verdict.action !== "none" && verdict.action !== "baseline" ? visitorSide(row) : null;
+    if (side && !serverAgrees(side, day, await ownEvidence(env, row, now))) {
+      verdict = { action: row.state === "watch" ? "baseline" : "none" };
+    }
     if (verdict.action === "none") continue;
     if (verdict.action === "baseline") { follow.push(env.DB.prepare("UPDATE sig SET state = 'baseline' WHERE fp = ?1").bind(g.fp)); continue; }
     todo.push({ g, row, day, verdict });

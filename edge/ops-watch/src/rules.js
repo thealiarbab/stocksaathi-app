@@ -75,6 +75,24 @@ export function decide(sig, day, ctx) {
   return { action: "none" };
 }
 
+// A browser measures its own connection as well as our server. "Slow in
+// browsers" and "fails to load in browsers" are therefore the visitor's
+// problem unless something we measure ourselves agrees. An answer with a 5xx
+// status is the server speaking and is never treated this way.
+export function visitorSide(sig) {
+  if (sig.src !== "browser") return null;
+  if (sig.kind === "apislow") return "slow";
+  if (sig.kind === "api5" && /\|network$/.test(sig.sig || "")) return "network";
+  return null;
+}
+
+// ev: { serverHits, badMinutes } from the last hour of our own measurements.
+// Failing to load for 30 different people in a day is not one bad connection.
+export function serverAgrees(side, day, ev) {
+  if ((ev.serverHits || 0) > 0 || (ev.badMinutes || 0) >= 3) return true;
+  return side === "network" && (day.people || 0) >= 30;
+}
+
 export function median(xs) {
   if (!xs.length) return null;
   const s = [...xs].sort((a, b) => a - b);
