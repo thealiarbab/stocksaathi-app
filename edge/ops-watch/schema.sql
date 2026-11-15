@@ -123,3 +123,18 @@ CREATE TABLE IF NOT EXISTS flow (
   bucket INTEGER NOT NULL, k TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (bucket, k)
 ) WITHOUT ROWID;
+
+-- Reflexes (tell-only): one row each time a reflex says "I would have done
+-- X because Y" while something serious was happening and the agent could not
+-- start. kind 'none' = it looked and nothing fitted. Nothing here is ever
+-- acted on; `after` is filled five minutes later (still | eased), `verdict`
+-- by the owner (right | wrong) or by the follow-up (unneeded).
+CREATE TABLE IF NOT EXISTS reflex (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, fp TEXT NOT NULL, issue_id INTEGER, kind TEXT NOT NULL,
+  why_blocked TEXT, would TEXT, because TEXT, target TEXT, after TEXT, after_at INTEGER, verdict TEXT, verdict_at INTEGER, note TEXT
+);
+CREATE INDEX IF NOT EXISTS reflex_fp ON reflex (fp, at);
+-- The Ask box: the owner's questions and the answers. Kept 60 days.
+CREATE TABLE IF NOT EXISTS ask (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, q TEXT NOT NULL, a TEXT, ok INTEGER NOT NULL DEFAULT 0, ms INTEGER NOT NULL DEFAULT 0
+);

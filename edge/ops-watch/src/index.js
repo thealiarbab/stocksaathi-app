@@ -9,6 +9,8 @@ import { page } from "./page.js";
 import { runRobot, robotView } from "./robot.js";
 import { flowSums } from "./senses.js";
 import { dayInfo } from "./calendar.js";
+import { reflexView, setVerdict } from "./reflex.js";
+import { ask, askLink } from "./ask.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
 
@@ -221,6 +223,26 @@ export default {
           if (b.fire_test === true) return json(200, { ok: true, test: await testWake(env, deps) });
           return json(200, await gateView(env, deps));
         }
+        // Reflexes are tell-only. This shows what they said; with id + verdict
+        // the owner marks one call right or wrong. Nothing here can make a
+        // reflex act.
+        if (b.op === "reflex") {
+          if (b.id != null && b.verdict) return json(200, await setVerdict(env, deps, b));
+          // What a reflex would be shown right now (read-only): running
+          // database jobs, long queries, AI use.
+          if (b.facts === true) { const r = await deps.rpc("ops_reflex_facts", {}); return json(200, { ok: !!(r.ok && r.data?.ok), ms: r.ms, facts: r.data || null }); }
+          return json(200, { ok: true, ...(await reflexView(env, deps.now(), Math.max(1, Math.min(50, Number(b.n) || 10)))) });
+        }
+        // The agent's weekly score and self-tuning, read now instead of at night.
+        if (b.op === "growth") {
+          const r = await deps.rpc("ops_growth", {});
+          const good = !!(r.ok && r.data?.ok);
+          if (good) await kvPut(env, "growth", { ...r.data, read_at: deps.now() }, deps.now()).run();
+          return json(200, { ok: good, growth: good ? r.data : null });
+        }
+        // The Ask box: a fresh 48-hour link to the page, or one answer here.
+        if (b.op === "ask_link") return json(200, { ok: true, link: await askLink(env, (await kvGet(env, "self"))?.origin || url.origin, deps.now()), works_for_hours: 48 });
+        if (b.op === "ask") return json(200, await ask(env, deps, b.q));
         return json(400, { ok: false, why: "unknown_op" });
       }
       return new Response(null, { status: 404 });
@@ -273,6 +295,9 @@ async function status(env, deps) {
     robot: await robotView(env, now).catch(() => ({ state: "unknown", why: "could not be read" })),
     robot_error: await kvGet(env, "robot_error"),
     outside: await kvGet(env, "outside"),
+    reflex: await reflexView(env, now, 3).catch(() => null),
+    reflex_error: await kvGet(env, "reflex_error"),
+    growth: await kvGet(env, "growth"),
     gate_error: await kvGet(env, "gate_error"),
     pulse_error: await kvGet(env, "pulse_error"),
     ingest_error: await kvGet(env, "ingest_error"),

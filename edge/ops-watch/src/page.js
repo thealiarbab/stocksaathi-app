@@ -9,6 +9,7 @@ import { checkLink } from "./brief.js";
 import { answer } from "./gaterun.js";
 import { istClock } from "./gate.js";
 import { istDay } from "./rules.js";
+import { ASK_ID, askPage } from "./ask.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const AREA = { signup: "Sign-up and login", core: "Site, API or database", trading: "Trading", saathi: "Saathi", other: "Other" };
@@ -32,13 +33,15 @@ export async function page(req, env, deps) {
   const url = new URL(req.url);
   let p = url.searchParams;
   if (req.method === "POST") {
-    try { p = new URLSearchParams((await req.text()).slice(0, 2000)); } catch { return new Response(null, { status: 404 }); }
+    try { p = new URLSearchParams((await req.text()).slice(0, 6000)); } catch { return new Response(null, { status: 404 }); }
   } else if (req.method !== "GET") return new Response(null, { status: 404 });
   const i = p.get("i") || "", e = p.get("e") || "", k = p.get("k") || "";
   const now = deps.now();
   if (!(await checkLink(env, i, e, k, now))) {
     return html(404, `<div class="card"><div class="t">This link no longer works.</div><div class="m">Links in the daily brief run out after 48 hours. The next brief has fresh ones.</div></div>`);
   }
+  // The Ask box has a fixed name instead of an issue's.
+  if (i === ASK_ID) return askPage(req, env, deps, p, html, esc);
   const g = await env.DB.prepare(
     `SELECT g.fp, g.area, g.state, g.reason, g.opened, s.issue_id id, s.title, s.last_seen, COALESCE(d.hits, 0) hits, COALESCE(d.people, 0) people
        FROM gate g JOIN sig s ON s.fp = g.fp LEFT JOIN sig_day d ON d.fp = g.fp AND d.day = ?2 WHERE g.fp = ?1`,

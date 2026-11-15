@@ -190,7 +190,7 @@ export async function runPulse(env, deps) {
   // outage is exactly when the agent has to be woken. Its own failure must
   // never take the pulse down with it.
   let gate = null;
-  try { gate = await runGate(env, deps, { dbOk: db.ok, drill: !!test }); }
+  try { gate = await runGate(env, deps, { dbOk: db.ok, drill: !!test, db }); }
   catch (e) { try { await kvPut(env, "gate_error", { at: now, err: String(e?.stack || e).slice(0, 600) }, now).run(); } catch {} }
   if (mm === 35 && new Date(now).getUTCHours() === 20) await nightly(env, deps, st, now);
   if (st.learning_until && now >= st.learning_until && !st.learning_done && db.ok) await baselineReview(env, deps, st);
@@ -438,6 +438,12 @@ async function nightly(env, deps, st, now) {
   const b = await env.DB.prepare("SELECT vital, COUNT(*) n, AVG(v) mean, MIN(v) lo, MAX(v) hi FROM vital_hour WHERE incident = 0 AND hour >= ?1 GROUP BY vital")
     .bind(Math.floor(now / HOUR) - 24 * 28).all();
   await deps.rpc("ops_baseline_put", { at: new Date(now).toISOString(), vitals: b.results || [] });
+  // The agent's weekly score and its small tuning, read once a night so the
+  // brief and the sign-up limits work from the watcher's own copy.
+  try {
+    const gr = await deps.rpc("ops_growth", {});
+    if (gr.ok && gr.data?.ok) await kvPut(env, "growth", { ...gr.data, read_at: now }, now).run();
+  } catch {}
   // Funnels by source and returning users, each against its own history.
   try {
     const found = await nightlySenses(env, deps, now);

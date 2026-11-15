@@ -12,6 +12,8 @@ import { kvGet } from "./core.js";
 import { dayInfo } from "./calendar.js";
 import { robotView } from "./robot.js";
 import { SOURCE_NAME } from "./senses.js";
+import { reflexLines } from "./reflex.js";
+import { askLink } from "./ask.js";
 
 const MIN = 60_000, HOUR = 3600_000, DAY = 86400_000, IST = 330 * MIN;
 const LINK_LIFE = 48 * HOUR;
@@ -53,6 +55,28 @@ const name = (g) => (g.id ? `#${g.id}` : "(no number yet)");
 const line = (g) => `${name(g)} [${AREA[g.area] || g.area}, ${g.band}] ${String(g.title || "").slice(0, 110)}`;
 const n0 = (x) => Math.round(x || 0).toLocaleString("en-IN");
 const share = (ok, n) => (n ? `${(Math.floor((ok / n) * 1000) / 10).toFixed(1)}%` : "no checks");
+
+// What the agent tuned by itself (inside fixed bounds), what it only proposed,
+// and on Sundays its score for the week. From the nightly copy in kv "growth".
+const TUNE_WORD = {
+  memory_min_meaning: "how alike a past case must be before it is shown to the agent",
+  signup_stuck_submits: "how many sign-up forms in 30 minutes with no new account count as stuck",
+  signup_unconfirmed_accounts: "how many new accounts in an hour with none confirmed count as a problem",
+};
+export function growthLines(g, now) {
+  if (!g?.ok) return null;
+  const out = [];
+  const ch = g.tuning?.changes || [], pr = g.tuning?.proposals || [];
+  if (ch.length) out.push(`Tuned by the agent itself in the last 7 days (small steps inside fixed limits):\n${ch.slice(0, 5).map((c) => `  ${TUNE_WORD[c.key] || c.key}: ${c.old} -> ${c.new}. Why: ${String(c.why || "").slice(0, 160)}`).join("\n")}`);
+  if (pr.length) out.push(`Tuning the agent proposed but may not do itself (needs you):\n${pr.slice(0, 5).map((c) => `  ${TUNE_WORD[c.key] || c.key}: to ${c.new} (${c.refused_why}). Why: ${String(c.why || "").slice(0, 160)}`).join("\n")}`);
+  const w = g.week, s = w?.score;
+  if (s && new Date(now + IST).getUTCDay() === 0) {
+    const mins = (x) => (x == null ? "unknown" : `${Math.round(x)} min`);
+    out.push(`The agent's week (from ${w.week_start}): ${s.issues_opened ?? 0} issue(s) opened, ${s.fixed ?? 0} fixed. Time to notice: ${mins(s.notice_min_median)} (median). Time to fix: ${mins(s.fix_min_median)} (median). Wrong diagnoses: ${s.wrong_diagnoses ?? 0}. Agent runs: ${s.runs ?? 0}, of which ${s.runs_not_worth_it ?? 0} changed nothing and wrote nothing down, ${s.runs_died ?? 0} never finished.`
+      + `\nMemory tidy-up on Sunday morning: ${w.merged ?? 0} duplicate card(s) merged, ${w.near_duplicates ?? 0} look-alike pair(s) and ${w.skill_candidates ?? 0} repeated fix(es) left for the agent's weekly review.`);
+  }
+  return out.length ? out.join("\n") : null;
+}
 
 export async function buildBrief(env, deps, { rows, usage, paused, log, origin }) {
   const now = deps.now();
@@ -156,6 +180,12 @@ export async function buildBrief(env, deps, { rows, usage, paused, log, origin }
     ? `Agent starts today: ${runs.length}\n${runs.map((w) => `  ${istClock(w.at).slice(-9)} ${w.mode}: ${w.ids?.length ? w.ids.map((x) => (typeof x === "number" ? `#${x}` : x)).join(", ") : "test"}${w.ok === false ? ` (refused: ${w.why})` : w.ok === null ? " (no answer from the start call)" : ""}`).join("\n")}`
     : "Agent starts today: none.");
   out.push(`Claude limits: ${usageLine(usage, now)}.`);
+  try { out.push(await reflexLines(env, now, dayStart)); } catch {}
+  try { const gl = growthLines(await kvGet(env, "growth"), now); if (gl) out.push(gl); } catch {}
+  try {
+    const al = await askLink(env, origin, now);
+    if (al) out.push(`Ask a question about the site or the agent (answers from its memory and this minute's numbers; works 48 hours, changes nothing):\n  ${al}`);
+  } catch {}
   const held = rows.filter((g) => g.why === "paused").length;
   if (paused) out.push(`Note: waking the agent is switched off, so nothing is fixed automatically.${held ? ` ${held} issue(s) would have gone to the agent by now.` : ""}`);
   return { title: `StockSaathi daily brief: ${openedRows.length} new, ${waiting.length} waiting${needs.length ? `, ${needs.length} need you` : ""}`, body: out.join("\n\n") };

@@ -18,17 +18,29 @@ const MIN = 60_000, DAY = 86400_000;
 // f30 / f60: { view, start, submit, error, otp } counted by the site in the
 // last 30 / 60 minutes. db: what ops_senses() returned. First-guess limits
 // from 14 days of data (about 1.6 form submits and 1.8 e-mail accounts an hour).
-export function signupTruth(f30, f60, db) {
+//
+// Two of the limits may be tuned a little by the agent (ops_tune in the main
+// database, one step a week). The bounds are fixed there AND here: whatever
+// number arrives, it is clamped to [low, high] before it is used.
+export const TUNE = { signup_stuck_submits: [7, 5, 12], signup_unconfirmed_accounts: [8, 6, 14] };
+export function tuned(t, k) {
+  const [def, lo, hi] = TUNE[k];
+  const v = Number(t?.[k]);
+  return Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : def;
+}
+
+export function signupTruth(f30, f60, db, tune) {
   const out = [];
+  const S = tuned(tune, "signup_stuck_submits"), U = tuned(tune, "signup_unconfirmed_accounts");
   if (!db || db.ok === false) return out;
   const stuck = (w, f, made, severity) => ({
     sig: "vital|signups|stuck", severity,
     title: "People are sending the sign-up form but no account is being created",
     sample: { window_min: w, form_submits: f.submit || 0, form_errors_shown: f.error || 0, register_page_views: f.view || 0, accounts_created: made },
   });
-  if ((f60?.submit || 0) >= 8 && db.email_created_60 === 0) out.push(stuck(60, f60, 0, "critical"));
-  else if ((f30?.submit || 0) >= 7 && db.email_created_30 === 0) out.push(stuck(30, f30, 0, "high"));
-  if (db.email_created_60 >= 8 && db.confirmed_60 === 0) {
+  if ((f60?.submit || 0) >= S + 1 && db.email_created_60 === 0) out.push(stuck(60, f60, 0, "critical"));
+  else if ((f30?.submit || 0) >= S && db.email_created_30 === 0) out.push(stuck(30, f30, 0, "high"));
+  if (db.email_created_60 >= U && db.confirmed_60 === 0) {
     out.push({
       sig: "vital|signups|unconfirmed", severity: "critical",
       title: "New accounts are not being confirmed: the code e-mail may not be arriving",
@@ -47,7 +59,8 @@ export async function signupCheck(env, deps, now) {
   const r = await deps.rpc("ops_senses", {});
   if (!r.ok || !r.data?.ok) return [];
   const [f30, f60, status] = [await flowSums(env, now, 30), await flowSums(env, now, 60), await kvGet(env, "outside")];
-  return signupTruth(f30, f60, r.data).map((f) => {
+  const tune = (await kvGet(env, "growth"))?.tuning?.values;
+  return signupTruth(f30, f60, r.data, tune).map((f) => {
     const outside = blameOf({ sig: f.sig }, f.sample, status, now);
     return { ...f, kind: "vital", sample: { t: now, ...f.sample }, outside: outside || undefined, severity: outside ? "medium" : f.severity };
   });

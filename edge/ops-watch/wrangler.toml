@@ -43,5 +43,10 @@ OPS_MAIL_FROM = "StockSaathi Ops <orders@stocksaathi.co.in>"
 # password is the secret ROBOT_PASSWORD and exists nowhere else).
 ROBOT_EMAIL = "ops-robot@stocksaathi.co.in"
 
+# Reflexes (src/reflex.js) are tell-only. If the owner ever asks for the
+# "put the previous build back" reflex to act, it needs a Vercel token here
+# as a secret: `npx wrangler secret put VERCEL_TOKEN`. Not set, not needed
+# and not asked for while reflexes only tell.
+
 [observability]
 enabled = true

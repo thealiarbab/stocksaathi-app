@@ -11,6 +11,7 @@ import { areaOf, bandOf, decide, usageNow, usageLine, wakeText, istClock } from 
 import { severityOf, istDay } from "./rules.js";
 import { sendBrief, briefDue } from "./brief.js";
 import { dayInfo } from "./calendar.js";
+import { cannotStart, runReflexes } from "./reflex.js";
 
 const MIN = 60_000, HOUR = 3600_000, DAY = 86400_000;
 const LIVE = new Set(["open", "fixing", "fix_live"]);
@@ -236,6 +237,21 @@ export async function runGate(env, deps, opts = {}) {
       dirty = true;
       fired = { ok: !!reply?.ok, refused, mode, issues: waking.length };
     }
+  }
+
+  // Reflexes (tell-only): for serious issues the agent cannot start for. They
+  // only write down and mail what they would have done; they never start the
+  // agent and never change the judge's books.
+  try {
+    const cands = [];
+    for (const g of all) {
+      if (!LIVE.has(g.sstate) || BUSY.has(g.status) || decideBand(g, now) !== "serious") continue;
+      const blocked = cannotStart(g, g.v, now);
+      if (blocked) cands.push({ g, blocked });
+    }
+    await runReflexes(env, deps, cands, opts.db);
+  } catch (e) {
+    try { await kvPut(env, "reflex_error", { at: now, err: String(e?.stack || e).slice(0, 600) }, now).run(); } catch {}
   }
 
   if (nags.length) {
