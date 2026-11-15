@@ -17,7 +17,7 @@ const BUSY = new Set(["fixing", "fix_live", "needs_owner", "needs_pc"]);
 const MODE_RANK = { fix: 5, approved: 4, look: 3, recheck: 2, small: 1 };
 
 const SELECT = `
-SELECT g.*, s.sig, s.kind, s.trusted, s.title, s.issue_id, s.last_seen, s.state AS sstate,
+SELECT g.*, s.sig, s.kind, s.trusted, s.title, s.issue_id, s.last_seen, s.state AS sstate, s.people AS t_people, s.hits AS t_hits,
        COALESCE(d.hits, 0) AS d_hits, COALESCE(d.people, 0) AS d_people,
        COALESCE(y.hits, 0) AS y_hits, COALESCE(y.people, 0) AS y_people
   FROM gate g JOIN sig s ON s.fp = g.fp
@@ -34,7 +34,7 @@ function shape(x, now, today) {
     state: x.state, sstate: x.sstate, status: x.status || x.sstate, why: x.why, reason: x.reason, nextAt: x.next_at,
     opened: x.opened, lastSeen: x.last_seen,
     people: x.d_people + (carry ? x.y_people : 0), hits: x.d_hits + (carry ? x.y_hits : 0),
-    openPeople: x.open_people, openHits: x.open_hits,
+    openPeople: x.open_people, openHits: x.open_hits, totalPeople: x.t_people || 0, totalHits: x.t_hits || 0,
     wakes: x.wakes, wokenAt: x.woken_at, wakePeople: x.wake_people, wakeHits: x.wake_hits,
     pickedAt: x.picked_at, naggedAt: x.nagged_at, approvedAt: x.approved_at, again: x.again,
   };
@@ -341,7 +341,9 @@ export async function gateSummary(env, deps) {
     serious: rows.filter((g) => LIVE.has(g.sstate) && decideBand(g, now) === "serious").slice(0, 10).map((g) => ({ issue: g.id, fp: g.fp.slice(0, 8), area: g.area, opened: g.opened })),
     queued: rows.filter((g) => g.why === "queued").length,
     held_while_off: rows.filter((g) => g.why === "paused").length,
-    with_agent: rows.filter((g) => g.state === "woken" || g.status === "fixing" || g.status === "fix_live").length,
+    // Only what the agent holds right now: claimed, or started in the last
+    // 15 minutes and not yet claimed. An issue it looked at and let go is not.
+    with_agent: rows.filter((g) => g.status === "fixing" || g.status === "fix_live" || (g.state === "woken" && !g.pickedAt && now - (g.wokenAt || 0) < 15 * MIN)).length,
     paused, usage: usageLine(u, now), weekly: u.weekly, five: u.five, reading_age_min: u.age == null ? null : Math.round(u.age / MIN),
     states: Object.fromEntries((c.results || []).map((r) => [r.state, r.n])),
     wakes_today: G.n || 0, last_wake: G.last || null, last_log: G.log.slice(-1)[0] || null, brief_day: G.brief_day || null,

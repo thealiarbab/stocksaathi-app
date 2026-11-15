@@ -141,7 +141,10 @@ export function decide(g, c) {
     const doubled = g.people >= 2 * Math.max(g.wakePeople || 0, 1) && g.people - (g.wakePeople || 0) >= 3;
     const stillBroken = serious && live && since >= 45 * MIN;
     const grew = since >= 6 * HOUR && live && g.hits >= 1.5 * Math.max(g.wakeHits || 0, 1) && g.hits - (g.wakeHits || 0) >= 5;
-    if (!(recheck || g.approvedAt || doubled || stillBroken || grew)) return out("idle", "woken", g.reason || "woken", now + 30 * MIN);
+    // Started for it, but an hour later nothing has claimed it: that run died
+    // (most often on a full limit). It goes back in the queue, not into limbo.
+    const lost = !g.pickedAt && since >= HOUR;
+    if (!(recheck || g.approvedAt || doubled || stillBroken || grew || lost)) return out("idle", "woken", g.reason || "woken", now + 30 * MIN);
     if ((g.wakes || 0) >= 3 && !recheck && !g.approvedAt) return out("brief", "max_wakes", "woken 3 times and still open: it needs you", now + 6 * HOUR);
     skipWait = true;
   }
@@ -188,7 +191,10 @@ export function decide(g, c) {
   // waiting for a limit keeps its place for six hours, so it does not drop
   // off the owner's list between two occurrences.
   const liveFor = friday ? DAY : WAITING.has(g.why) ? 6 * HOUR : 20 * MIN;
-  if (quiet >= liveFor) return out("brief", "stopped", "stopped by itself", now + HOUR);
+  // A real error (not mere slowness) that nobody has ever looked at is a bug
+  // waiting for its next victim: it gets one look even after it went quiet.
+  const unlooked = !/slow/.test(g.kind || "") && (g.wakes || 0) === 0 && now - g.opened < 7 * DAY && ((g.totalPeople || 0) >= 5 || (g.totalHits || 0) >= 20);
+  if (quiet >= liveFor && !unlooked) return out("brief", "stopped", "stopped by itself", now + HOUR);
   // Small work goes in batches (the runner takes five at a time), not as a
   // stream of sessions.
   if (c.lastSeriousWakeAt && now < c.lastSeriousWakeAt + HOUR) return out("brief", "queued", "an incident is being handled: small fixes wait an hour", c.lastSeriousWakeAt + HOUR);
