@@ -941,6 +941,13 @@ async function opMarketMood(req, origin) {
       "FII", "DII", "GDP", "CPI", "WPI", "RBI", "SEBI", "NSE", "BSE",
       "ETF", "MF", "IPO", "AI", "NFO",
     ]);
+    // Words of the sector names we sent (NBFC, FMCG) are not tickers: the
+    // prompt asks for sectors by name. Counting them as leaks forced a
+    // second model call on most narratives naming those sectors, and the
+    // two calls together overran the 22 s deadline (504, no mood card).
+    for (const s of sectors) {
+      for (const w of String(s.name || "").toUpperCase().split(/[^A-Z0-9&]+/)) if (w) SKIP_CAPS.add(w);
+    }
     const tokenRe = /\b([A-Z][A-Z0-9&\-_.]{2,})\b/g;
     let leaked = [];
     for (const m of narrative.matchAll(tokenRe)) {
