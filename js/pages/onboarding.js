@@ -5,14 +5,14 @@
 //   3) Investing style
 // =============================================================================
 
-import { getState, completeOnboarding } from "../state.js";
+import { getState, setState, completeOnboarding } from "../state.js";
+import { updateProfile } from "../auth/accounts.js";
 import { navigate } from "../router.js";
 import { toast } from "../components/toast.js";
 import { logEvent } from "../features/telemetry.js";
 
-// "How did you hear about us?" Logged as a click labelled heard_from:<value>,
-// which web_event_daily keeps per day forever, so a drop in one source shows
-// up within days (the Nov 2026 ChatGPT drop took a week to diagnose).
+// "How did you hear about us?" is saved to profiles.heard_from before
+// moving past this step. The analytics event remains a secondary signal.
 const HEARD_FROM = [
   ["chatgpt", "ChatGPT"], ["google", "Google search"], ["other_ai", "Gemini, Perplexity or another AI"],
   ["instagram", "Instagram"], ["youtube", "YouTube"], ["friend", "A friend or classmate"],
@@ -26,6 +26,7 @@ let form = {
   school: "",
   classCode: "",
   riskProfile: null,
+  heardFrom: "",
 };
 
 const STEPS = [
@@ -41,6 +42,8 @@ export function renderOnboarding(main) {
   if (s.user.school) form.school = s.user.school;
   if (s.user.classCode) form.classCode = s.user.classCode;
   if (s.user.riskProfile) form.riskProfile = s.user.riskProfile;
+  form.heardFrom = s.user.heardFrom || "";
+  heardLogged = "";
   render(main);
 }
 
@@ -145,7 +148,7 @@ function renderStep(s) {
 }
 
 function attachStepListeners(main) {
-  main.querySelector("[data-next]")?.addEventListener("click", () => {
+  main.querySelector("[data-next]")?.addEventListener("click", async (e) => {
     if (step === 1) {
       // The fields can be gone if the page re-rendered under a second tap
       // (seen live 23 Oct: "reading 'value' of null").
@@ -156,6 +159,25 @@ function attachStepListeners(main) {
       form.classCode = (main.querySelector("#f-class")?.value || "").trim();
       form.heardFrom = main.querySelector("#f-heard")?.value || "";
       if (!form.age || form.age < 13) { alert("Please enter a valid age (13+)."); return; }
+
+      // This answer is profile data, not merely analytics. Await the write so
+      // a transient outage cannot silently lose it while the user advances.
+      const previousHeardFrom = getState().user.heardFrom || "";
+      if (form.heardFrom !== previousHeardFrom) {
+        const nextButton = e.currentTarget;
+        nextButton.disabled = true;
+        nextButton.textContent = "Saving…";
+        try {
+          await updateProfile({ heardFrom: form.heardFrom || null });
+          setState(s => ({ ...s, user: { ...s.user, heardFrom: form.heardFrom || null } }));
+        } catch (err) {
+          console.warn("onboarding heard-from save failed:", err?.message || err);
+          nextButton.disabled = false;
+          nextButton.textContent = "Continue";
+          toast({ kind: "error", message: "Couldn't save your answer. Please check your connection and try again." });
+          return;
+        }
+      }
       if (form.heardFrom && form.heardFrom !== heardLogged) {
         heardLogged = form.heardFrom;
         logEvent("click", `heard_from:${form.heardFrom}`);

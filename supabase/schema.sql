@@ -39,6 +39,7 @@ create table if not exists public.profiles (
   class_code    text,
   city          text,
   risk_profile  text check (risk_profile is null or risk_profile in ('cautious','balanced','bold')),
+  heard_from    text check (heard_from is null or heard_from in ('chatgpt','google','other_ai','instagram','youtube','friend','school','other')),
   parent_email  text,
   parent_consent_at timestamptz,
   avatar_color  text default 'green',

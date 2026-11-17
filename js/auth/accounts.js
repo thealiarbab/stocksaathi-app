@@ -691,6 +691,7 @@ export async function refreshCurrentUser() {
       city: profile.city,
       age: profile.age,
       riskProfile: profile.risk_profile,
+      heardFrom: profile.heard_from,
       onboarded: profile.onboarded,
       createdAt: profile.created_at,
       // Google-only accounts have no password to check or change.
@@ -722,7 +723,7 @@ export async function updateProfile(patch) {
     const map = {
       displayName: "display_name", school: "school", classCode: "class_code",
       city: "city", age: "age", riskProfile: "risk_profile",
-      avatarColor: "avatar_color", onboarded: "onboarded",
+      avatarColor: "avatar_color", heardFrom: "heard_from", onboarded: "onboarded",
     };
     for (const [k, v] of Object.entries(patch || {})) {
       if (map[k]) dbPatch[map[k]] = v;

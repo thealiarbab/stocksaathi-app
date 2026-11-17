@@ -29,6 +29,7 @@ const DEFAULT_STATE = () => ({
   portfolioHistory: [],
   profile: {
     riskProfile: null, school: null, classCode: null, age: null,
+    heardFrom: null,
     onboarded: false,
   },
   demo: { crashReplayCompleted: [], firstTradeDone: false },
@@ -190,6 +191,7 @@ export function getState() {
       school: user?.school ?? us.profile.school,
       classCode: user?.classCode ?? us.profile.classCode,
       riskProfile: user?.riskProfile ?? us.profile.riskProfile,
+      heardFrom: user?.heardFrom ?? us.profile.heardFrom,
       // Hotfix41: was `user?.onboarded ?? us.profile.onboarded`. The `??`
       // operator only falls through on null/undefined â€” so if the auth
       // layer's cached user has onboarded=false (DB write hadn't yet
@@ -256,6 +258,7 @@ function applyFullPatch(full, prev) {
         school: full.user?.school ?? _userState.profile.school,
         classCode: full.user?.classCode ?? _userState.profile.classCode,
         age: full.user?.age ?? _userState.profile.age,
+        heardFrom: full.user?.heardFrom ?? _userState.profile.heardFrom,
         onboarded: full.user?.onboarded ?? _userState.profile.onboarded,
       },
       demo: full.demo ?? _userState.demo,
