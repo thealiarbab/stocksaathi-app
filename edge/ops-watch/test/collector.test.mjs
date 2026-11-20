@@ -181,6 +181,22 @@ test("pulse: failed and missed scheduled jobs, and a job switched off", async ()
   assert.ok(w.calls("ops_issue_upsert").some((c) => c.p.title === "Scheduled job ops-health was switched off"));
 });
 
+test("pulse: a daily job added after its slot is not reported missed; a real miss later is", async () => {
+  const w = makeWorld(Date.UTC(2026, 10, 14, 20, 0, 0));
+  const jobs = [{ id: 7, name: "ops-health", schedule: "*/5 * * * *", active: true }];
+  let n = 1;
+  w.pulse = () => ({ ok: true, now: new Date(w.t).toISOString(), conns: 20, max_conn: 60, longest_s: 0, dead: 0, hit: 1, read: 1, ins: { signups: 0, trades: 0, views: 0 },
+    cron: { jobs, runs: new Date(w.t).getUTCMinutes() % 5 === 0 ? [{ id: n++, job: 7, status: "succeeded", start: new Date(w.t).toISOString() }] : [], cursor: n, changed: [] }, net: { cursor: 1, fails: [] } });
+  for (let i = 0; i < 60; i++) { await runPulse(w.env, w.deps); w.tick(); }   // 20:00-21:00, collector tracking
+  jobs.push({ id: 23, name: "nightly", schedule: "20 20 * * *", active: true }); // added at 21:00, slot 20:20 already gone
+  for (let i = 0; i < 30; i++) { await runPulse(w.env, w.deps); w.tick(); }
+  const cronIssues = () => w.calls("ops_issue_upsert").filter((c) => c.p.title.startsWith("Scheduled job"));
+  assert.equal(cronIssues().length, 0, "a slot before the job existed is not a miss");
+  w.tick(Date.UTC(2026, 10, 15, 20, 30, 0) - w.t);                              // next day: slot 20:20 passes with no run
+  for (let i = 0; i < 10; i++) { await runPulse(w.env, w.deps); w.tick(); }
+  assert.ok(cronIssues().some((c) => c.p.title === "Scheduled job nightly did not run"));
+});
+
 test("pulse: zero sign-ups when several were certain raises 'nobody is getting through'", async () => {
   const w = makeWorld(Date.UTC(2026, 10, 12, 9, 0, 0));
   const hour = Math.floor(w.t / 3600_000);

@@ -40,6 +40,7 @@ export async function runPulse(env, deps) {
   st.good ||= { site: 0, api: 0, db: 0 };
   st.down ||= {};
   st.cron_last ||= {};
+  st.cron_seen ||= {};
   st.ring ||= [];
   st.acc ||= null;
   st.watch ||= {};
@@ -245,6 +246,8 @@ function processCron(st, d, now, items) {
       items.push(item("cron_missed", `cron|${c.job}|${c.what}`, `Scheduled job ${c.job} was ${c.what === "removed" ? "removed" : "switched off"}`, { t: now, ...c }, { route: c.job }));
     }
   }
+  // When each job was first seen: a job added after its slot had not missed it.
+  for (const j of cron.jobs || []) st.cron_seen[j.id] ||= now;
   // Did every active job run when it should have? (every 5th minute)
   if (Math.floor(now / MIN) % 5 !== 1) return;
   for (const j of cron.jobs || []) {
@@ -252,7 +255,7 @@ function processCron(st, d, now, items) {
     const c = parseCron(j.schedule);
     if (!c) continue;
     const due = prevRun(c, now - 4 * MIN);
-    if (due == null || due <= (st.track_since || now) + MIN) continue;
+    if (due == null || due <= (st.track_since || now) + MIN || due <= (st.cron_seen[j.id] || now) + MIN) continue;
     const last = st.cron_last[j.id] || 0;
     if (last >= due - 30_000) continue;
     items.push(item("cron_missed", `cron|${j.name}|missed`, `Scheduled job ${j.name} did not run`,
