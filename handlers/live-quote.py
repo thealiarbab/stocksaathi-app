@@ -319,13 +319,23 @@ def fetch_yahoo_one(symbol):
 
 YAHOO_BATCH_TIMEOUT_S = 8
 
+# The browser aborts /api/live-quote after 7 s (FETCH_TIMEOUT_MS in
+# js/data/marketData.js). An answer that arrives later is thrown away even
+# though it carries the last known real price for every symbol with a
+# cache row, and the browser then asks /api/quotes and one /api/quote per
+# symbol instead: ~60 extra Yahoo calls per chunk while Yahoo is already
+# slow (21 Nov 2026: live-quote 8.1-8.4 s, then bursts of 16 s /api/quote
+# 502s). So the HTTP path stops waiting on Yahoo at this many seconds after
+# the request started; stragglers fall back to their last known price.
+LIVE_YAHOO_DEADLINE_S = 5.0
+
 # How old a cached REAL price may be and still be served when nothing fresher
 # exists (by write time, cached_at_ms). Beyond this, null — and the UI says
 # "no price" rather than showing a months-old number as current.
 LAST_KNOWN_MAX_AGE_MS = 14 * 24 * 3600 * 1000
 
 
-def fetch_yahoo_batch(symbols):
+def fetch_yahoo_batch(symbols, timeout_s=None):
     out = {}
     if not symbols:
         return out
@@ -340,7 +350,8 @@ def fetch_yahoo_batch(symbols):
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=min(40, len(symbols)))
     try:
         futures = {ex.submit(fetch_yahoo_one, s): s for s in symbols}
-        done, _ = concurrent.futures.wait(futures, timeout=YAHOO_BATCH_TIMEOUT_S)
+        wait_s = YAHOO_BATCH_TIMEOUT_S if timeout_s is None else min(timeout_s, YAHOO_BATCH_TIMEOUT_S)
+        done, _ = concurrent.futures.wait(futures, timeout=wait_s)
         for f in done:
             try:
                 r = f.result()
@@ -453,7 +464,8 @@ class handler(BaseHTTPRequestHandler):
                 fresh = fetch_dhan_ltp(missing)
             yahoo_targets = [s for s in missing if s not in fresh]
             if yahoo_targets:
-                y = fetch_yahoo_batch(yahoo_targets)
+                budget = max(1.0, LIVE_YAHOO_DEADLINE_S - (time.time() - t0))
+                y = fetch_yahoo_batch(yahoo_targets, timeout_s=budget)
                 fresh.update(y)
 
         # 3. Previous close from NSE's own EOD file, not Yahoo's bars (a

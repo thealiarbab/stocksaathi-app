@@ -229,6 +229,41 @@ def test_yahoo_batch_returns_partial_results_on_timeout(monkeypatch):
     assert took < 2, f"batch waited {took:.1f}s for a straggler instead of abandoning it"
 
 
+def test_live_quote_answers_inside_the_browser_timeout():
+    """The browser drops /api/live-quote after 7 s and then fans out one
+    /api/quote per symbol. The HTTP path must stop waiting on Yahoo well
+    before that, and the other callers keep the full batch timeout."""
+    mod = _load("live-quote")
+    assert mod.LIVE_YAHOO_DEADLINE_S <= 5.5
+    js = (ROOT / "js" / "data" / "marketData.js").read_text(encoding="utf-8")
+    m = re.search(r"const FETCH_TIMEOUT_MS = ([\d_]+);", js)
+    assert m, "FETCH_TIMEOUT_MS not found in marketData.js"
+    assert mod.LIVE_YAHOO_DEADLINE_S + 1.5 <= int(m.group(1).replace("_", "")) / 1000
+    src = (HANDLERS / "live-quote.py").read_text(encoding="utf-8")
+    assert "fetch_yahoo_batch(yahoo_targets, timeout_s=" in src
+
+
+def test_yahoo_batch_honours_a_shorter_timeout(monkeypatch):
+    import threading
+
+    mod = _load("live-quote")
+    release = threading.Event()
+
+    def fake_one(sym):
+        if sym == "SLOW":
+            release.wait(5)
+        return {"symbol": sym}
+
+    monkeypatch.setattr(mod, "fetch_yahoo_one", fake_one)
+    t = time.monotonic()
+    try:
+        out = mod.fetch_yahoo_batch(["A", "SLOW"], timeout_s=0.3)
+    finally:
+        release.set()
+    assert set(out) == {"A"}
+    assert time.monotonic() - t < 2
+
+
 # ---------------------------------------------------------------------------
 # _shim: a blocking handler must not freeze the event loop for other requests
 # ---------------------------------------------------------------------------
