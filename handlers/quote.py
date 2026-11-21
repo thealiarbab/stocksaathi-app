@@ -44,7 +44,13 @@ def fetch_one(symbol):
     # the real failures (timeout, connection, 429, 5xx) apart so a symbol
     # Yahoo does not carry gets a 404, and only a real failure gets 502.
     failed = False
+    # A timeout or dropped connection on one host is not retried on the
+    # other host for the same ticker: that doubled the worst case to 32 s
+    # and the upstream connections in a burst. A 429/5xx still tries it.
+    dead = set()
     for ticker, base in ((t, b) for t in tickers for b in HOSTS):
+        if ticker in dead:
+            continue
         try:
             url = f"{base}/{url_quote(ticker, safe='.')}?interval=1d&range=5d"
             raw = yahoo_get(url, {
@@ -103,8 +109,9 @@ def fetch_one(symbol):
             continue
         except Exception:
             failed = True
+            dead.add(ticker)
             continue
-    return {"error": "yahoo_unreachable" if failed else "no_data"}
+    return {"error": "yahoo_unreachable" if failed else "no_data", "symbol": symbol}
 
 
 class handler(BaseHTTPRequestHandler):
