@@ -154,9 +154,9 @@ const COPY = {
     sub: "Pick one. It helps us reach more students like you.",
   },
   backfill: {
-    kicker: "Before you carry on",
-    title: "How did you find StockSaathi?",
-    sub: "One tap, asked only once. It helps us reach more students like you.",
+    kicker: "Quick question",
+    title: "How did you hear about StockSaathi?",
+    sub: "We forgot to ask when you signed up. Pick one.",
   },
 };
 
