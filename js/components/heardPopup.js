@@ -218,7 +218,7 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
           </div>
           <div class="hp-other"${st.pick === "other" ? "" : " hidden"}>
             <label class="label" for="hp-detail">Where? (optional)</label>
-            <input class="input" id="hp-detail" maxlength="${DETAIL_MAX}" autocomplete="off" placeholder="e.g. a poster at my coaching centre" value="${esc(st.detail)}">
+            <input class="input" id="hp-detail" maxlength="${DETAIL_MAX}" autocomplete="off" placeholder="e.g. a poster at school" value="${esc(st.detail)}">
             <div class="hp-count dim text-xs"><span>${st.detail.length}</span>/${DETAIL_MAX}</div>
           </div>
           ${st.error ? `<p class="hp-error" role="alert">${esc(st.error)}</p>` : ""}
