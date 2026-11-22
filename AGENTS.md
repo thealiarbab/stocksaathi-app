@@ -397,6 +397,13 @@ effort for A/B runs; unset to restore the per-op settings.
   nor on taps before 24 Oct (the old detectors were measured wrong; churning,
   averaging down and overtrading are re-run on those from the ledger).
 
+## "How did you hear" card (22 Nov 2026; admins only until the owner flips it)
+- `js/components/heardPopup.js`: required one-tap card on the `.term-pop` sheet (chips, no Esc/backdrop close, "Don't remember" is the way out). Values are `profiles.heard_from` (23, constraint in `2026-11-22b_heard_from_popup.sql`; the original 8 keep their spelling). "Other" adds optional `heard_from_detail` (60 chars, cleaned in `save_heard_from()` and by a check constraint).
+- `heard_config()` decides per caller: `popup` (card instead of the onboarding dropdown), `backfill` (one-time ask on /portfolio: onboarded in the last 14 days, no answer, never asked; `heard_backfill_shown_at` + localStorage), `debug` (`is_admin()` only).
+- Switches: `heard_settings.popup_mode` / `backfill_mode` = off | admin_only | live, on /a → "Heard from" tab (`op=admin-heard`, `op=admin-heard-set`). Never set popup_mode to live without the owner's yes.
+- Admin preview: `?heard_debug=1` (or `=backfill`) on any page; `heardDebug.js` loads only when the server says debug. Dry run is on by default (events get `props.debug = true`, nothing saved).
+- Events: `click heard_from:<value>` (same as the old dropdown), kind `heard` for `heard_popup:shown|more|other_text`.
+
 ## User notices
 
 `public.user_notices` + `ack_notice()` RPC + `js/components/noticeModal.js`
