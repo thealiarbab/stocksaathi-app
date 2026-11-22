@@ -2246,6 +2246,7 @@ async function opAdminOverview(req, origin) {
       avatarColor, onboarded, createdAt, updatedAt, cashPaise, startingCashPaise,
       portUpdatedAt, holdCostPaise, holdingCount, tradeCount, tradedValuePaise,
       biasFlagCount, lastTrade, coachMsgCount, watchlistCount, limitOrderCount,
+      heardFrom, heardFromDetail,
     ]) => {
       const hasPort = cashPaise != null;
       const cashRupees = hasPort ? Math.round(Number(cashPaise) / 100) : null;
@@ -2259,6 +2260,7 @@ async function opAdminOverview(req, origin) {
       return {
         id, username, displayName, email, age, school, classCode, city, riskProfile,
         avatarColor, onboarded, createdAt, updatedAt,
+        heardFrom: heardFrom ?? null, heardFromDetail: heardFromDetail ?? null,
         cashRupees,
         startingCashRupees: startingRupees,
         holdingsValueRupees,

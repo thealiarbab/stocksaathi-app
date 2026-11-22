@@ -533,6 +533,7 @@ function renderUsersTable(list) {
     ["age", "Age"],
     ["school", "School"],
     ["riskProfile", "Risk"],
+    ["heardFrom", "Heard"],
     ["tradeCount", "Trades"],
     ["coachMsgCount", "Coach"],
     ["holdingCount", "Hold"],
@@ -561,6 +562,7 @@ function renderUsersRowsHtml(list) {
       <td class="dim">${u.age ?? "—"}</td>
       <td class="dim text-xs">${escapeHtml(u.school || "—")}</td>
       <td class="dim text-xs">${escapeHtml(u.riskProfile || "—")}</td>
+      <td class="dim text-xs"${u.heardFromDetail ? ` title="${escapeAttr(u.heardFromDetail)}"` : ""}>${escapeHtml(u.heardFrom || "—")}${u.heardFromDetail ? " *" : ""}</td>
       <td class="tabular">${u.tradeCount}</td>
       <td class="tabular">${u.coachMsgCount}</td>
       <td class="tabular">${u.holdingCount}</td>
@@ -726,6 +728,8 @@ function paintUserModal() {
           ${kv("Class code", profile.class_code)}
           ${kv("City", profile.city)}
           ${kv("Risk profile", profile.risk_profile)}
+          ${kv("Heard from", profile.heard_from)}
+          ${profile.heard_from_detail ? kv("Heard from (where)", profile.heard_from_detail) : ""}
           ${kv("Avatar color", profile.avatar_color)}
         </div>
         <div>
