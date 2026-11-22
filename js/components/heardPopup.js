@@ -83,6 +83,7 @@ const ICONS = {
   doc: `<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4"/><path d="M9.5 12h6M9.5 15.5h6"/>`,
   compass: `<circle cx="12" cy="12" r="8"/><path d="M15 9l-1.8 4.2L9 15l1.8-4.2z"/>`,
   more: `<path d="M12 6v12M6 12h12"/>`,
+  less: `<path d="M6 12h12"/>`,
 };
 const svg = (name) => `<svg class="hp-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
@@ -183,7 +184,7 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
 
     const el = document.createElement("div");
     el.className = "term-pop-overlay hp-overlay";
-    el.innerHTML = `<div class="term-pop hp" role="dialog" aria-modal="true" aria-labelledby="hp-title"></div>`;
+    el.innerHTML = `<div class="term-pop hp" role="dialog" aria-modal="true" aria-labelledby="hp-title" tabindex="-1"></div>`;
     const card = el.firstElementChild;
 
     const chip = ([v, label, ico]) => `
@@ -206,7 +207,7 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
           <div class="hp-grid" role="group" aria-label="Where you heard about StockSaathi">
             ${main.slice(0, -2).map(chip).join("")}
             <button type="button" class="hp-chip hp-more-btn" aria-expanded="${moreOpen}" aria-controls="hp-more">
-              ${svg("more")}<span class="hp-label">${moreOpen ? "Fewer options" : "More options"}</span>
+              ${svg(moreOpen ? "less" : "more")}<span class="hp-label">${moreOpen ? "Fewer options" : "More options"}</span>
             </button>
           </div>
           <div class="hp-grid hp-more" id="hp-more"${moreOpen ? "" : " hidden"}>
@@ -264,7 +265,13 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
         st.pick = c.dataset.v;
         st.error = "";
         paint();
-        if (st.pick === "other") card.querySelector("#hp-detail")?.focus({ preventScroll: true });
+        if (st.pick === "other") {
+          // The field opens below the chips: bring it into view. Phones get no
+          // auto-focus (the keyboard would cover the card for an optional field).
+          const box = card.querySelector(".hp-other");
+          box?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          if (!matchMedia("(pointer: coarse)").matches) card.querySelector("#hp-detail")?.focus({ preventScroll: true });
+        }
         else card.querySelector(`.hp-chip[data-v="${st.pick}"]`)?.focus({ preventScroll: true });
         return;
       }
@@ -338,7 +345,8 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
     document.documentElement.classList.add("term-pop-open");
     document.body.appendChild(el);
     document.addEventListener("keydown", onKey, true);
-    card.querySelector(".hp-chip")?.focus({ preventScroll: true });
+    // Focus the card itself: focusing the first chip drew a ring that read as "already picked".
+    card.focus({ preventScroll: true });
     shown();
   });
 }
