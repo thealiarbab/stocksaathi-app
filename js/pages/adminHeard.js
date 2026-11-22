@@ -69,7 +69,12 @@ function paint(root) {
       </div>
       <div>
         <h3 style="margin:0 0 4px">Preview</h3>
-        <p class="muted text-sm" style="margin:0">Signed in as an admin, add <code>?heard_debug=1</code> (or <code>?heard_debug=backfill</code>) to any page. Dry run is on by default, so nothing is saved.</p>
+        <p class="muted text-sm" style="margin:0 0 10px">Opens the card on the site as you'd see it (your admin account must be signed in on this browser). Dry run is on by default, so nothing is saved.</p>
+        <div class="flex gap-2 wrap">
+          <a class="btn btn-sm btn-primary" href="/portfolio?heard_debug=1" target="_blank" rel="noopener">Preview onboarding card</a>
+          <a class="btn btn-sm btn-outline" href="/portfolio?heard_debug=backfill" target="_blank" rel="noopener">Preview one-time ask</a>
+          <a class="btn btn-sm btn-ghost" href="/portfolio?whatsnew=preview" target="_blank" rel="noopener">Compare: What's new card</a>
+        </div>
       </div>
       <div>
         <h3 style="margin:0 0 8px">Answers, accounts onboarded in the last 14 days</h3>
