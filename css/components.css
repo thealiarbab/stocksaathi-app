@@ -1289,7 +1289,18 @@ html.term-pop-open body { padding-right: var(--term-pop-gutter, 0); }
 .hp-chip.on { border-color: var(--brand); background: var(--brand-soft); box-shadow: var(--sh-xs); }
 .hp-ico { flex: none; width: 20px; height: 20px; color: var(--text-muted); }
 .hp-chip.on .hp-ico { color: var(--brand); }
-.hp-label { min-width: 0; overflow-wrap: anywhere; }
+.hp-label { min-width: 0; overflow-wrap: break-word; }
+/* Small phones (under 360px, ~2% of phone visits): 320px left the label ~62px
+   and split "WhatsApp" and "Instagram" mid-word. Icon above the label gives the
+   word the chip's full width; full-row chips keep the side-by-side look. */
+@media (max-width: 359px) {
+  .hp-body { padding: 16px 14px 10px; }
+  .hp-grid { gap: 6px; }
+  .hp-chip { flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px; }
+  .hp-chip.hp-wide, .hp-more-btn { flex-direction: row; align-items: center; }
+  .hp-more-btn { justify-content: center; }
+  .hp-actions { padding: 10px 14px 14px; }
+}
 .hp-more-btn { grid-column: 1 / -1; justify-content: center; border-style: dashed; color: var(--text-muted); }
 .hp-other { margin-top: 12px; scroll-margin-bottom: 84px; }
 .hp-count { margin-top: 4px; text-align: right; }
