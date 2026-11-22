@@ -182,6 +182,26 @@ setTimeout(() => {
   if (!go()) { const off = subscribe(() => { if (go()) off(); }); }
 }, 2500);
 
+// "How did you hear about StockSaathi?" (22 Nov): the admin ?heard_debug=1
+// preview on any page, and the one-time ask on /portfolio for recent accounts
+// that skipped it. The card's code loads only when one of those can apply;
+// heard_config() on the server decides the rest (admin, switches, eligibility).
+const heardCheck = () => {
+  const u = getState()?.user;
+  if (!u?.id) return false;
+  if (!new URLSearchParams(location.search).has("heard_debug")) {
+    if (!/^\/portfolio\/?$/.test(location.pathname)) return true;
+    if (u.heardFrom || u.heardBackfillShownAt || !u.onboarded) return true;
+    if (!(Date.parse(u.createdAt || "") > Date.now() - 14 * 86400_000)) return true;
+  }
+  import("./components/heardPopup.js").then((m) => m.heardOnRoute()).catch(() => {});
+  return true;
+};
+setTimeout(() => {
+  if (!heardCheck()) { const off = subscribe(() => { if (heardCheck()) off(); }); }
+  window.addEventListener("ss:navigate", () => setTimeout(heardCheck, 700));
+}, 1800);
+
 // Reactively sync theme
 subscribe((s) => {
   document.documentElement.setAttribute("data-theme", resolvedTheme(s.settings));

@@ -10,6 +10,7 @@ import { updateProfile } from "../auth/accounts.js";
 import { navigate } from "../router.js";
 import { toast } from "../components/toast.js";
 import { logEvent } from "../features/telemetry.js";
+import { heardConfig, openHeardPopup } from "../components/heardPopup.js";
 
 // "How did you hear about us?" is saved to profiles.heard_from before
 // moving past this step. The analytics event remains a secondary signal.
@@ -19,6 +20,10 @@ const HEARD_FROM = [
   ["school", "School or a teacher"], ["other", "Somewhere else"],
 ];
 let heardLogged = "";
+// true once heard_config() says this account gets the one-tap card
+// (heard_settings.popup_mode: admin_only = is_admin() accounts, live = all).
+// Until then, and for everyone else, the old dropdown stays.
+let heardCard = false;
 
 let step = 0;
 let form = {
@@ -44,7 +49,20 @@ export function renderOnboarding(main) {
   if (s.user.riskProfile) form.riskProfile = s.user.riskProfile;
   form.heardFrom = s.user.heardFrom || "";
   heardLogged = "";
+  heardCard = false;
   render(main);
+  heardConfig().then((cfg) => {
+    if (!cfg.popup || heardCard) return;
+    heardCard = true;
+    if (step === 1 && main.isConnected && main.querySelector("#f-heard")) {
+      // Keep whatever was typed before the dropdown goes away.
+      const n = parseInt(main.querySelector("#f-age")?.value, 10);
+      if (n) form.age = n;
+      form.school = main.querySelector("#f-school")?.value ?? form.school;
+      form.classCode = main.querySelector("#f-class")?.value ?? form.classCode;
+      render(main);
+    }
+  });
 }
 
 function render(main) {
@@ -102,13 +120,13 @@ function renderStep(s) {
           <input class="input" id="f-class" placeholder="e.g. 12-Science or FINED-A" value="${escapeAttr(form.classCode)}" />
           <div class="dim text-xs" style="margin-top: 4px;">Useful if your teacher groups your class together for challenges.</div>
         </div>
-        <div>
+        ${heardCard ? "" : `<div>
           <label class="label" for="f-heard">How did you hear about StockSaathi? (optional)</label>
           <select class="input" id="f-heard">
             <option value="">Choose one</option>
             ${HEARD_FROM.map(([v, l]) => `<option value="${v}" ${form.heardFrom === v ? "selected" : ""}>${l}</option>`).join("")}
           </select>
-        </div>
+        </div>`}
       </div>
       <div class="flex gap-2 wrap justify-between" style="margin-top: var(--sp-5);">
         <button class="btn btn-outline" data-back>Back</button>
@@ -157,8 +175,24 @@ function attachStepListeners(main) {
       form.age = parseInt(age.value, 10);
       form.school = (main.querySelector("#f-school")?.value || "").trim();
       form.classCode = (main.querySelector("#f-class")?.value || "").trim();
-      form.heardFrom = main.querySelector("#f-heard")?.value || "";
       if (!form.age || form.age < 13) { alert("Please enter a valid age (13+)."); return; }
+
+      // One-tap card: required, saves through save_heard_from() and logs its
+      // own events. Asked once; coming back to this step doesn't ask again.
+      if (heardCard) {
+        if (!getState().user.heardFrom) {
+          const nextButton = e.currentTarget;
+          nextButton.disabled = true;
+          const res = await openHeardPopup({ variant: "onboarding" });
+          nextButton.disabled = false;
+          if (!res) return;
+          form.heardFrom = res.value;
+        }
+        step++;
+        render(main);
+        return;
+      }
+      form.heardFrom = main.querySelector("#f-heard")?.value || "";
 
       // This answer is profile data, not merely analytics. Await the write so
       // a transient outage cannot silently lose it while the user advances.

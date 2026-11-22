@@ -692,6 +692,8 @@ export async function refreshCurrentUser() {
       age: profile.age,
       riskProfile: profile.risk_profile,
       heardFrom: profile.heard_from,
+      heardFromDetail: profile.heard_from_detail ?? null,
+      heardBackfillShownAt: profile.heard_backfill_shown_at ?? null,
       onboarded: profile.onboarded,
       createdAt: profile.created_at,
       // Google-only accounts have no password to check or change.
@@ -728,6 +730,8 @@ export async function updateProfile(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
       if (map[k]) dbPatch[map[k]] = v;
     }
+    // The old dropdown has no "Where?" text; a new answer clears any earlier one.
+    if ("heardFrom" in (patch || {})) dbPatch.heard_from_detail = null;
     dbPatch.updated_at = new Date().toISOString();
     const { error } = await client.from("profiles").update(dbPatch).eq("id", user.id);
     if (error) throw new Error(error.message);

@@ -201,6 +201,7 @@ export function getState() {
       // EITHER source means the user is onboarded.
       onboarded: !!(user?.onboarded) || !!(us.profile.onboarded),
       createdAt: user?.createdAt || null,
+      heardBackfillShownAt: user?.heardBackfillShownAt || null,
     },
     portfolio: us.portfolio,
     holdings: us.holdings,
