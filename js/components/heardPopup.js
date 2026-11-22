@@ -188,7 +188,7 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
     const card = el.firstElementChild;
 
     const chip = ([v, label, ico]) => `
-      <button type="button" class="hp-chip${st.pick === v ? " on" : ""}" data-v="${esc(v)}" aria-pressed="${st.pick === v}">
+      <button type="button" class="hp-chip${label.length > 24 ? " hp-wide" : ""}${st.pick === v ? " on" : ""}" data-v="${esc(v)}" aria-pressed="${st.pick === v}">
         ${svg(ico)}<span class="hp-label">${esc(label)}</span>
       </button>`;
 

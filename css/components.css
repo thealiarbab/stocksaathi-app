@@ -1268,6 +1268,12 @@ html.term-pop-open body { padding-right: var(--term-pop-gutter, 0); }
 }
 @media (min-width: 560px) { .hp-overlay:not(.hp-sim-mobile) .hp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .hp-grid.hp-more, .hp-grid.hp-tail { margin-top: 8px; }
+/* Long labels ("Another search engine (Bing, DuckDuckGo…)") take a full row
+   in the two-column phone layout instead of wrapping to four lines and
+   stretching their neighbour; dense flow fills the gap the shuffle leaves. */
+.hp-grid { grid-auto-flow: row dense; }
+.hp-chip.hp-wide { grid-column: 1 / -1; }
+@media (min-width: 560px) { .hp-overlay:not(.hp-sim-mobile) .hp-chip.hp-wide { grid-column: auto; } }
 .hp-grid[hidden], .hp-other[hidden] { display: none; }
 .hp-chip {
   display: flex; align-items: center; gap: 10px;
@@ -1284,7 +1290,7 @@ html.term-pop-open body { padding-right: var(--term-pop-gutter, 0); }
 .hp-ico { flex: none; width: 20px; height: 20px; color: var(--text-muted); }
 .hp-chip.on .hp-ico { color: var(--brand); }
 .hp-label { min-width: 0; overflow-wrap: anywhere; }
-.hp-more-btn { border-style: dashed; color: var(--text-muted); }
+.hp-more-btn { grid-column: 1 / -1; justify-content: center; border-style: dashed; color: var(--text-muted); }
 .hp-other { margin-top: 12px; scroll-margin-bottom: 84px; }
 .hp-count { margin-top: 4px; text-align: right; }
 .hp-error { margin: 12px 0 0; font-size: var(--text-sm); color: var(--negative); }
