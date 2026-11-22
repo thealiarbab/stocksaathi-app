@@ -359,16 +359,18 @@ const BACKFILL_LS = "ss.heard.backfill.v1";
 let _openNow = false;
 
 export async function heardOnRoute() {
+  const user = getState()?.user;
+  if (!user?.id || _openNow) return;
+  // Claim the slot before any await: two route events arriving together
+  // must not both open the card (or show the one-time ask twice).
+  _openNow = true;
   try {
-    const user = getState()?.user;
-    if (!user?.id || _openNow) return;
     const q = new URLSearchParams(location.search).get("heard_debug");
     if (q) {
       const cfg = await heardConfig();
       if (!cfg.debug) return;          // not an admin account: the parameter does nothing
-      _openNow = true;
+      if (document.querySelector(".hp-overlay")) return;
       await openHeardPopup({ variant: q === "backfill" ? "backfill" : "onboarding", debug: true });
-      _openNow = false;
       return;
     }
     if (!/^\/portfolio\/?$/.test(location.pathname)) return;
@@ -381,15 +383,13 @@ export async function heardOnRoute() {
     if (seen) return;
     const cfg = await heardConfig();
     if (!cfg.backfill) return;
-    _openNow = true;
     // Marked shown the moment it opens, here and on the profile, so it never repeats.
     try { localStorage.setItem(`${BACKFILL_LS}.${user.id}`, "1"); } catch {}
     try { (await sb())?.rpc("mark_heard_backfill_shown").then(() => {}, () => {}); } catch {}
-    setState((s) => ({ ...s, user: { ...s.user, heardBackfillShownAt: new Date().toISOString() } }));
     await openHeardPopup({ variant: "backfill", debug: false });
-    _openNow = false;
   } catch (e) {
-    _openNow = false;
     console.warn("[heard] route hook skipped:", e?.message || e);
+  } finally {
+    _openNow = false;
   }
 }
