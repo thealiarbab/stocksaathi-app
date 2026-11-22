@@ -1701,6 +1701,8 @@ async function route(req) {
       case "admin-achievements":  return await opAdminAchievements(req, origin);
       case "admin-achievements-dry-run": return await opAdminAchievementsDryRun(req, origin);
       case "admin-achievements-set": if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminAchievementsSet(req, origin);
+      case "admin-heard":         return await opAdminHeard(req, origin);
+      case "admin-heard-set":     if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opAdminHeardSet(req, origin);
       case "signup-count":        return await opSignupCount(req, origin);
       case "admin-path-check":    return opAdminPathCheck(req, origin, url);
       case "admin-overview":      return await opAdminOverview(req, origin);
@@ -2064,6 +2066,30 @@ async function opAdminAchievementsSet(req, origin) {
   }
   const res = await sbAdminFetch(`/rest/v1/rpc/admin_ach_set`, { method: "POST", body: JSON.stringify({ p: b }) });
   if (!res.ok) return j(502, { error: "query_failed", detail: `admin_ach_set ${res.status}: ${(await res.text()).slice(0, 200)}` }, origin);
+  return j(200, await res.json(), origin);
+}
+
+// "How did you hear" card switches (heard_settings, 2026-11-22b): read on /a
+// (Signups tab), flipped there. 'off' | 'admin_only' | 'live'.
+const HEARD_MODES = new Set(["off", "admin_only", "live"]);
+async function opAdminHeard(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  const res = await sbAdminFetch(`/rest/v1/rpc/admin_heard_overview`, { method: "POST", body: "{}" });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `admin_heard_overview ${res.status}` }, origin);
+  return j(200, await res.json(), origin);
+}
+async function opAdminHeardSet(req, origin) {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return j(401, { error: gate.reason }, origin);
+  let b; try { b = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const popup = b?.popup_mode == null ? null : String(b.popup_mode);
+  const backfill = b?.backfill_mode == null ? null : String(b.backfill_mode);
+  if ((popup && !HEARD_MODES.has(popup)) || (backfill && !HEARD_MODES.has(backfill)) || (!popup && !backfill)) {
+    return j(400, { error: "bad_mode" }, origin);
+  }
+  const res = await sbAdminFetch(`/rest/v1/rpc/admin_heard_set`, { method: "POST", body: JSON.stringify({ p_popup: popup, p_backfill: backfill }) });
+  if (!res.ok) return j(502, { error: "query_failed", detail: `admin_heard_set ${res.status}: ${(await res.text()).slice(0, 200)}` }, origin);
   return j(200, await res.json(), origin);
 }
 
@@ -3663,6 +3689,7 @@ const EV_KINDS = new Set([
   "outbound", "copy", "net", "install", "visibility", "share", "media", "coach",
   "achievement",
   "bias_note",   // after-trade note: shown / opened / dismissed / ask (tradeNote.js)
+  "heard",       // how-did-you-hear card: shown / more / other_text (heardPopup.js)
 ]);
 const EV_BOT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|whatsapp|python-requests|curl|wget/i;
 const EV_ID = /^[A-Za-z0-9_-]{8,40}$/;

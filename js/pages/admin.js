@@ -33,6 +33,7 @@ import { renderBehaviourTab, renderJourney } from "./adminBehaviour.js";
 import { renderFunnelTab } from "./adminFunnel.js";
 import { renderIssuesTab } from "./adminIssues.js";
 import { renderAchievementsTab } from "./adminAchievements.js";
+import { renderHeardTab } from "./adminHeard.js";
 import { toast } from "../components/toast.js";
 import { mountThemedSelect } from "../components/themedSelect.js";
 
@@ -230,6 +231,7 @@ function renderTabbedShell(main) {
     { id: "aicost",   label: "AI cost" },
     { id: "coachq",   label: "Coach" },
     { id: "achievements", label: "Achievements" },
+    { id: "heard",    label: "Heard from" },
     { id: "deploy",   label: "Deploy" },
     { id: "repo",     label: "Repo" },
     { id: "audit",    label: "Audit" },
@@ -301,6 +303,7 @@ function renderTabBody(main) {
     case "growth":   return renderGrowthTab(host, { adminGet });
     case "coachq":   return renderCoachQualityTab(host, { adminGet });
     case "achievements": return renderAchievementsTab(host, { adminGet, adminPost });
+    case "heard":    return renderHeardTab(host, { adminGet, adminPost });
     case "deploy":   return renderDeployTab(host, main);
     case "repo":     return renderRepoTab(host, main);
     case "audit":    return renderAuditTab(host, main);
