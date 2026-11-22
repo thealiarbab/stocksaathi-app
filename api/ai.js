@@ -2246,7 +2246,7 @@ async function opAdminOverview(req, origin) {
       avatarColor, onboarded, createdAt, updatedAt, cashPaise, startingCashPaise,
       portUpdatedAt, holdCostPaise, holdingCount, tradeCount, tradedValuePaise,
       biasFlagCount, lastTrade, coachMsgCount, watchlistCount, limitOrderCount,
-      heardFrom, heardFromDetail,
+      heardFrom, heardFromDetail, lastSeenAt,
     ]) => {
       const hasPort = cashPaise != null;
       const cashRupees = hasPort ? Math.round(Number(cashPaise) / 100) : null;
@@ -2266,7 +2266,12 @@ async function opAdminOverview(req, origin) {
         holdingsValueRupees,
         totalPortfolioRupees,
         unrealizedPLPct: Math.round(unrealizedPLPct * 100) / 100,
-        lastActive: portUpdatedAt || createdAt,
+        // Last time the account used the site (user_last_seen: visits and
+        // in-app actions, 2026-11-22d). The old value was the portfolio's
+        // updated_at, which moves on trades and on order fills while the
+        // person is away, and never on a plain visit.
+        lastActive: lastSeenAt || lastTrade || createdAt,
+        lastSeenAt: lastSeenAt || null,
         tradeCount,
         totalTradedValueRupees: Math.round(Number(tradedValuePaise || 0) / 100),
         coachMsgCount,
@@ -2345,7 +2350,7 @@ async function opAdminUser(req, origin, url) {
 
     const [
       profRes, portRes, holdRes, txRes, coachRes, histRes,
-      watchRes, orderRes, auditRes,
+      watchRes, orderRes, auditRes, seenRes,
     ] = await Promise.all([
       sbAdminFetch(`/rest/v1/profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`),
       sbAdminFetch(`/rest/v1/portfolios?select=*&user_id=eq.${encodeURIComponent(userId)}&limit=1`),
@@ -2356,6 +2361,7 @@ async function opAdminUser(req, origin, url) {
       sbAdminFetch(`/rest/v1/watchlist?select=symbol,added_at&user_id=eq.${encodeURIComponent(userId)}&order=added_at.desc&limit=200`),
       sbAdminFetch(`/rest/v1/limit_orders?select=*&user_id=eq.${encodeURIComponent(userId)}&order=created_at.desc&limit=500`),
       sbAdminFetch(`/rest/v1/admin_audit_log?select=*&target_user_id=eq.${encodeURIComponent(userId)}&order=ts.desc&limit=200`),
+      sbAdminFetch(`/rest/v1/user_last_seen?select=last_seen_at&user_id=eq.${encodeURIComponent(userId)}&limit=1`),
     ]);
     const userCacheResponse = await selectedUserCacheRefresh;
     if (!userCacheResponse?.ok) {
@@ -2364,6 +2370,7 @@ async function opAdminUser(req, origin, url) {
 
     const profile = profRes.ok ? (await profRes.json())[0] : null;
     if (!profile) return j(404, { error: "not_found" }, origin);
+    try { profile.last_seen_at = seenRes.ok ? ((await seenRes.json())[0]?.last_seen_at ?? null) : null; } catch { profile.last_seen_at = null; }
     const portfolio = portRes.ok ? (await portRes.json())[0] : null;
     const holdings = holdRes.ok ? await holdRes.json() : [];
     const transactions = txRes.ok ? await txRes.json() : [];

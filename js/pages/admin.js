@@ -545,6 +545,7 @@ function renderUsersTable(list) {
     ["unrealizedPLPct", "P/L%"],
     ["totalTradedValueRupees", "Vol"],
     ["daysSinceLastTrade", "Idle"],
+    ["lastTradeAt", "Last trade"],
     ["lastActive", "Active"],
   ];
   return `<table class="admin-table">
@@ -574,7 +575,8 @@ function renderUsersRowsHtml(list) {
       <td class="tabular ${u.unrealizedPLPct >= 0 ? "positive" : "negative"}">${u.unrealizedPLPct >= 0 ? "+" : ""}${u.unrealizedPLPct.toFixed(1)}%</td>
       <td class="tabular">${u.totalTradedValueRupees ? formatRupees(u.totalTradedValueRupees * 100, { compact: true }) : "—"}</td>
       <td class="tabular">${u.daysSinceLastTrade != null ? u.daysSinceLastTrade + "d" : "—"}</td>
-      <td class="dim text-xs" title="${escapeAttr(formatDatePrecise(u.lastActive))}">${formatDateShort(u.lastActive)}</td>
+      <td class="dim text-xs" title="${escapeAttr(u.lastTradeAt ? formatDatePrecise(u.lastTradeAt) : "No trades")}">${u.lastTradeAt ? formatDateShort(u.lastTradeAt) : "—"}</td>
+      <td class="dim text-xs" title="${escapeAttr(u.lastSeenAt ? "Last visit " + formatDatePrecise(u.lastSeenAt) : "No visit recorded; last trade or signup")}">${formatDateShort(u.lastActive)}${u.lastSeenAt ? "" : " ·"}</td>
       <td><button class="btn btn-ghost btn-sm" data-quick-reset="${escapeAttr(u.id)}" title="Reset portfolio">⟲</button></td>
     </tr>`).join("");
 }
@@ -735,7 +737,8 @@ function paintUserModal() {
         <div>
           ${kv("Onboarded", profile.onboarded ? "Yes" : "No")}
           ${kv("Joined", formatDatePrecise(profile.created_at))}
-          ${kv("Last active", formatDatePrecise(profile.updated_at))}
+          ${kv("Last visit", profile.last_seen_at ? formatDatePrecise(profile.last_seen_at) : "None recorded")}
+          ${kv("Profile last edited", formatDatePrecise(profile.updated_at))}
           ${kv("ID", profile.id)}
         </div>
       </div>
