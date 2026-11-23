@@ -481,8 +481,14 @@ function render() {
     // tool-use path below.
     // chatHistory already has this turn's user message pushed, so hand the
     // heuristic the turns BEFORE it as context for short follow-ups.
+    // One lane (24 Nov 2026), like /chat: every turn goes to the tool agent
+    // (it streams too) and the model decides what it needs. Picking the lane
+    // by keyword sent follow-ups to a prompt that said "you have no prices",
+    // which made the model call the app's own facts fake. The old no-tools
+    // stream below is kept only as dead code for a quick revert.
+    const ONE_LANE = true;
     const deictic = onInstrumentPage() && DEICTIC_RE.test(text);
-    if (!deictic && !needsLiveData(text, chatHistory.slice(-9, -1))) {
+    if (!ONE_LANE && !deictic && !needsLiveData(text, chatHistory.slice(-9, -1))) {
       abortController = new AbortController();
       const placeholderIdx = chatHistory.length;
       chatHistory.push({ role: "assistant", text: "", ts: nextTs(chatHistory), streaming: true });
