@@ -48,6 +48,8 @@ const SUB = {
   get_limit_orders: ["Reading your queued orders", "Orders retrieved"],
   get_market_news: ["Scanning today's headlines", "Headlines retrieved"],
   search_stocks: ["Searching NSE and BSE", "Matches found"],
+  screen_stocks: ["Ranking about 4,600 companies", "Ranked from the fundamentals store"],
+  get_market_movers: ["Reading NSE's end-of-day file", "From NSE's end-of-day file"],
   check: ["Matching every number to a lookup", "Numbers checked"],
 };
 
@@ -73,6 +75,17 @@ function toolLabel(name, a, done) {
     case "get_limit_orders": return T("Checking your orders", "Checked your orders");
     case "get_market_news": return T(q ? `Reading news on ${q}` : "Reading the latest news", q ? `Read news on ${q}` : "Read the latest news");
     case "search_stocks": return T(q ? `Searching “${q}”` : "Searching stocks", q ? `Searched “${q}”` : "Searched stocks");
+    case "screen_stocks": {
+      const by = { pe: "P/E", pb: "P/B", market_cap: "size", roe: "ROE", dividend_yield: "dividend yield", debt_to_equity: "debt", eps: "EPS" }[String(a.sort || "market_cap").toLowerCase()] || "size";
+      const dir = String(a.direction || "desc").toLowerCase() === "asc" ? "lowest" : "highest";
+      const where = a.sector ? ` in ${a.sector}` : " across the market";
+      return T(`Screening for the ${dir} ${by}${where}`, `Screened the ${dir} ${by}${where}`);
+    }
+    case "get_market_movers": {
+      const k = String(a.kind || "gainers").toLowerCase();
+      const what = k === "losers" ? "top losers" : k === "volume" ? "most traded stocks" : "top gainers";
+      return T(`Finding the ${what}`, `Found the ${what}`);
+    }
     default: return T("Looking that up", "Looked it up");
   }
 }
@@ -109,6 +122,18 @@ function receipt(name, facts) {
     }
     case "search_stocks":
       return Number.isFinite(facts.count) ? { text: `${facts.count} match${facts.count === 1 ? "" : "es"}` } : null;
+    case "screen_stocks": {
+      const top = Array.isArray(facts.results) ? facts.results[0] : null;
+      if (!top) return null;
+      const key = facts.sorted_by === "pe" ? "pe" : facts.sorted_by === "pb" ? "pb" : null;
+      return { text: key && top[key] != null ? `${top.symbol} · ${key === "pe" ? "P/E" : "P/B"} ${top[key]}` : `${top.symbol} first`, extra: Number.isFinite(facts.matched) ? `of ${facts.matched}` : "" };
+    }
+    case "get_market_movers": {
+      const top = Array.isArray(facts.results) ? facts.results[0] : null;
+      if (!top) return null;
+      const v = Number(top.change_pct);
+      return { text: top.symbol, extra: Number.isFinite(v) ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "", dir: v > 0 ? "up" : v < 0 ? "down" : "" };
+    }
     case "get_fundamentals": {
       const pe = facts.pe ?? facts.pe_ratio ?? facts.trailingPE;
       return Number.isFinite(pe) ? { text: `P/E ${Number(pe).toFixed(1)}` } : null;

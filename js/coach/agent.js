@@ -7,6 +7,7 @@
 // backend proxies using GROQ_API_KEY env var.
 // =============================================================================
 
+import { sb } from "../db/supabase.js";
 import { getInstrument, getAllInstruments, STOCKS, MUTUAL_FUNDS } from "../data/universe.js";
 import { getQuote, getQuoteBatch, getFundamentals } from "../data/marketData.js";
 import { listPendingOrders, listAllOrders } from "../features/limitOrders.js";
@@ -202,6 +203,40 @@ const TOOLS = [
             type: "string",
             description: "Filter: 'pending' (default), 'filled', 'cancelled', or 'all'.",
           },
+        },
+      },
+    },
+  },  {
+    type: "function",
+    function: {
+      name: "screen_stocks",
+      description:
+        "Screen the WHOLE market (about 4,600 NSE/BSE companies) and rank them by a fundamental: highest or lowest P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector and above a minimum size. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'best ROE in pharma', 'stocks with P/E under 15'. Always say which filter you used. Very high P/E values usually mean tiny earnings; mention a minimum market cap when that matters.",
+      parameters: {
+        type: "object",
+        properties: {
+          sort: { type: "string", description: "pe | pb | market_cap | roe | dividend_yield | debt_to_equity | eps" },
+          direction: { type: "string", description: "desc (highest first, default) or asc (lowest first)." },
+          sector: { type: "string", description: "Optional sector or industry words, e.g. 'bank', 'IT', 'pharma', 'auto'." },
+          min_market_cap_cr: { type: "number", description: "Optional minimum market cap in ₹ crore, e.g. 10000 for large companies." },
+          min_pe: { type: "number" },
+          max_pe: { type: "number" },
+          limit: { type: "number", description: "How many to return, 1-25 (default 15)." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_market_movers",
+      description:
+        "Top gainers, top losers or most-traded NSE stocks for the latest session in NSE's official end-of-day file (the result says which date). Use for 'top gainers', 'biggest losers', 'what moved today/yesterday', 'most active stocks'.",
+      parameters: {
+        type: "object",
+        properties: {
+          kind: { type: "string", description: "gainers (default) | losers | volume" },
+          limit: { type: "number", description: "1-25 (default 10)." },
         },
       },
     },
@@ -627,7 +662,42 @@ async function execGetLimitOrders(args = {}) {
   };
 }
 
+// Market-wide lookups (24 Nov 2026): GR-1 can screen and rank the whole
+// market; Saathi could only look up named stocks, so "the company with the
+// highest P/E" fell back to the student's own two holdings.
+async function execScreenStocks(args = {}) {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Screener unavailable right now." };
+    const { data, error } = await client.rpc("coach_screen_stocks", {
+      p_sort: String(args.sort || "market_cap").toLowerCase(),
+      p_dir: String(args.direction || "desc").toLowerCase(),
+      p_sector: args.sector ? String(args.sector) : null,
+      p_min_market_cap_cr: Number.isFinite(+args.min_market_cap_cr) && args.min_market_cap_cr != null ? +args.min_market_cap_cr : null,
+      p_max_pe: Number.isFinite(+args.max_pe) && args.max_pe != null ? +args.max_pe : null,
+      p_min_pe: Number.isFinite(+args.min_pe) && args.min_pe != null ? +args.min_pe : null,
+      p_limit: Number.isFinite(+args.limit) && args.limit != null ? +args.limit : 15,
+    });
+    if (error || !data) return { ok: false, error: "Screener lookup failed." };
+    return data;
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+async function execMarketMovers(args = {}) {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Movers unavailable right now." };
+    const { data, error } = await client.rpc("coach_market_movers", {
+      p_kind: String(args.kind || "gainers").toLowerCase(),
+      p_limit: Number.isFinite(+args.limit) && args.limit != null ? +args.limit : 10,
+    });
+    if (error || !data) return { ok: false, error: "Movers lookup failed." };
+    return data;
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
 const EXECUTORS = {
+  screen_stocks: execScreenStocks,
+  get_market_movers: execMarketMovers,
   get_stock_price: execGetStockPrice,
   get_trade_history: execGetTradeHistory,
   get_crypto_price: execGetCryptoPrice,
@@ -1765,8 +1835,12 @@ export function dropFigureSentences(text, figures) {
   const hit = (p) => figures.some((f) => p.replace(/\*\*/g, "").includes(f));
   return String(text || "").split("\n").map((line) => {
     if (!hit(line)) return line;
+    // A list item is one unit. Splitting "2. ULTRACEMCO: 42.3 …" at ". "
+    // dropped the item and left a bare "2." (24 Nov: "2. 3. 4. 5.").
+    const m = line.match(/^(\s*(?:\d+[.)]|[-*•])\s+)(.*)$/);
+    if (m) return null;
     return line.split(/(?<=[.!?।])\s+/).filter((p) => !hit(p)).join(" ");
-  }).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }).filter((l) => l !== null).join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**
