@@ -719,8 +719,8 @@ export function renderPortfolio(main) {
             </div>
           ` : ""}
 
-          <div class="card">
-            <div class="card-head"><h3>Recent activity</h3></div>
+          <div class="card" id="pf-activity">
+            <div class="card-head"><h3>${actView.open ? "Trade history" : "Recent activity"}</h3></div>
             ${renderActivity(state)}
           </div>
         </div>
@@ -848,6 +848,21 @@ export function renderPortfolio(main) {
         if (sym) go("/stocks/" + sym);
       });
     });
+    // Trade history: toggle, filters, paging. State lives at module level
+    // because render() replaces the whole page every 15 s quote tick.
+    main.querySelectorAll("[data-act]").forEach(el => {
+      el.addEventListener("click", () => {
+        const a = el.dataset.act;
+        if (a === "toggle") { actView.open = !actView.open; actView.limit = ACT_PAGE; }
+        else if (a === "more") actView.limit += ACT_PAGE;
+        else if (a.startsWith("side:")) { actView.side = a.slice(5); actView.limit = ACT_PAGE; }
+        render();
+        if (a === "toggle" && !actView.open) main.querySelector("#pf-activity")?.scrollIntoView({ block: "nearest" });
+      });
+    });
+    const actSym = main.querySelector("[data-act-sym]");
+    if (actSym) actSym.addEventListener("change", () => { actView.sym = actSym.value; actView.limit = ACT_PAGE; render(); });
+    loadActQuotes(() => { if (!cancelled) render(); });
     main.querySelectorAll("[data-cancel-order]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const id = btn.dataset.cancelOrder;
@@ -992,64 +1007,170 @@ function renderEmptyHoldings() {
   `;
 }
 
+// ── Trade history (Recent activity + the full list behind a toggle) ──
+// Only trades: buys and sells from state.transactions (market, AMO, limit
+// and fund fills all land there). Coach, learning and other site activity
+// are deliberately left out.
+const ACT_PAGE = 30;
+let actView = { open: false, side: "all", sym: "", limit: ACT_PAGE };
+// Prices for stocks the user traded but no longer holds (the page's
+// quoteCache only covers current holdings). Fetched once per symbol.
+let actQuotes = {};
+const actAsked = new Set();
+let actWanted = [];
+
+function actQuote(sym) {
+  const q = quoteCache[sym] || actQuotes[sym];
+  return q && q.source !== "synthetic" && q.pricePaise > 0 ? q : null;
+}
+
+function loadActQuotes(onDone) {
+  const need = actWanted.filter(s => !actAsked.has(s) && !actQuote(s));
+  if (!need.length) return;
+  need.forEach(s => actAsked.add(s));
+  getQuoteBatch(need).then(q => {
+    actQuotes = { ...actQuotes, ...(q || {}) };
+    onDone();
+  }).catch(() => {});
+}
+
+function fmtAgo(ms) {
+  const d = Math.floor(ms / 86_400_000);
+  if (d < 1) return "today";
+  if (d < 60) return `in ${d} day${d > 1 ? "s" : ""}`;
+  return `in ${Math.round(d / 30.4)} months`;
+}
+
+// What the stock did after this trade, in the user's own rupees.
+function afterLine(t, inst) {
+  const q = actQuote(t.symbol);
+  if (!q || !(t.pricePaise > 0)) return "";
+  const now = q.pricePaise;
+  const pct = (now - t.pricePaise) / t.pricePaise;
+  const diffPaise = Math.round((now - t.pricePaise) * Number(t.qty || 0));
+  const ago = fmtAgo(Date.now() - t.ts);
+  const isMf = String(t.symbol).startsWith("MF_");
+  const unitWord = isMf ? "units" : (Number(t.qty) === 1 ? "share" : "shares");
+  const flat = Math.abs(pct) < 0.0005;
+  const move = flat ? "about the same" : `${pct > 0 ? "up" : "down"} ${formatPct(Math.abs(pct))}`;
+  let tone, sayRupees;
+  if (flat) {
+    tone = "flat"; sayRupees = "";
+  } else if (t.side === "BUY") {
+    tone = pct > 0 ? "good" : "bad";
+    sayRupees = `${formatRupees(diffPaise, { sign: true })} on the ${formatQty(t.qty, inst?.kind)} ${unitWord} you bought`;
+  } else {
+    // A sale looks good in hindsight when the price fell afterwards.
+    tone = pct < 0 ? "good" : "bad";
+    sayRupees = pct > 0
+      ? `if kept, worth ${formatRupees(diffPaise)} more`
+      : `you got ${formatRupees(-diffPaise)} more than they are worth now`;
+  }
+  const arrow = flat ? "→" : pct > 0 ? "▲" : "▼";
+  return `
+    <div class="pf-after pf-after-${tone}">
+      <span class="pf-after-move">${arrow} Since you ${t.side === "BUY" ? "bought" : "sold"}: ${move} ${ago}</span>
+      <span class="pf-after-now">now ${formatRupees(now)}${sayRupees ? ` · ${sayRupees}` : ""}</span>
+    </div>`;
+}
+
+function actRow(t, plById) {
+  const inst = getInstrument(t.symbol);
+  const sell = t.side === "SELL" ? plById.get(t.id) : null;
+  let amount, ac, cashLine, label;
+  if (sell) {
+    amount = formatRupees(sell.plPaise, { sign: true, compact: true });
+    ac = deltaClass(sell.plPaise);
+    label = sell.plPaise > 0 ? "profit" : sell.plPaise < 0 ? "loss" : "no gain";
+    cashLine = `${formatRupees(t.valuePaise, { compact: true })} back to cash · avg cost ${formatRupees(sell.avgCostPaise)}`;
+  } else if (t.side === "SELL") {
+    amount = formatRupees(t.valuePaise, { compact: true });
+    ac = ""; label = "to cash"; cashLine = "";
+  } else {
+    amount = formatRupees(t.valuePaise, { compact: true });
+    ac = ""; label = "invested"; cashLine = "";
+  }
+  const d = new Date(t.ts);
+  const when = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " · " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  const name = inst ? escapeHtml(inst.name) : escapeHtml(t.symbol);
+  return `
+    <div class="pf-act-row">
+      <div class="pf-act-top">
+        <div class="pf-act-main">
+          <div class="text-md"><span class="pill ${t.side === "BUY" ? "pill-green" : "pill-red"}">${t.side}</span> <a href="/stocks/${encodeURIComponent(t.symbol)}" class="pf-act-name">${name}</a></div>
+          <div class="dim text-xs">${when} · ${formatQty(t.qty, inst?.kind)} @ ${formatRupees(t.pricePaise)}</div>
+          ${cashLine ? `<div class="dim text-xs">${cashLine}</div>` : ""}
+        </div>
+        <div class="pf-act-amt">
+          <div class="num font-bold ${ac}">${amount}</div>
+          <div class="dim text-xs">${label}</div>
+        </div>
+      </div>
+      ${afterLine(t, inst)}
+    </div>`;
+}
+
 function renderActivity(state) {
-  const txns = state.transactions.slice().reverse().slice(0, 5);
-  if (!txns.length) {
+  const all = state.transactions.slice().sort((a, b) => b.ts - a.ts);
+  if (!all.length) {
+    actWanted = [];
     return `<p class="muted text-sm" style="text-align: center; padding: var(--sp-4);">No activity yet. Your trades will show here.</p>`;
   }
   // Realised P&L per SELL, from the same running-average-cost walk the
-  // report card and the coach use. The amount column used to show a SELL's
-  // proceeds as a green "+₹12,593", which read as a ₹12,593 profit on a sale
-  // that actually lost ₹196. Proceeds are cash moving, not a gain.
-  const plById = new Map(computeTradeStats(state.transactions).sells.map(x => [x.id, x]));
-  const rows = [];
-  for (const t of txns) {
-    const inst = getInstrument(t.symbol);
-    const sell = t.side === "SELL" ? plById.get(t.id) : null;
-    let amount, ac, cashLine, label;
-    if (sell) {
-      amount = formatRupees(sell.plPaise, { sign: true, compact: true });
-      ac = deltaClass(sell.plPaise);
-      label = sell.plPaise > 0 ? "profit" : sell.plPaise < 0 ? "loss" : "no gain";
-      cashLine = `${formatRupees(t.valuePaise, { compact: true })} back to cash · avg cost ${formatRupees(sell.avgCostPaise)}`;
-    } else if (t.side === "SELL") {
-      amount = formatRupees(t.valuePaise, { compact: true });
-      ac = ""; label = "to cash"; cashLine = "";
-    } else {
-      amount = formatRupees(t.valuePaise, { compact: true });
-      ac = ""; label = "invested"; cashLine = "";
-    }
-    rows.push({
-      type: "trade",
-      ts: t.ts,
-      left: `<span class="pill ${t.side === "BUY" ? "pill-green" : "pill-red"}">${t.side}</span> ${inst ? escapeHtml(inst.name) : t.symbol}`,
-      right: `${formatQty(t.qty, inst?.kind)} @ ${formatRupees(t.pricePaise)}`,
-      amount, ac, cashLine, label,
-    });
-  }
-  rows.sort((a, b) => b.ts - a.ts);
+  // report card and the coach use. A SELL's proceeds are cash moving, not
+  // a gain, so the amount column shows the profit or loss instead.
+  const stats = computeTradeStats(state.transactions);
+  const plById = new Map(stats.sells.map(x => [x.id, x]));
 
+  if (!actView.open) {
+    const recent = all.slice(0, 5);
+    actWanted = [...new Set(recent.map(t => t.symbol))];
+    return `
+      <div class="flex-col gap-2">${recent.map(t => actRow(t, plById)).join("")}</div>
+      ${all.length > 5 ? `<button class="btn btn-ghost btn-sm pf-act-toggle" data-act="toggle">Show full history (${all.length} trades) ▾</button>` : ""}`;
+  }
+
+  // Full history: filters, month groups, paged.
+  const syms = [...new Set(all.map(t => t.symbol))]
+    .map(s => ({ s, n: getInstrument(s)?.name || s }))
+    .sort((a, b) => a.n.localeCompare(b.n));
+  if (actView.sym && !syms.some(x => x.s === actView.sym)) actView.sym = "";
+  const list = all.filter(t =>
+    (actView.side === "all" || t.side === actView.side) && (!actView.sym || t.symbol === actView.sym));
+  const shown = list.slice(0, actView.limit);
+  actWanted = [...new Set(shown.map(t => t.symbol))];
+
+  const buys = list.filter(t => t.side === "BUY");
+  const sellsIn = list.filter(t => t.side === "SELL");
+  const investedPaise = buys.reduce((s, t) => s + (t.valuePaise || 0), 0);
+  const priced = sellsIn.map(t => plById.get(t.id)).filter(Boolean);
+  const bookedPaise = priced.reduce((s, x) => s + (x.plPaise || 0), 0);
+  const wins = priced.filter(x => x.plPaise > 0).length;
+
+  let lastMonth = "";
+  const rows = shown.map(t => {
+    const m = new Date(t.ts).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+    const head = m !== lastMonth ? `<div class="pf-act-month">${m}</div>` : "";
+    lastMonth = m;
+    return head + actRow(t, plById);
+  }).join("");
+
+  const chip = (key, label) => `<button class="pf-act-chip${actView.side === key ? " on" : ""}" data-act="side:${key}">${label}</button>`;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   return `
-    <div class="flex-col gap-2">
-      ${rows.slice(0, 6).map(r => {
-        const d = new Date(r.ts);
-        const when = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " · " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-        return `
-          <div class="pf-act-row">
-            <div class="pf-act-main">
-              <div class="text-md">${r.left}</div>
-              <div class="dim text-xs">${when} · ${r.right}</div>
-              ${r.cashLine ? `<div class="dim text-xs">${r.cashLine}</div>` : ""}
-            </div>
-            <div class="pf-act-amt">
-              <div class="num font-bold ${r.ac}">${r.amount}</div>
-              <div class="dim text-xs">${r.label}</div>
-            </div>
-          </div>
-        `;
-      }).join("")}
+    <div class="pf-act-tools">
+      <div class="pf-act-chips">${chip("all", "All")}${chip("BUY", "Buys")}${chip("SELL", "Sells")}</div>
+      <select class="pf-act-sym" data-act-sym aria-label="Filter by stock">
+        <option value="">All stocks</option>
+        ${syms.map(x => `<option value="${escapeAttr(x.s)}"${x.s === actView.sym ? " selected" : ""}>${escapeHtml(x.n)}</option>`).join("")}
+      </select>
     </div>
-  `;
+    <div class="pf-act-sum dim text-xs">
+      ${plural(list.length, "trade")} · ${plural(buys.length, "buy")}${buys.length ? ` (${formatRupees(investedPaise, { compact: true })} put in)` : ""} · ${plural(sellsIn.length, "sell")}${priced.length ? ` (<span class="${deltaClass(bookedPaise)}">${formatRupees(bookedPaise, { sign: true, compact: true })}</span> booked, ${wins} at a profit)` : ""}
+    </div>
+    <div class="flex-col gap-2">${rows || `<p class="muted text-sm" style="text-align:center; padding: var(--sp-4);">No trades match.</p>`}</div>
+    ${list.length > shown.length ? `<button class="btn btn-ghost btn-sm pf-act-toggle" data-act="more">Show ${Math.min(ACT_PAGE, list.length - shown.length)} more</button>` : ""}
+    <button class="btn btn-ghost btn-sm pf-act-toggle" data-act="toggle">Show less ▴</button>`;
 }
 
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
