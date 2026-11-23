@@ -1184,3 +1184,25 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 #chat-form.cc-composer { flex-wrap: wrap; }
 #chat-form.cc-composer > .cc-quote-chip { flex: 1 0 100%; width: 100%; box-sizing: border-box; }
 #chat-form.cc-composer > .composer-shell { flex: 1 1 100%; }
+
+/* Breakdown sheet: long thought lists start folded. */
+.ts-thoughts.ts-all.is-clipped .ts-extra { display: none; }
+.ts-thoughts.ts-all { list-style: none; counter-reset: none; }
+.ts-more {
+  align-self: flex-start; margin: 2px 0 4px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); font: 600 var(--text-xs)/1.3 var(--font-sans); cursor: pointer;
+  transition: border-color 150ms var(--ease), color 150ms var(--ease);
+}
+.ts-more:hover { color: var(--text-strong); border-color: var(--border-strong); }
+.ts-more:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Phone chat header: one row (24 Nov: the "more" button wrapped to its own
+   line and squeezed the title to three letters). */
+@media (max-width: 520px) {
+  .cc-has-side .cc-head { flex-wrap: nowrap; gap: 6px; padding: 8px 10px; }
+  .cc-has-side .cc-head .cc-lang-pre { display: none; }
+  .cc-has-side .cc-head .cc-chip-btn { flex: 0 0 auto; padding-left: 10px; padding-right: 10px; }
+  .cc-has-side .cc-head .cc-menu-btn span { display: none; }
+  .cc-has-side .cc-head .cc-id { flex: 1 1 auto; min-width: 0; }
+  .cc-has-side .cc-head .cc-head-more { width: 36px; padding: 0; justify-content: center; }
+}

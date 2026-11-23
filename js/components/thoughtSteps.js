@@ -49,7 +49,7 @@ const SUB = {
   get_market_news: ["Scanning today's headlines", "Headlines retrieved"],
   search_stocks: ["Searching NSE and BSE", "Matches found"],
   read_chart: ["Loading daily closes", "Daily closes from the exchange"],
-  screen_stocks: ["Ranking about 4,600 companies", "Ranked from the fundamentals store"],
+  screen_stocks: ["Ranking about 3,800 companies", "Ranked from the fundamentals store"],
   get_market_movers: ["Reading NSE's end-of-day file", "From NSE's end-of-day file"],
   check: ["Matching every number to a lookup", "Numbers checked"],
 };
@@ -80,7 +80,7 @@ function toolLabel(name, a, done) {
     case "screen_stocks": {
       const by = { pe: "P/E", pb: "P/B", market_cap: "size", roe: "ROE", dividend_yield: "dividend yield", debt_to_equity: "debt", eps: "EPS" }[String(a.sort || "market_cap").toLowerCase()] || "size";
       const dir = String(a.direction || "desc").toLowerCase() === "asc" ? "lowest" : "highest";
-      const where = a.sector ? ` in ${a.sector}` : " across the market";
+      const where = a.sector ? ` in ${a.sector}` : a.top_by_size ? ` among the ${a.top_by_size} largest` : " across the market";
       return T(`Screening for the ${dir} ${by}${where}`, `Screened the ${dir} ${by}${where}`);
     }
     case "get_market_movers": {
@@ -131,8 +131,8 @@ function receipt(name, facts) {
     case "screen_stocks": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;
       if (!top) return null;
-      const key = facts.sorted_by === "pe" ? "pe" : facts.sorted_by === "pb" ? "pb" : null;
-      return { text: key && top[key] != null ? `${top.symbol} · ${key === "pe" ? "P/E" : "P/B"} ${top[key]}` : `${top.symbol} first`, extra: Number.isFinite(facts.matched) ? `of ${facts.matched}` : "" };
+      const n = facts.results.length;
+      return { text: `${n} compan${n === 1 ? "y" : "ies"}`, extra: `${top.symbol} first` };
     }
     case "get_market_movers": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;
@@ -389,8 +389,10 @@ export function foldedTraceHtml(trace, idx) {
 // sheet: every thought line, then each narration with its ticked steps.
 export function openTraceSheet(trace) {
   if (!trace) return;
-  const thoughts = (trace.thoughts || []).length
-    ? `<ol class="ts-thoughts ts-all">${trace.thoughts.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>` : "";
+  const all = trace.thoughts || [];
+  const KEEP = 4;
+  const thoughts = all.length
+    ? `<ol class="ts-thoughts ts-all${all.length > KEEP ? " is-clipped" : ""}">${all.map((t, i) => `<li${i >= KEEP ? ' class="ts-extra"' : ""}>${esc(t)}</li>`).join("")}</ol>${all.length > KEEP ? `<button type="button" class="ts-more" aria-expanded="false">Show all ${all.length} thoughts</button>` : ""}` : "";
   const steps = trace.groups.length ? stepsHtml(trace.groups) : "";
   const n = lookups(trace);
   const meta = `<p class="ts-meta">${n ? `${n} lookup${n === 1 ? "" : "s"}` : "No lookups"} · thought for ${secs(trace)}s</p>`;
@@ -400,6 +402,14 @@ export function openTraceSheet(trace) {
     html: `${meta}<div class="ts-replay">${thoughts}${steps}</div>${note}`,
     onMount(card) {
       card.addEventListener("click", (e) => {
+        const more = e.target.closest(".ts-more");
+        if (more) {
+          const list = card.querySelector(".ts-thoughts.ts-all");
+          const open = list.classList.toggle("is-clipped") === false;
+          more.setAttribute("aria-expanded", String(open));
+          more.textContent = open ? "Show fewer" : `Show all ${list.children.length} thoughts`;
+          return;
+        }
         const head = e.target.closest(".ts-batch-head");
         if (!head) return;
         const b = head.closest(".ts-batch");

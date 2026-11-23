@@ -211,17 +211,18 @@ const TOOLS = [
     function: {
       name: "screen_stocks",
       description:
-        "Screen the WHOLE market (about 4,600 NSE/BSE companies) and rank them by a fundamental: highest or lowest P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector and above a minimum size. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'best ROE in pharma', 'stocks with P/E under 15'. Always say which filter you used. Very high P/E values usually mean tiny earnings; mention a minimum market cap when that matters.",
+        "Screen the WHOLE market (about 3,800 NSE/BSE companies; ETFs and funds are left out) and rank by a fundamental: P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'lowest debt', 'stocks with P/E under 15'. IMPORTANT: 'top N stocks sorted by X' means the N LARGEST companies ranked by X: set top_by_size to N (and limit to N). Without top_by_size or min_market_cap_cr, the highest P/Es are tiny companies with near-zero earnings, so for 'highest P/E' questions prefer top_by_size (e.g. 200) or a market-cap floor and say which you used. Returns up to 50 rows in one call.",
       parameters: {
         type: "object",
         properties: {
           sort: { type: "string", description: "pe | pb | market_cap | roe | dividend_yield | debt_to_equity | eps" },
           direction: { type: "string", description: "desc (highest first, default) or asc (lowest first)." },
-          sector: { type: "string", description: "Optional sector or industry words, e.g. 'bank', 'IT', 'pharma', 'auto'." },
-          min_market_cap_cr: { type: "number", description: "Optional minimum market cap in ₹ crore, e.g. 10000 for large companies." },
+          sector: { type: "string", description: "Optional: bank, IT, pharma, FMCG, auto, finance, energy, power, metal, realty, telecom, or another sector/industry word." },
+          top_by_size: { type: "number", description: "Only consider the N largest companies by market cap (1-500), e.g. 50 for 'top 50 stocks'." },
+          min_market_cap_cr: { type: "number", description: "Optional minimum market cap in ₹ crore, e.g. 10000." },
           min_pe: { type: "number" },
           max_pe: { type: "number" },
-          limit: { type: "number", description: "How many to return, 1-25 (default 15)." },
+          limit: { type: "number", description: "Rows to return, 1-50 (default 15)." },
         },
       },
     },
@@ -685,23 +686,19 @@ async function execScreenStocks(args = {}) {
   try {
     const client = await sb();
     if (!client) return { ok: false, error: "Screener unavailable right now." };
-    const { data, error } = await client.rpc("coach_screen_stocks", {
+    const num = (v) => (v != null && Number.isFinite(+v) ? +v : null);
+    const { data, error } = await client.rpc("coach_screen_stocks_v2", {
       p_sort: String(args.sort || "market_cap").toLowerCase(),
       p_dir: String(args.direction || "desc").toLowerCase(),
       p_sector: args.sector ? String(args.sector) : null,
-      p_min_market_cap_cr: Number.isFinite(+args.min_market_cap_cr) && args.min_market_cap_cr != null ? +args.min_market_cap_cr : null,
-      p_max_pe: Number.isFinite(+args.max_pe) && args.max_pe != null ? +args.max_pe : null,
-      p_min_pe: Number.isFinite(+args.min_pe) && args.min_pe != null ? +args.min_pe : null,
-      p_limit: Number.isFinite(+args.limit) && args.limit != null ? +args.limit : 15,
+      p_min_market_cap_cr: num(args.min_market_cap_cr),
+      p_max_pe: num(args.max_pe),
+      p_min_pe: num(args.min_pe),
+      p_limit: num(args.limit) ?? 15,
+      p_top_by_size: num(args.top_by_size),
     });
     if (error || !data) return { ok: false, error: "Screener lookup failed." };
-    const key = String(data.sorted_by || "market_cap");
-    const col = key === "market_cap" ? "market_cap_cr" : key;
-    const results = (data.results || []).map((r) => ({
-      symbol: r.symbol, name: String(r.name || "").slice(0, 40), sector: r.sector || null,
-      market_cap_cr: r.market_cap_cr, pe: r.pe, ...(col !== "pe" && col !== "market_cap_cr" ? { [col]: r[col] } : {}),
-    }));
-    return { ...data, as_of: data.results?.[0]?.as_of || null, results };
+    return data;
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 async function execMarketMovers(args = {}) {
@@ -764,6 +761,19 @@ async function execReadChart(args = {}) {
     recent_volume_vs_average: +(vol(bars.slice(-5)) / Math.max(1, vol(bars.slice(0, -5)))).toFixed(1),
     how_to_use: "Daily closes from the exchange. Describe the shape (rise, fall, sideways, dip and recovery), where the high and low came, and what being above or below the averages means, in plain words. Add [[chart " + sym + " " + (range === "1mo" ? "1m" : range === "3mo" ? "3m" : range === "6mo" ? "6m" : range) + "]] on its own line to show it.",
   };
+}
+
+function capToolResult(result, max) {
+  let text = JSON.stringify(result);
+  if (text.length <= max) return text;
+  for (const key of ["results", "holdings", "trades", "items", "orders"]) {
+    if (!Array.isArray(result?.[key])) continue;
+    const copy = { ...result, [key]: result[key].slice() };
+    while (copy[key].length > 1 && JSON.stringify(copy).length > max - 80) copy[key].pop();
+    copy.truncated = `Showing the first ${copy[key].length} of ${result[key].length} rows.`;
+    return JSON.stringify(copy);
+  }
+  return text.slice(0, max);
 }
 
 const EXECUTORS = {
@@ -1204,7 +1214,9 @@ export async function runAgent({ apiKey, system, messages, onStep, onText, onRea
           message: {
             role: "tool",
             tool_call_id: tc.id,
-            content: JSON.stringify(result).slice(0, 6000),   // cap large payloads
+            // Cap large payloads, on a row boundary: a cut mid-JSON once made
+            // the model say "my results got cut off" (24 Nov).
+            content: capToolResult(result, 9000),
           },
           provenance: {
             tool: name,

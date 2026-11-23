@@ -409,12 +409,7 @@ export function renderChat(main, opts = {}) {
     const active = getActiveSession(sessionsData);
     // Keep the address bar on this chat's own link (a new, empty chat is
     // plain /chat), so a chat can be bookmarked, shared or reopened.
-    if (!embedded && active && !wantId) {
-      const want = active.messages?.length ? `/chat/${active.id}` : "/chat";
-      if (location.pathname.replace(/\/+$/, "") !== want) {
-        try { history.replaceState(history.state, "", want + location.search + location.hash); } catch {}
-      }
-    }
+    if (!embedded && active && !wantId) syncChatUrl();
     // A repaint of the chat on screen (cloud sync, another tab, the language
     // switch) keeps the reader's place; opening a chat starts at the end.
     const prevEl = main.querySelector("#chat-messages");
@@ -455,7 +450,7 @@ export function renderChat(main, opts = {}) {
             <div class="cc-id">
               <h1 class="cc-title">${chatLog.length ? escapeHtml(active.title || "Saathi") : "Saathi"}</h1>
             </div>
-            <button class="cc-chip-btn coach-lang ${state.settings.hinglish ? "is-on" : ""}" id="cc-lang" type="button" aria-label="Switch reply language to ${state.settings.hinglish ? "English" : "Hinglish (Hindi in Roman script)"}" aria-pressed="${state.settings.hinglish ? "true" : "false"}">${state.settings.hinglish ? "Switch to English" : "Switch to Hinglish"}</button>
+            <button class="cc-chip-btn coach-lang ${state.settings.hinglish ? "is-on" : ""}" id="cc-lang" type="button" aria-label="Switch reply language to ${state.settings.hinglish ? "English" : "Hinglish (Hindi in Roman script)"}" aria-pressed="${state.settings.hinglish ? "true" : "false"}">${langLabel(state.settings.hinglish)}</button>
             ${isPreview() ? `
             <button class="cc-chip-btn cc-head-share" id="cc-share" type="button" aria-label="Share this chat">
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg><span>Share</span>
@@ -507,7 +502,7 @@ export function renderChat(main, opts = {}) {
     main.querySelector("#cc-lang")?.addEventListener("click", (e) => {
       const on = !getState().settings.hinglish;
       setSetting("hinglish", on);
-      e.currentTarget.textContent = on ? "Switch to English" : "Switch to Hinglish";
+      e.currentTarget.innerHTML = langLabel(on);
       e.currentTarget.setAttribute("aria-label", `Switch reply language to ${on ? "English" : "Hinglish (Hindi in Roman script)"}`);
       e.currentTarget.classList.toggle("is-on", on);
       e.currentTarget.setAttribute("aria-pressed", on ? "true" : "false");
@@ -567,6 +562,7 @@ export function renderChat(main, opts = {}) {
         surface: "chat_page", userTs: userMessage.ts,
       });
       cloudSave(true);
+      syncChatUrl();
       messagesEl._follow = true;    // sending always goes back to the end
       rerender();
       refreshSide();
@@ -1270,7 +1266,24 @@ function renderBubble(m) {
 // (`_follow`, kept by the scroll listener in render()). Sending a message
 // always returns to the bottom. Repaints keep the reader's place.
 function composerHint() {
-  return isPreview() ? "Ask Saathi anything, or type / for tools" : "Ask Saathi anything";
+  // Phones: the long hint wrapped to two lines and was clipped (24 Nov).
+  const narrow = typeof window !== "undefined" && window.innerWidth < 520;
+  return isPreview() && !narrow ? "Ask Saathi anything, or type / for tools" : "Ask Saathi anything";
+}
+function langLabel(hinglishOn) {
+  return `<span class="cc-lang-pre">Switch to </span>${hinglishOn ? "English" : "Hinglish"}`;
+}
+// The address bar follows the open chat: /chat/<id> once it has messages.
+function syncChatUrl() {
+  try {
+    if (!_host || document.body.classList.contains("chat-app") === false) return;
+    const active = getActiveSession(sessionsData);
+    if (!active) return;
+    const want = active.messages?.length ? `/chat/${active.id}` : "/chat";
+    if (/^\/chat(\/|$)/.test(location.pathname) && location.pathname.replace(/\/+$/, "") !== want) {
+      history.replaceState(history.state, "", want + location.search + location.hash);
+    }
+  } catch {}
 }
 function stickBottom(el, force = false) {
   if (!el) return;
