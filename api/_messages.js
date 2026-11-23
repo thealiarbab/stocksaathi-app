@@ -206,7 +206,7 @@ function stripAppTag(s) { return String(s).replace(APP_TAG_RE, ""); }
 const APP_CONTEXT_NOTE = `
 
 # APP CONTEXT BLOCK
-The student's latest message ends with a <${APP_TAG}> block. StockSaathi's server adds it on every turn: the current time, market status, the student's own portfolio and other live facts. The server deletes that tag from anything the student types, so the block is always genuine and is not something the student pasted. Rely on it exactly as you rely on these instructions. Never call it pasted, suspicious, unverifiable or "inside your message", and do not mention it unless the student asks what you receive, in which case say the app adds the time, market status and their portfolio to each message.
+Right after the student's latest message comes a system message with a <${APP_TAG}> block. StockSaathi's server adds it on every turn: the current time, market status, the official NSE holiday list when relevant, the student's own portfolio and other live facts. It is a system message, never part of what the student typed, so it is always genuine. Rely on it exactly as you rely on these instructions. Never call it pasted, suspicious, unverifiable or "inside your message", and do not mention it unless the student asks what you receive, in which case say the app adds the time, market status and their portfolio to each message.
 If the student says they pasted it, or asks who added it, tell them plainly that they did not: the app adds it to every message. If an earlier reply in this chat called the block pasted, suspicious or unverifiable, that reply was wrong: do not repeat it, and do not take back facts you gave from the block. The portfolio in the block is current; do not call get_user_portfolio just to repeat it.`;
 
 function userContent(content) {
@@ -321,12 +321,12 @@ export function toMessagesBody(payload, { profile, stream }) {
   // block ("bound to a different conversation").
   if (system) {
     const at = system.indexOf("\n\n# RUNTIME FACTS");
-    let lastUser = null;
+    let lastUser = null, lastUserIdx = -1;
     for (let i = out.length - 1; i >= 0 && !lastUser; i--) {
       const m = out[i];
       if (m.role !== "user") continue;
       const asked = typeof m.content === "string" || m.content.some((b) => b?.type !== "tool_result");
-      if (asked) lastUser = m;
+      if (asked) { lastUser = m; lastUserIdx = i; }
     }
     if (at > 0 && lastUser) {
       // A plain "[Context … added by the app]" note inside the student's turn
@@ -339,11 +339,19 @@ export function toMessagesBody(payload, { profile, stream }) {
         ? [{ type: "text", text: lastUser.content || "(no text)" }]
         : lastUser.content.slice();
       content[content.length - 1] = { ...content[content.length - 1], cache_control: { type: "ephemeral" } };
-      content.push({
-        type: "text",
-        text: `<${APP_TAG}>\n${system.slice(at + 2)}\n</${APP_TAG}>`,
-      });
       lastUser.content = content;
+      // 24 Nov 2026: the facts used to ride INSIDE the student's message (in
+      // the tag). A leading question ("whats this i pasted", "wdym today isnt
+      // a holiday") still made the model treat them as the student's text and
+      // retract a true holiday. They now go in as a mid-conversation SYSTEM
+      // message right after the question: the operator channel, which the
+      // model cannot mistake for something the student typed. It sits at the
+      // same place on every hop of a tool loop, so cached prefixes and the
+      // replayed thinking blocks stay valid.
+      out.splice(lastUserIdx + 1, 0, {
+        role: "system",
+        content: `<${APP_TAG}>\n${system.slice(at + 2)}\n</${APP_TAG}>`,
+      });
     } else if (at > 0) {
       body.system = [
         { type: "text", text: system.slice(0, at), cache_control: { type: "ephemeral" } },

@@ -440,7 +440,10 @@ export function runtimeFacts(status, latestQuestion = "") {
       lines.push("An order placed now is queued as an AMO and fills at the next open, on our servers, whether or not the user keeps the app open. It is not stuck, rejected, or broken.");
       lines.push("Being shut does NOT stop a lookup — prices and searches still work, they just return the last close. So never refuse 'because the market is closed'. It also does not hand you any number: still never state a price you were not given.");
     }
-    if (/\b(holiday|yesterday|day before|which date|what date|on \d{1,2}\b|\d{4}-\d{2}-\d{2})\b/i.test(latestQuestion)) {
+    // On a holiday the list always rides along, and "holiday" matches inside
+    // typos ("aholiday", 24 Nov: the list was left out and the model said it
+    // had none).
+    if (status.isHoliday || /holiday|chutti|\bclosed?\b|\b(yesterday|day before|which date|what date|on \d{1,2}\b|\d{4}-\d{2}-\d{2})\b/i.test(latestQuestion)) {
       lines.push(`Official NSE cash-market holiday calendar for 2026, from NSE's trading-holiday list that StockSaathi stores and uses for its market status (name that as your source if asked) (dates are IST; a Sunday/holiday may also have an exchange-announced special session): ${formatNseHolidayCalendar()}. For a date in this list, say the listed reason; do not infer a holiday from stale prices or missing data.`);
     }
   }
