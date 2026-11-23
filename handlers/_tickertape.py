@@ -72,14 +72,18 @@ def lookup_sid(nse_symbol):
             if sid:
                 _sid_cache[nse_symbol] = sid
                 return sid
-    # Fallback: first result if it's NSE-listed (loose match).
+    # Same ticker on another exchange (BSE-only listings).
     for r in results:
         info = (r.get("stock") or {}).get("info") or {}
-        if (info.get("exchange") or "").upper() == "NSE":
+        if (info.get("ticker") or "").upper() == nse_symbol.upper():
             sid = r.get("sid")
             if sid:
                 _sid_cache[nse_symbol] = sid
                 return sid
+    # No loose "first result" fallback. Until 24 Nov 2026 a symbol with no
+    # exact match took the first search hit, so "CONS" stored TCS's numbers,
+    # "DRA" Kotak Bank's and "NSE" Bajaj Finserv's: 121 stock pages showed
+    # another company's fundamentals. No match means no data.
     return None
 
 

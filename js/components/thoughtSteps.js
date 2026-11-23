@@ -146,6 +146,11 @@ function receipt(name, facts) {
 export function traceStep(trace, st) {
   if (!trace || !st) return;
   const last = trace.groups[trace.groups.length - 1];
+  if (st.action !== "figure_check") {
+    for (const g of trace.groups) for (const x of g.steps) {
+      if (x.name === "check" && x.state === "run") { x.state = "done"; x.label = "Double-checked the numbers"; x.ms = Date.now() - x.t; }
+    }
+  }
   if (st.action === "narration" && st.text) {
     trace.groups.push({ text: clip(st.text, 220), steps: [] });
   } else if (st.action === "tool_calls") {
@@ -171,7 +176,7 @@ export function traceStep(trace, st) {
 }
 
 // Summaries can mention the instructions; those lines are never shown.
-const HIDE_RE = /\b(system prompt|system message|instructions?|the rules?|tools?|function call|app context|context block|stocksaathi_|json|the user)\b|<\/?\w+>/i;
+const HIDE_RE = /\b(system prompt|system message|the system|instructions?|the rules?|tools?|function call|app context|context block|dossier|runtime|the brief|stocksaathi_|json|the user|the student|lookup record)\b|<\/?\w+>/i;
 // The model's thinking summary streams in pieces. Each finished sentence
 // becomes one thought line (GR-1's narration lines, the owner's "thinking
 // breakdown"); lines that talk about the setup are dropped.
@@ -272,8 +277,10 @@ function lookups(trace) { return trace.groups.flatMap((g) => g.steps).filter((s)
 // The empty live block. paintLiveTrace() fills it and then patches only what
 // changed: redrawing it whole twice a second restarted every animation and
 // made it flicker (owner, 24 Nov).
-export function liveTraceHtml() {
-  return `<div class="ts-live" role="status" aria-live="polite"><div class="ts-head"><span class="ts-wico" aria-hidden="true">${BRAIN}</span><span class="ts-word"></span><span class="ts-pill is-done ts-count" hidden></span><span class="ts-secs"></span></div><ol class="ts-thoughts"></ol><div class="ts-groups"></div><div class="ts-bar" hidden><i></i></div></div>`;
+export function liveTraceHtml(trace = null, { hinglish = false } = {}) {
+  const words = hinglish ? WORDS_HI : WORDS_EN;
+  const word = trace ? words[Math.floor((Date.now() - trace.t0) / WORD_MS) % words.length] : words[0];
+  return `<div class="ts-live" role="status" aria-live="polite"><div class="ts-head"><span class="ts-wico" aria-hidden="true">${BRAIN}</span><span class="ts-word">${esc(word)}</span><span class="ts-pill is-done ts-count" hidden></span><span class="ts-secs">${trace ? secs(trace) + "s" : ""}</span></div><ol class="ts-thoughts"></ol><div class="ts-groups"></div><div class="ts-bar" hidden><i></i></div></div>`;
 }
 
 export function paintLiveTrace(host, trace, { hinglish = false } = {}) {

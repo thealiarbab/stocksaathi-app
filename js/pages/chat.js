@@ -9,7 +9,7 @@ import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
 import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
-import { runAgent, streamChat, needsLiveData, callsAppContextFake, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
+import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
 import { getNews } from "../data/news.js";
@@ -214,10 +214,13 @@ function clipQuote(t) {
   return s.length > 600 ? s.slice(0, 599) + "…" : s;
 }
 function quoteChipHtml() {
+  if (pendingQuote && _quoteChatId && _quoteChatId !== getActiveSession(sessionsData)?.id) pendingQuote = null;
   if (!pendingQuote) return `<div class="cc-quote-chip" id="cc-quote-chip" hidden></div>`;
   return `<div class="cc-quote-chip" id="cc-quote-chip"><span class="cc-quote-ico" aria-hidden="true">${QUOTE_ICON}</span><span class="cc-quote-t">${escapeHtml(pendingQuote)}</span><button type="button" class="cc-quote-x" aria-label="Remove quote">&times;</button></div>`;
 }
+let _quoteChatId = null;
 function setQuote(q) {
+  _quoteChatId = q ? (getActiveSession(sessionsData)?.id || null) : null;
   pendingQuote = q ? clipQuote(q) : null;
   const host = _host?.querySelector("#cc-quote-chip");
   if (!host) return;
@@ -1662,7 +1665,7 @@ export function chartCard(c) {
 function liveBotBody(m) {
   const hinglish = !!getState()?.settings?.hinglish;
   if (!m.trace) return m.status ? statusHtml(m.text) : renderMarkdown(hideChartMarkers(m.text));
-  if (m.status || !m.text) return liveTraceHtml();
+  if (m.status || !m.text) return liveTraceHtml(m.trace, { hinglish });
   return foldedTraceHtml(m.trace, rememberTrace(m.trace)) + renderMarkdown(hideChartMarkers(m.text));
 }
 // Fold rows find their trace by a small id (traces live on the messages).
@@ -2071,7 +2074,7 @@ Reply in English.`;
     // The bubble exists from the first moment, and ticks (rotating word,
     // seconds) until the answer starts.
     showLive("", true);
-    const traceTick = setInterval(() => { if (live && live.status) paintLive(); }, 600);
+    const traceTick = setInterval(() => { if (live && (live.status || !live.text)) paintLive(); }, 600);
     let reasonRaf = false;
     const onReasoning = (d) => {
       traceReasoning(trace, d);
@@ -2133,6 +2136,7 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
         onStep: (st) => {
           collectLookupStep(st);
           traceStep(trace, st);
+          if (st.action === "tool_calls" || st.action === "figure_check") trace.answerAt = 0;
           if (st.action === "tool_calls") showLive(toolStatus(st.calls), true);
           else if (st.action === "figure_check") showLive("Double-checking the numbers…", true);
           else if (st.action === "tool_results" || st.action === "narration") paintLive();
@@ -2199,29 +2203,6 @@ You already offered to look this up and the user already asked. Do NOT ask again
           || looksLikePricelessList(cleanRetry, userText);
         if (cleanRetry && cleanRetry.trim() && !retryStillBad) cleanedReply = cleanRetry;
       } catch (e) { console.warn("[chat] lookup-offer retry failed:", e?.message || e); }
-    }
-    // The app context block is the server's, every turn. A reply that calls it
-    // pasted or untrustworthy is wrong by construction: run it once more with
-    // the correction, and never keep the bad text (24 Nov 2026).
-    if (callsAppContextFake(cleanedReply)) {
-      recheck();
-      try {
-        const retry = await withDeadline(runAgent({
-          apiKey: state.settings.llmApiKey || null,
-          system: system + `
-
-# THIS TURN
-Your draft called the app context block pasted or unverifiable. That is wrong: StockSaathi's server adds it to every message and removes the tag from anything the student types. Answer the student's latest message again, relying on the block's facts. If they asked who added it, say the app adds it to every message; they did not paste it.`,
-          messages, profile: "fast",
-          onStep: collectLookupStep,
-        }), 12_000);
-        const cleanRetry = stripScaffolding(retry);
-        if (cleanRetry && cleanRetry.trim() && !callsAppContextFake(cleanRetry)) cleanedReply = cleanRetry;
-        else cleanedReply = "The time, market status and your portfolio come from the app itself: it adds them to every message you send, so you didn't paste anything. Ask me again and I'll answer from them.";
-      } catch (e) {
-        console.warn("[chat] app-context retry failed:", e?.message || e);
-        cleanedReply = "The time, market status and your portfolio come from the app itself: it adds them to every message you send, so you didn't paste anything. Ask me again and I'll answer from them.";
-      }
     }
     cleanedReply = await finishReply(cleanedReply, userText, system, messages, collectLookupStep);
     let finalText = (cleanedReply && cleanedReply.trim()) ? cleanedReply : (errorText || "Saathi couldn't answer that. Try rephrasing or asking again.");

@@ -60,3 +60,13 @@ revoke all on function public.coach_screen_stocks(text,text,text,numeric,numeric
 revoke all on function public.coach_market_movers(text,int,numeric) from public;
 grant execute on function public.coach_screen_stocks(text,text,text,numeric,numeric,numeric,int) to anon, authenticated;
 grant execute on function public.coach_market_movers(text,int,numeric) to anon, authenticated;
+
+-- 2026-11-24b (applied the same day): sector words map to a pattern over
+-- sector + industry. The store mixes two naming schemes ("Financials" /
+-- "Financial Services", "Information Technology" / "Technology"), and a plain
+-- substring match made "IT" match "Utilities". See the live definitions of
+-- public._coach_sector_pattern(text) and public.coach_screen_stocks(...).
+-- Also on 24 Nov: 121 fundamentals_cache rows that held ANOTHER company's
+-- numbers (loose Tickertape match, fixed in handlers/_tickertape.py) were
+-- blanked (source = 'cleared_mismatch_2026_11_24') and their tickertape_sids
+-- reset to '' so the daily refresh re-resolves them by exact ticker.

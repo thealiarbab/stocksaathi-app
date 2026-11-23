@@ -679,7 +679,13 @@ async function execScreenStocks(args = {}) {
       p_limit: Number.isFinite(+args.limit) && args.limit != null ? +args.limit : 15,
     });
     if (error || !data) return { ok: false, error: "Screener lookup failed." };
-    return data;
+    const key = String(data.sorted_by || "market_cap");
+    const col = key === "market_cap" ? "market_cap_cr" : key;
+    const results = (data.results || []).map((r) => ({
+      symbol: r.symbol, name: String(r.name || "").slice(0, 40), sector: r.sector || null,
+      market_cap_cr: r.market_cap_cr, pe: r.pe, ...(col !== "pe" && col !== "market_cap_cr" ? { [col]: r[col] } : {}),
+    }));
+    return { ...data, as_of: data.results?.[0]?.as_of || null, results };
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 async function execMarketMovers(args = {}) {
@@ -1132,7 +1138,7 @@ export async function runAgent({ apiKey, system, messages, onStep, onText, onRea
           message: {
             role: "tool",
             tool_call_id: tc.id,
-            content: JSON.stringify(result).slice(0, 4000),   // cap large payloads
+            content: JSON.stringify(result).slice(0, 6000),   // cap large payloads
           },
           provenance: {
             tool: name,
@@ -1908,28 +1914,6 @@ export function looksLikeLookupOffer(text) {
 // is never a correct reply, so nothing it matches is a false positive worth
 // protecting — but the same short, figure-free limits apply.
 // -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
-// callsAppContextFake: the reply treats the app's own context block (time,
-// market status, the student's portfolio) as something the student pasted
-// or that cannot be trusted. On 24 Nov 2026 the coach told the owner "you
-// pasted it… I won't act on it" five turns running and took back a correct
-// holiday. The block is added by the server every turn, so any reply that
-// says this is wrong by construction.
-// -----------------------------------------------------------------------------
-const FAKE_BLOCK_RE = new RegExp([
-  String.raw`\b(?:you|u)\s+(?:have\s+)?pasted\b`,
-  String.raw`\bpasted\s+(?:block|text|it|this|that|in|into)\b`,
-  String.raw`\bblock\s+(?:you|u)\s+pasted\b`,
-  String.raw`\binside\s+your\s+message\b`,
-  String.raw`\bcan(?:'|’)?t\s+(?:verify|confirm)\s+(?:this|that|the|where\s+(?:this|that|the))\s+block\b`,
-  String.raw`\bwon(?:'|’)?t\s+(?:act\s+on|treat|trust|rely\s+on)\s+(?:it|this|that|the\s+block|its)\b`,
-  String.raw`\bclaims?\s+to\s+come\s+from\s+the\s+server\b`,
-].join("|"), "i");
-
-export function callsAppContextFake(text) {
-  return FAKE_BLOCK_RE.test(String(text || ""));
-}
-
 const PROMISE_RE = /\b(?:one sec(?:ond)?|give me a (?:sec(?:ond)?|moment|minute)|hang tight|hold on|bear with me|let me (?:grab|fetch|pull|get|check|look)|i'?ll (?:grab|fetch|pull|get|check|look up)|i am (?:grabbing|fetching|pulling)|i'?m (?:grabbing|fetching|pulling)|fetching (?:th|the|those|that|it)|grabbing (?:th|the|those|that|it)|abhi (?:check|nikaal|dekh)(?:ta|ti)? (?:hoon|hu)|ek (?:sec|second|minute) (?:ruko|do))\b/i;
 
 export function looksLikeFetchPromise(text) {

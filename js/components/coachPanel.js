@@ -865,7 +865,7 @@ function renderMessagesHtml(state) {
     const card = preview && m.card ? cardHtml(m.card) : "";
     // Thinking: an empty host the live row is patched into (no redraws).
     if (m.streaming && m.trace && !String(m.text || "").trim()) {
-      return `<div class="cc-row cc-row-bot"><span class="cc-avatar" aria-hidden="true">S</span><div class="cc-bot-col"><div class="cc-bubble cc-bot"><span class="msg-body" data-pc-live>${liveTraceHtml()}</span></div></div></div>`;
+      return `<div class="cc-row cc-row-bot"><span class="cc-avatar" aria-hidden="true">S</span><div class="cc-bot-col"><div class="cc-bubble cc-bot"><span class="msg-body" data-pc-live>${liveTraceHtml(m.trace, { hinglish: !!getState()?.settings?.hinglish })}</span></div></div></div>`;
     }
     const fold = m.trace ? foldedTraceHtml(m.trace, rememberPanelTrace(m.trace)) : "";
     const textHtml = `${fold}<div class="cc-bubble cc-bot ${card && !m.cardWithText ? "sr-only" : ""}"><span class="msg-body">${renderMarkdown(hideChartMarkers(m.text))}</span></div>`;

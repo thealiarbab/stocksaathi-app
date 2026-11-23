@@ -978,8 +978,8 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 .ts-tick { width: 16px; height: 16px; color: var(--text-dim); }
 .ts-step.is-done .ts-tick { color: var(--positive); animation: tsPop 420ms cubic-bezier(.3,1.6,.5,1) both; }
 .ts-step.is-fail .ts-tick { color: var(--negative); }
-.ts-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
-.ts-label { font-size: var(--text-sm); font-weight: 650; color: var(--text-strong); overflow-wrap: anywhere; }
+.ts-step .ts-text, .ts-batch-head .ts-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
+.ts-step .ts-label, .ts-batch-head .ts-label { font-size: var(--text-sm); font-weight: 650; color: var(--text-strong); overflow-wrap: anywhere; }
 .ts-step.is-run .ts-label { color: var(--text); }
 .ts-sub { font-size: var(--text-xs); color: var(--text-dim); }
 .ts-right { flex: none; margin-left: 6px; text-align: right; }
@@ -1087,7 +1087,7 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 .ts-batch-head[hidden] { display: none; }
 .ts-batch-head:hover { background: color-mix(in srgb, var(--text-dim) 8%, transparent); }
 .ts-batch-head:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.ts-batch-head .ts-text { flex: 0 0 auto; }
+.ts-batch-head .ts-text.ts-text { flex: 0 0 auto; }
 .ts-batch-head .ts-tick { color: var(--positive); }
 .ts-tape {
   flex: 1 1 auto; min-width: 0; display: flex; gap: 5px; overflow: hidden; justify-content: flex-end;
@@ -1116,7 +1116,7 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 @media (prefers-reduced-motion: reduce) { .ts-batch-body, .ts-chev2, .ts-tape-i { transition: none; animation: none; } }
 
 /* Sidebar width handle (desktop): drag, arrow keys, double-click to reset. */
-.cc-side { position: relative; }
+@media (min-width: 901px) { .cc-side { position: relative; } }
 .cc-side-grip {
   position: absolute; top: 0; right: -4px; bottom: 0; width: 9px; z-index: 3;
   cursor: col-resize; touch-action: none; outline: none;
