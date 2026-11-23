@@ -87,6 +87,14 @@ jobs:
       - name: Behaviour detectors — biasCore regression suite
         run: node scripts/test-bias-core.mjs
 
+      # Saathi must never call the app's own context block pasted (24 Nov).
+      - name: Coach — app context guard + lookup provenance
+        run: node scripts/test-app-context-guard.mjs && node scripts/test-coach-provenance.mjs
+
+      # Every list uses the site pick sheet, never a native select (24 Nov).
+      - name: No native select
+        run: node scripts/check-no-select.mjs
+
       # The report card score: edge cases (no trades, only buys, all evens,
       # one huge position, all cash, a split in the price history), the rules
       # it is built on, and every sentence in English and Hinglish.

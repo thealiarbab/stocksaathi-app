@@ -33,7 +33,7 @@ const context = lookupProvenanceContext(records);
 assert.match(context, /"tool":"get_stock_price","status":"returned","subject":"TCS"/);
 assert.match(context, /"tool":"get_stock_price","status":"failed","subject":"FAKE"/);
 assert.match(context, /"price_inr":2269\.3/);
-assert.match(context, /does not prove every sentence was accurate/);
+assert.doesNotMatch(context, /Internal instruction/);
 assert.doesNotMatch(context, /user@example\.com/);
 assert.equal(lookupProvenanceContext([]), "");
 assert.match(withLookupProvenance("Earlier answer.", records), /^Earlier answer\.\n\n<stocksaathi_lookup_provenance>/);

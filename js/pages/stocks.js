@@ -5,6 +5,7 @@
 import { STOCKS, MUTUAL_FUNDS, SECTORS, INSTRUMENTS, getAllInstruments, getAllSectors, getInstrument, ensureUniverseLoaded, ensureMfUniverseLoaded, getMfCategoryBuckets, getCanonicalCategory, getCanonicalCategoryCounts } from "../data/universe.js";
 import { getTodayChange, marketStatus } from "../data/prices.js";
 import { get52wReal, request52w, on52wLoaded } from "../data/range52w.js";
+import { mountThemedSelect } from "../components/themedSelect.js";
 import { getQuoteBatch, getDataSource, subscribeToQuotes, getCachedQuotes, getFreshCachedQuotes, getIntradaySparkline } from "../data/marketData.js";
 import { sparkline } from "../components/charts.js";
 import { formatRupees, formatPct, deltaClass } from "../money.js";
@@ -1132,19 +1133,12 @@ export function renderStocks(main) {
       { value: "name",      label: "Name A–Z" },
     ];
     const onSort = v => { filter.sort = v; _sortChosen = true; visibleCount = PAGE_SIZE; render(); };
-    // A failed chunk fetch (flaky network, or a deploy mid-visit; 5 times on
-    // 24 Oct) used to leave no sort control at all: retry once, then fall
-    // back to a plain <select>.
-    import("../components/themedSelect.js").catch(() => import("../components/themedSelect.js?retry=1")).then(({ mountThemedSelect }) => {
+    // The sort control is the site's pick sheet (themedSelect is a static
+    // import now, so a flaky lazy fetch can no longer leave no control).
+    {
       const host = main.querySelector("#stocks-sort");
-      if (host) mountThemedSelect(host, { value: filter.sort, options: sortOptions, onChange: onSort });
-    }).catch(() => {
-      const host = main.querySelector("#stocks-sort");
-      if (!host) return;
-      host.innerHTML = `<select class="input" aria-label="Sort stocks">${sortOptions.map(o =>
-        `<option value="${o.value}"${o.value === filter.sort ? " selected" : ""}>${o.label}</option>`).join("")}</select>`;
-      host.querySelector("select").addEventListener("change", e => onSort(e.target.value));
-    });
+      if (host) mountThemedSelect(host, { value: filter.sort, options: sortOptions, onChange: onSort, title: "Sort stocks by" });
+    }
     main.querySelectorAll("[data-sector]").forEach(btn => btn.addEventListener("click", () => { filter.sector = btn.dataset.sector; visibleCount = PAGE_SIZE; render(); }));
     // Hotfix65a: view toggle (Tiles / Cards). renderList() rebuilds the
     // grid host with the new mode's stub HTML; the IO re-fires for

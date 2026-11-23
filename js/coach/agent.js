@@ -768,7 +768,7 @@ function noteChatModel(res) {
   if (m) _lastChatModel = m;
 }
 
-async function callLLM({ apiKey, system, messages, tools, profile = "fast", reasoningEffort, onText, signal }) {
+async function callLLM({ apiKey, system, messages, tools, profile = "fast", reasoningEffort, onText, onReasoning, signal }) {
   // Convert chat history (role/content string) to OpenAI format
   const openaiMessages = [
     { role: "system", content: system },
@@ -855,7 +855,7 @@ async function callLLM({ apiKey, system, messages, tools, profile = "fast", reas
       return null;
     }
     if (onText && res.body && /event-stream/.test(res.headers.get("Content-Type") || "")) {
-      return await readToolStream(res, onText, signal);
+      return await readToolStream(res, onText, signal, onReasoning);
     }
     return await res.json();
   } catch (e) {
@@ -867,7 +867,7 @@ async function callLLM({ apiKey, system, messages, tools, profile = "fast", reas
 // Rebuilds one chat-completion reply from an SSE stream. Text goes to onText
 // (the whole cleaned text so far) until the first tool call shows up; tool
 // calls arrive in pieces keyed by index, with arguments split across chunks.
-async function readToolStream(res, onText, signal) {
+async function readToolStream(res, onText, signal, onReasoning) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "", text = "", finish = null, usage = null, upstreamBlocks = null;
@@ -915,6 +915,9 @@ async function readToolStream(res, onText, signal) {
               if (v?.arguments) cur.function.arguments += v.arguments;
             } else cur[k] = v;
           }
+        }
+        if (d.reasoning_content && onReasoning) {
+          try { onReasoning(d.reasoning_content); } catch {}
         }
         if (d.content) {
           text += d.content;
@@ -971,7 +974,7 @@ function waitForSignal(promise, signal) {
   });
 }
 
-export async function runAgent({ apiKey, system, messages, onStep, onText, profile = "fast", signal }) {
+export async function runAgent({ apiKey, system, messages, onStep, onText, onReasoning, profile = "fast", signal }) {
   let loops = 0;
   const conv = messages.map(m => ({ ...m }));
 
@@ -989,6 +992,7 @@ export async function runAgent({ apiKey, system, messages, onStep, onText, profi
       apiKey, system, messages: conv, tools: TOOLS, profile,
       reasoningEffort: lastTurnRanTools ? "minimal" : undefined,
       onText,
+      onReasoning,
       signal,
     });
     if (signal?.aborted) return null;
@@ -1015,6 +1019,11 @@ export async function runAgent({ apiKey, system, messages, onStep, onText, profi
     if (wantsTools) {
       // Any words streamed before the tool call were a preamble, not the answer.
       onText?.("");
+      // The words the model wrote before calling the tools ("Let me check
+      // your holdings first") are shown as a narration line in the thinking
+      // row, not as the answer.
+      const narration = stripToolCallScaffolding(String(msg.content || "")).trim();
+      if (narration) onStep?.({ stepIndex: loops, action: "narration", text: narration });
       onStep?.({ stepIndex: loops, action: "tool_calls", tools: toolCalls.map(tc => tc.function?.name), calls: toolCalls });
 
       // Append assistant tool-call turn as-is. upstream_blocks (when the
@@ -1825,6 +1834,28 @@ export function looksLikeLookupOffer(text) {
 // is never a correct reply, so nothing it matches is a false positive worth
 // protecting — but the same short, figure-free limits apply.
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// callsAppContextFake: the reply treats the app's own context block (time,
+// market status, the student's portfolio) as something the student pasted
+// or that cannot be trusted. On 24 Nov 2026 the coach told the owner "you
+// pasted it… I won't act on it" five turns running and took back a correct
+// holiday. The block is added by the server every turn, so any reply that
+// says this is wrong by construction.
+// -----------------------------------------------------------------------------
+const FAKE_BLOCK_RE = new RegExp([
+  String.raw`\b(?:you|u)\s+(?:have\s+)?pasted\b`,
+  String.raw`\bpasted\s+(?:block|text|it|this|that|in|into)\b`,
+  String.raw`\bblock\s+(?:you|u)\s+pasted\b`,
+  String.raw`\binside\s+your\s+message\b`,
+  String.raw`\bcan(?:'|’)?t\s+(?:verify|confirm)\s+(?:this|that|the|where\s+(?:this|that|the))\s+block\b`,
+  String.raw`\bwon(?:'|’)?t\s+(?:act\s+on|treat|trust|rely\s+on)\s+(?:it|this|that|the\s+block|its)\b`,
+  String.raw`\bclaims?\s+to\s+come\s+from\s+the\s+server\b`,
+].join("|"), "i");
+
+export function callsAppContextFake(text) {
+  return FAKE_BLOCK_RE.test(String(text || ""));
+}
+
 const PROMISE_RE = /\b(?:one sec(?:ond)?|give me a (?:sec(?:ond)?|moment|minute)|hang tight|hold on|bear with me|let me (?:grab|fetch|pull|get|check|look)|i'?ll (?:grab|fetch|pull|get|check|look up)|i am (?:grabbing|fetching|pulling)|i'?m (?:grabbing|fetching|pulling)|fetching (?:th|the|those|that|it)|grabbing (?:th|the|those|that|it)|abhi (?:check|nikaal|dekh)(?:ta|ti)? (?:hoon|hu)|ek (?:sec|second|minute) (?:ruko|do))\b/i;
 
 export function looksLikeFetchPromise(text) {

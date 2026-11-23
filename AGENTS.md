@@ -100,6 +100,14 @@ still needs his approval for a history rewrite.
   `scripts\smoke.cmd` (it detects the bundle), then undo with
   `git checkout -- "*.html" sw.js` and delete `assets/`.
 
+## Lists and choices: the pick sheet, never a native select (24 Nov 2026)
+Every list, filter, sort or choice uses `js/components/pickSheet.js`
+(`openPickSheet` returns the picked value) or, for an inline trigger in a
+form or toolbar, `mountThemedSelect` (`js/components/themedSelect.js`, which
+opens the same sheet). Never a native `<select>`, `<datalist>` or browser
+menu: the OS paints those itself (the bright-blue list the owner banned).
+`scripts/check-no-select.mjs` fails smoke.cmd and CI if one appears.
+
 ## Order execution — SERVER-SIDE. Never make this client-driven again.
 
 Limit orders and AMOs are matched by `/api/match-orders` (`handlers/match-orders.py`)

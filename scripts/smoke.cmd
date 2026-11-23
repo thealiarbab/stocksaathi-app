@@ -5,5 +5,6 @@ setlocal
 set "PLAYWRIGHT_BROWSERS_PATH=%LOCALAPPDATA%\claude-seo\ms-playwright"
 set "PY=%LOCALAPPDATA%\claude-seo\.venv\Scripts\python.exe"
 if not exist "%PY%" set "PY=python"
+node "%~dp0check-no-select.mjs" || exit /b 1
 "%PY%" "%~dp0smoke_test.py" %*
 exit /b %ERRORLEVEL%

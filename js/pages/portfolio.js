@@ -30,6 +30,7 @@ import { stockChart, attachStockChartHover } from "../components/charts.js";
 import { attachChartZoom } from "../components/chartZoom.js";
 import { fetchDigest, cachedDigest } from "../features/portfolioDigest.js";
 import { computeTradeStats, returnSummary } from "../data/tradeStats.js";
+import { openPickSheet } from "../components/pickSheet.js";
 
 let newsItems = [];
 let quoteCache = {};
@@ -860,8 +861,20 @@ export function renderPortfolio(main) {
         if (a === "toggle" && !actView.open) main.querySelector("#pf-activity")?.scrollIntoView({ block: "nearest" });
       });
     });
-    const actSym = main.querySelector("[data-act-sym]");
-    if (actSym) actSym.addEventListener("change", () => { actView.sym = actSym.value; actView.limit = ACT_PAGE; render(); });
+    main.querySelector("[data-act-sym]")?.addEventListener("click", async () => {
+      const st = getState();
+      const counts = new Map();
+      for (const t of st.transactions) counts.set(t.symbol, (counts.get(t.symbol) || 0) + 1);
+      const options = [
+        { value: "", label: "All stocks", meta: `${st.transactions.length}` },
+        ...[...counts.entries()]
+          .map(([s, n]) => ({ value: s, label: shortName(getInstrument(s)?.name || s), meta: `${n} trade${n === 1 ? "" : "s"}` }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
+      ];
+      const picked = await openPickSheet({ title: "Show trades for", options, value: actView.sym, searchPlaceholder: "Search your stocks" });
+      if (picked === null || cancelled) return;
+      actView.sym = picked; actView.limit = ACT_PAGE; render();
+    });
     loadActQuotes(() => { if (!cancelled) render(); });
     main.querySelectorAll("[data-cancel-order]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -1034,6 +1047,17 @@ function loadActQuotes(onDone) {
   }).catch(() => {});
 }
 
+// "Tata Banking & Financial Services Fund - Direct Plan - Growth Option" ->
+// "Tata Banking & Financial Services Fund"; "Reliance Industries Limited" ->
+// "Reliance Industries". For the filter chip and its sheet only.
+function shortName(n) {
+  return String(n || "")
+    .replace(/\s*-\s*(?:Direct|Regular)\s+Plan.*$/i, "")
+    .replace(/\s*-\s*Growth(?:\s+Option)?$/i, "")
+    .replace(/\s+(?:Limited|Ltd\.?)$/i, "")
+    .trim() || String(n || "");
+}
+
 function fmtAgo(ms) {
   const d = Math.floor(ms / 86_400_000);
   if (d < 1) return "today";
@@ -1160,10 +1184,9 @@ function renderActivity(state) {
   return `
     <div class="pf-act-tools">
       <div class="pf-act-chips">${chip("all", "All")}${chip("BUY", "Buys")}${chip("SELL", "Sells")}</div>
-      <select class="pf-act-sym" data-act-sym aria-label="Filter by stock">
-        <option value="">All stocks</option>
-        ${syms.map(x => `<option value="${escapeAttr(x.s)}"${x.s === actView.sym ? " selected" : ""}>${escapeHtml(x.n)}</option>`).join("")}
-      </select>
+      <button type="button" class="pf-act-chip pf-act-sym${actView.sym ? " on" : ""}" data-act-sym aria-haspopup="dialog">
+        <span>${actView.sym ? escapeHtml(shortName(syms.find(x => x.s === actView.sym)?.n || actView.sym)) : "All stocks"}</span><span aria-hidden="true">▾</span>
+      </button>
     </div>
     <div class="pf-act-sum dim text-xs">
       ${plural(list.length, "trade")} · ${plural(buys.length, "buy")}${buys.length ? ` (${formatRupees(investedPaise, { compact: true })} put in)` : ""} · ${plural(sellsIn.length, "sell")}${priced.length ? ` (<span class="${deltaClass(bookedPaise)}">${formatRupees(bookedPaise, { sign: true, compact: true })}</span> booked, ${wins} at a profit)` : ""}

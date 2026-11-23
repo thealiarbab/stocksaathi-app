@@ -11,6 +11,7 @@ import { navigate } from "../router.js";
 import { toast } from "../components/toast.js";
 import { logEvent } from "../features/telemetry.js";
 import { heardConfig, openHeardPopup } from "../components/heardPopup.js";
+import { mountThemedSelect } from "../components/themedSelect.js";
 
 // "How did you hear about us?" is saved to profiles.heard_from before
 // moving past this step. The analytics event remains a secondary signal.
@@ -122,10 +123,7 @@ function renderStep(s) {
         </div>
         ${heardCard ? "" : `<div>
           <label class="label" for="f-heard">How did you hear about StockSaathi? (optional)</label>
-          <select class="input" id="f-heard">
-            <option value="">Choose one</option>
-            ${HEARD_FROM.map(([v, l]) => `<option value="${v}" ${form.heardFrom === v ? "selected" : ""}>${l}</option>`).join("")}
-          </select>
+          <div class="input" id="f-heard" aria-label="How did you hear about StockSaathi?"></div>
         </div>`}
       </div>
       <div class="flex gap-2 wrap justify-between" style="margin-top: var(--sp-5);">
@@ -166,6 +164,13 @@ function renderStep(s) {
 }
 
 function attachStepListeners(main) {
+  const heardHost = main.querySelector("#f-heard");
+  if (heardHost) mountThemedSelect(heardHost, {
+    value: form.heardFrom || "",
+    title: "How did you hear about StockSaathi?",
+    options: [{ value: "", label: "Choose one" }, ...HEARD_FROM.map(([v, l]) => ({ value: v, label: l }))],
+    onChange: (v) => { form.heardFrom = v; },
+  });
   main.querySelector("[data-next]")?.addEventListener("click", async (e) => {
     if (step === 1) {
       // The fields can be gone if the page re-rendered under a second tap

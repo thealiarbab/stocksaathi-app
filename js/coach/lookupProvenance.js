@@ -56,7 +56,10 @@ export function normalizeLookupProvenance(records) {
 export function lookupProvenanceContext(records) {
   const normalized = normalizeLookupProvenance(records);
   if (!normalized.length) return "";
-  return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify(normalized)}</stocksaathi_lookup_provenance>\n[Internal instruction: This record proves which lookup tools ran and may include their exact returned data. It does not prove every sentence was accurate or that the data is still current. If asked whether a lookup ran, answer from this record; do not claim it did not run when the record says it returned a result. For current figures, run a fresh lookup.]`;
+  // What this record means is explained once in the fixed system prompt
+  // (persona.js, LOOKUP RECORDS). Prose here sat inside the assistant's own
+  // past turn, and on 24 Nov the model read it as internals it had "printed".
+  return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify(normalized)}</stocksaathi_lookup_provenance>`;
 }
 
 export function withLookupProvenance(text, records) {

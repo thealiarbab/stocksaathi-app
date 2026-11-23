@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { escapeHtml } from "./adminCharts.js";
+import { mountThemedSelect } from "../components/themedSelect.js";
 
 const e = escapeHtml;
 const st = { data: null, dry: null, busy: false, show: "drafts" };
@@ -123,7 +124,7 @@ function paint(root, ctx) {
         <form class="ac-add">
           <b>Add a date</b> <span class="dim text-xs">(next year's Budget, RBI meetings, Diwali; seasonal achievements of that kind pick it up)</span>
           <div class="ac-add-row">
-            <select name="kind">${KINDS.map((k) => `<option>${k}</option>`).join("")}</select>
+            <input type="hidden" name="kind" value="${e(KINDS[0])}"><div class="select ac-kind" aria-label="Kind of date"></div>
             <input name="name" placeholder="Name, e.g. Union Budget 2028" required maxlength="80">
             <input name="starts_on" type="date" required>
             <input name="ends_on" type="date" title="End (optional)">
@@ -170,6 +171,12 @@ function wire(root, ctx) {
     } catch (err) { alert(String(err.message || err)); }
     ctx.load();
   }));
+  const kindHost = root.querySelector(".ac-kind");
+  if (kindHost) mountThemedSelect(kindHost, {
+    value: KINDS[0], title: "Kind of date",
+    options: KINDS.map((k) => ({ value: k, label: k })),
+    onChange: (v) => { const inp = root.querySelector('.ac-add input[name="kind"]'); if (inp) inp.value = v; },
+  });
   root.querySelector(".ac-add")?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);

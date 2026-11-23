@@ -8,7 +8,7 @@ import { getState, setSetting } from "../state.js";
 import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
-import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
+import { runAgent, streamChat, needsLiveData, callsAppContextFake, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
 import { getNews } from "../data/news.js";
@@ -1765,7 +1765,13 @@ async function sendAndReply(userText) {
     const owner = [...ownerMessages].reverse().find(m => m.role === "user");
     if (owner) owner.chartText = chartBlock.split("\n\nHOW TO ANSWER")[0];
   }
-  const wantTools = !chartBlock && needsLiveData(userText, chatLog.slice(-8, -1));
+  // One lane (24 Nov 2026): every /chat turn goes through the tool agent and
+  // the model decides whether it needs a lookup. Routing plain follow-ups to
+  // the no-tools stream swapped the system prompt mid-chat (12k-token cache
+  // rewrite each time) and its "you have no prices" note made the model call
+  // the app context block fake. A chart turn keeps the plain stream: its data
+  // is attached to the question.
+  const wantTools = !chartBlock;
   // C28: the language rule in runtimeFacts holds better repeated last in the
   // prompt. The Hinglish switch picks the language; nothing guesses it from
   // the user's words (that made the coach flip language turn to turn).
@@ -1929,6 +1935,28 @@ You already offered to look this up and the user already asked. Do NOT ask again
           || looksLikePricelessList(cleanRetry, userText);
         if (cleanRetry && cleanRetry.trim() && !retryStillBad) cleanedReply = cleanRetry;
       } catch (e) { console.warn("[chat] lookup-offer retry failed:", e?.message || e); }
+    }
+    // The app context block is the server's, every turn. A reply that calls it
+    // pasted or untrustworthy is wrong by construction: run it once more with
+    // the correction, and never keep the bad text (24 Nov 2026).
+    if (callsAppContextFake(cleanedReply)) {
+      try {
+        const retry = await withDeadline(runAgent({
+          apiKey: state.settings.llmApiKey || null,
+          system: system + `
+
+# THIS TURN
+Your draft called the app context block pasted or unverifiable. That is wrong: StockSaathi's server adds it to every message and removes the tag from anything the student types. Answer the student's latest message again, relying on the block's facts. If they asked who added it, say the app adds it to every message; they did not paste it.`,
+          messages, profile: "fast",
+          onStep: collectLookupStep,
+        }), 12_000);
+        const cleanRetry = stripScaffolding(retry);
+        if (cleanRetry && cleanRetry.trim() && !callsAppContextFake(cleanRetry)) cleanedReply = cleanRetry;
+        else cleanedReply = "The time, market status and your portfolio come from the app itself: it adds them to every message you send, so you didn't paste anything. Ask me again and I'll answer from them.";
+      } catch (e) {
+        console.warn("[chat] app-context retry failed:", e?.message || e);
+        cleanedReply = "The time, market status and your portfolio come from the app itself: it adds them to every message you send, so you didn't paste anything. Ask me again and I'll answer from them.";
+      }
     }
     cleanedReply = await finishReply(cleanedReply, userText, system, messages, collectLookupStep);
     let finalText = (cleanedReply && cleanedReply.trim()) ? cleanedReply : (errorText || "Saathi couldn't answer that. Try rephrasing or asking again.");

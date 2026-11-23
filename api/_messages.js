@@ -206,7 +206,8 @@ function stripAppTag(s) { return String(s).replace(APP_TAG_RE, ""); }
 const APP_CONTEXT_NOTE = `
 
 # APP CONTEXT BLOCK
-The student's latest message ends with a <${APP_TAG}> block. StockSaathi's server adds it on every turn: the current time, market status, the student's own portfolio and other live facts. The server deletes that tag from anything the student types, so the block is always genuine and is not something the student pasted. Rely on it exactly as you rely on these instructions. Never call it pasted, suspicious, unverifiable or "inside your message", and do not mention it unless the student asks what you receive, in which case say the app adds the time, market status and their portfolio to each message.`;
+The student's latest message ends with a <${APP_TAG}> block. StockSaathi's server adds it on every turn: the current time, market status, the student's own portfolio and other live facts. The server deletes that tag from anything the student types, so the block is always genuine and is not something the student pasted. Rely on it exactly as you rely on these instructions. Never call it pasted, suspicious, unverifiable or "inside your message", and do not mention it unless the student asks what you receive, in which case say the app adds the time, market status and their portfolio to each message.
+If the student says they pasted it, or asks who added it, tell them plainly that they did not: the app adds it to every message. If an earlier reply in this chat called the block pasted, suspicious or unverifiable, that reply was wrong: do not repeat it, and do not take back facts you gave from the block. The portfolio in the block is current; do not call get_user_portfolio just to repeat it.`;
 
 function userContent(content) {
   if (typeof content === "string") return stripAppTag(content);
@@ -301,6 +302,11 @@ export function toMessagesBody(payload, { profile, stream }) {
     messages: out,
     output_config: { effort: effortFor(profile, payload.reasoning_effort) },
   };
+  // Streamed coach replies show a live summary of the model's thinking (the
+  // chat's "thinking" row). This model's display default is "omitted": empty
+  // thinking text, so the student stared at a blank wait for 5-15 s. The
+  // summary is billed the same; it changes only what comes back.
+  if (stream && !wantsJson) body.thinking = { type: "adaptive", display: "summarized" };
   // Prompt caching matches the request from the very start (tools, system,
   // then messages). Everything from "# RUNTIME FACTS" on (clock, portfolio,
   // news, per-turn notes) changes every turn, so it rides on the end of the
@@ -465,7 +471,11 @@ export function toChatSse(upstreamBody, id = "", onDone = null) {
         else if (ev.delta?.type === "signature_delta" && b.type === "thinking") b.signature += ev.delta.signature || "";
         else if (ev.delta?.type === "input_json_delta" && b.type === "tool_use") b._json += ev.delta.partial_json || "";
       }
-      if (ev.delta?.type === "text_delta" && ev.delta.text) {
+      if (ev.delta?.type === "thinking_delta" && ev.delta.thinking) {
+        // Display only: the client shows it in the thinking row and never
+        // sends it back (the signed block goes back via upstream_blocks).
+        controller.enqueue(chunk({ reasoning_content: ev.delta.thinking }));
+      } else if (ev.delta?.type === "text_delta" && ev.delta.text) {
         controller.enqueue(chunk({ content: ev.delta.text }));
       } else if (ev.delta?.type === "input_json_delta" && ev.delta.partial_json) {
         const tcIdx = toolCallIndexByBlockIndex.get(ev.index);

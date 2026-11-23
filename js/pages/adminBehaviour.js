@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { xyChart, barList, escapeHtml, fmtInt } from "./adminCharts.js";
+import { mountThemedSelect } from "../components/themedSelect.js";
 
 const PREF_KEY = "ss.adminBehaviourPrefs.v1";
 // How often pg_cron (behaviour-cache) recalculates each range.
@@ -149,7 +150,7 @@ function paint() {
 
     ${card("Click map", "every click on the page, placed where it landed (darker = more)", `
       <div class="bh-mapbar">
-        <select id="bh-map-path" class="select">${mapPaths.map((p) => `<option value="${e(p)}" ${p === st.prefs.mapPath ? "selected" : ""}>${e(p || "/")}</option>`).join("")}</select>
+        <div id="bh-map-path" class="select" aria-label="Page" data-paths="${e(JSON.stringify(mapPaths))}"></div>
         <div class="sg-seg" id="bh-map-dev">${[["", "All"], ["mobile", "Phone"], ["tablet", "Tablet"], ["desktop", "Computer"]].map(([v, l]) => `<button data-v="${v}" class="${st.prefs.mapDev === v ? "on" : ""}">${l}</button>`).join("")}</div>
         <span class="dim text-xs" id="bh-map-n"></span>
       </div>
@@ -287,6 +288,12 @@ function wire() {
   h.querySelectorAll("#bh-days button").forEach((b) => b.addEventListener("click", () => {
     st.prefs.days = Number(b.dataset.v); savePrefs(); st.data = null; st.map = null; paint(); load();
   }));
+  const pathHost = h.querySelector("#bh-map-path");
+  if (pathHost) {
+    let paths = [];
+    try { paths = JSON.parse(pathHost.dataset.paths || "[]"); } catch {}
+    mountThemedSelect(pathHost, { value: st.prefs.mapPath, title: "Show clicks on", options: paths.map((p) => ({ value: p, label: p || "/" })) });
+  }
   h.querySelector("#bh-map-path")?.addEventListener("change", (ev) => { st.prefs.mapPath = ev.target.value; savePrefs(); drawMap(); loadMap(); });
   h.querySelectorAll("#bh-map-dev button").forEach((b) => b.addEventListener("click", () => {
     st.prefs.mapDev = b.dataset.v; savePrefs();
