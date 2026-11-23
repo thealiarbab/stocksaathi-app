@@ -8,6 +8,7 @@ import { getState, setSetting } from "../state.js";
 import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
+import { createTrace, traceStep, traceReasoning, liveTraceHtml, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
 import { runAgent, streamChat, needsLiveData, callsAppContextFake, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
@@ -448,6 +449,8 @@ export function renderChat(main, opts = {}) {
     });
 
     messagesEl.addEventListener("click", async (e) => {
+      const foldBtn = e.target.closest("[data-trace]");
+      if (foldBtn) { openTraceSheet(_traces.get(foldBtn.dataset.trace)); return; }
       const copyBtn = e.target.closest("[data-copy]");
       if (!copyBtn) return;
       const body = copyBtn.closest(".cc-row")?.querySelector(".msg-body");
@@ -1084,9 +1087,11 @@ function renderBubble(m) {
   // A streaming reply starts empty while the model thinks (about 3 s at high
   // effort). It used to render as nothing and hide the typing dots, so the
   // chat looked frozen until the first word arrived.
-  const textHtml = m.text ? `<div class="${textCls}"><span class="msg-body">${body}</span></div>`
+  let textHtml = m.text ? `<div class="${textCls}"><span class="msg-body">${body}</span></div>`
     : m.streaming ? `<div class="cc-bubble cc-bot"><span class="msg-body">${statusHtml("Thinking…")}</span></div>` : "";
-  return `<div class="cc-row cc-row-bot"${streamAttr} data-i="${i}"><div class="cc-bot-col">${m.cardWithText ? textHtml + card : card + textHtml}${actions}</div></div>`;
+  if (m.streaming && m.trace) textHtml = `<div class="cc-bubble cc-bot"><span class="msg-body">${liveBotBody(m)}</span></div>`;
+  const fold = !m.streaming && m.trace ? foldedTraceHtml(m.trace, rememberTrace(m.trace)) : "";
+  return `<div class="cc-row cc-row-bot"${streamAttr} data-i="${i}"><div class="cc-bot-col">${fold}${m.cardWithText ? textHtml + card : card + textHtml}${actions}</div></div>`;
 }
 
 // ---- Scrolling -------------------------------------------------------------------
@@ -1484,6 +1489,23 @@ export function chartCard(c) {
   </figure>`;
 }
 
+// The live reply bubble: the thinking row until the answer starts, then the
+// folded row and the answer streaming under it.
+function liveBotBody(m) {
+  const hinglish = !!getState()?.settings?.hinglish;
+  if (!m.trace) return m.status ? statusHtml(m.text) : renderMarkdown(hideChartMarkers(m.text));
+  if (m.status || !m.text) return liveTraceHtml(m.trace, { hinglish });
+  return foldedTraceHtml(m.trace, rememberTrace(m.trace)) + renderMarkdown(hideChartMarkers(m.text));
+}
+// Fold rows find their trace by a small id (traces live on the messages).
+const _traces = new Map();
+let _traceSeq = 0;
+function rememberTrace(t) {
+  if (!t.__id) Object.defineProperty(t, "__id", { value: String(++_traceSeq), enumerable: false });
+  _traces.set(t.__id, t);
+  return t.__id;
+}
+
 // "Checking TCS price…" while tools run: a pulsing dot, not a reply.
 function statusHtml(text) {
   return `<span class="cc-status" role="status"><i aria-hidden="true"></i>${escapeHtml(text)}</span>`;
@@ -1801,12 +1823,16 @@ Reply in English.`;
     // Live bubble: a status line while tools run ("Checking TCS price…"),
     // then the answer as it streams. The finished reply replaces its text.
     let live = null;
+    // GR-1-style thinking row (components/thoughtSteps.js): rotating word,
+    // the model's narration, the lookups as ticked steps with receipts.
+    const trace = createTrace();
     const showLive = (t, isStatus) => {
       if (!live) {
-        live = { role: "assistant", text: "", ts: nextTs(ownerMessages), streaming: true };
+        live = { role: "assistant", text: "", ts: nextTs(ownerMessages), streaming: true, status: true, trace };
         ownerMessages.push(live);
         reRenderOuter();
       }
+      if (!isStatus && t && !trace.answerAt) trace.answerAt = Date.now();
       // Status lines show at once; answer text streams directly via requestAnimationFrame.
       liveTarget = isStatus ? "" : t;
       live.text = t || "";
@@ -1827,9 +1853,20 @@ Reply in English.`;
       if (!isOwnerActive() || !live) return;
       const bubble = outer?.querySelector('#chat-messages [data-streaming="1"] .msg-body');
       if (!bubble) { reRenderOuter(); return; }
-      bubble.innerHTML = live.status ? statusHtml(live.text) : renderMarkdown(hideChartMarkers(live.text));
+      bubble.innerHTML = liveBotBody(live);
       const msgs = outer?.querySelector("#chat-messages");
       stickBottom(msgs);
+    };
+    // The bubble exists from the first moment, and ticks (rotating word,
+    // seconds) until the answer starts.
+    showLive("", true);
+    const traceTick = setInterval(() => { if (live && live.status) paintLive(); }, 600);
+    let reasonRaf = false;
+    const onReasoning = (d) => {
+      traceReasoning(trace, d);
+      if (reasonRaf) return;
+      reasonRaf = true;
+      requestAnimationFrame(() => { reasonRaf = false; if (live?.status) paintLive(); });
     };
     // DECLARED HERE, NOT INSIDE THE try BELOW.
     //
@@ -1876,10 +1913,13 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
         profile: "fast",
         signal,
         onText: (t) => showLive(t || "", false),
+        onReasoning,
         onStep: (st) => {
           collectLookupStep(st);
+          traceStep(trace, st);
           if (st.action === "tool_calls") showLive(toolStatus(st.calls), true);
           else if (st.action === "figure_check") showLive("Double-checking the numbers…", true);
+          else if (st.action === "tool_results" || st.action === "narration") paintLive();
         },
       });
     } catch (e) {
@@ -1971,7 +2011,9 @@ Your draft called the app context block pasted or unverifiable. That is wrong: S
       if (ownerMessages[i]?.role === "user" && ownerMessages[i].text === userText) { qIdx = i; break; }
     }
     const replyTs = qIdx >= 0 ? (ownerMessages[qIdx].ts || Date.now()) + 1 : Date.now();
+    clearInterval(traceTick);
     if (live) {
+      live.trace = freezeTrace(trace);
       live.text = finalText; live.streaming = false; live.status = false; live.ts = replyTs;
       Object.assign(live, chartExtra);
       const provenance = normalizeLookupProvenance(lookupProvenance);

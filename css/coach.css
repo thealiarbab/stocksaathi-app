@@ -947,3 +947,84 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 #coach-root .coach-embed-close { top: 5px; right: 6px; }
 #coach-root .coach-embed .cc-head .cc-id { display: none; }
 #coach-root .coach-embed .cc-head .coach-lang { flex: 0 0 auto; margin-right: auto; }
+
+/* ---------------------------------------------------------------------------
+   Thought steps (js/components/thoughtSteps.js): what Saathi is doing while
+   it works. Structure from Groww GR-1 (owner's screenshots, 24 Nov 2026) and
+   the owner's mockups; receipts, candle spinner and lookup count are ours.
+   --------------------------------------------------------------------------- */
+.ts-live { display: grid; gap: 10px; min-width: min(100%, 300px); }
+.ts-head { display: flex; align-items: center; gap: 8px; }
+.ts-wico { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; animation: tsWord 2.4s ease-in-out infinite; }
+.ts-wico svg { width: 15px; height: 15px; }
+.ts-w-chart { color: var(--brand); background: var(--brand-soft); }
+.ts-w-brain { color: var(--accent); background: var(--accent-soft); }
+.ts-w-calc { color: var(--positive); background: color-mix(in srgb, var(--positive) 14%, transparent); }
+.ts-w-spark { color: var(--warning); background: var(--warning-soft); }
+.ts-word {
+  font-weight: 700; font-size: var(--text-sm);
+  background: linear-gradient(90deg, var(--text-strong) 0%, var(--text-strong) 40%, var(--text-dim) 50%, var(--text-strong) 60%, var(--text-strong) 100%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: tsSweep 1.8s linear infinite;
+}
+.ts-secs { margin-left: auto; font-size: var(--text-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ts-think { display: flex; gap: 7px; align-items: flex-start; margin: 0; font-size: var(--text-xs); line-height: 1.45; color: var(--text-muted); }
+.ts-think svg { flex: none; width: 14px; height: 14px; margin-top: 1px; color: var(--accent); }
+.ts-think span { animation: tsIn 260ms var(--ease) both; }
+.ts-group { display: grid; gap: 6px; }
+.ts-narr { margin: 0; font-size: var(--text-sm); line-height: 1.5; color: var(--text); animation: tsIn 260ms var(--ease) both; }
+.ts-steps { list-style: none; margin: 0; padding: 0 0 0 14px; display: grid; gap: 8px; position: relative; }
+.ts-steps::before { content: ""; position: absolute; left: 3px; top: -2px; bottom: 8px; border-left: 1.5px solid var(--border); }
+.ts-step { display: flex; align-items: flex-start; gap: 9px; animation: tsIn 240ms var(--ease) both; }
+.ts-step:nth-child(2) { animation-delay: 60ms; } .ts-step:nth-child(3) { animation-delay: 120ms; } .ts-step:nth-child(4) { animation-delay: 180ms; } .ts-step:nth-child(n+5) { animation-delay: 240ms; }
+.ts-ico { flex: none; width: 16px; height: 16px; margin-top: 1px; display: grid; place-items: center; }
+.ts-tick { width: 16px; height: 16px; color: var(--text-dim); }
+.ts-step.is-done .ts-tick { color: var(--positive); animation: tsPop 420ms cubic-bezier(.3,1.6,.5,1) both; }
+.ts-step.is-fail .ts-tick { color: var(--negative); }
+.ts-text { flex: 1 1 auto; min-width: 0; display: grid; gap: 1px; }
+.ts-label { font-size: var(--text-sm); font-weight: 650; color: var(--text-strong); overflow-wrap: anywhere; }
+.ts-step.is-run .ts-label { color: var(--text); }
+.ts-sub { font-size: var(--text-xs); color: var(--text-dim); }
+.ts-right { flex: none; margin-left: 6px; text-align: right; }
+.ts-rcpt { display: inline-flex; flex-direction: column; align-items: flex-end; font-weight: 750; font-size: var(--text-sm); color: var(--text-strong); font-variant-numeric: tabular-nums; animation: tsIn 300ms var(--ease) both; }
+.ts-rcpt b { font-weight: 650; font-size: var(--text-xs); }
+.ts-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; line-height: 1.5; white-space: nowrap; }
+.ts-pill.is-done { color: var(--positive); background: color-mix(in srgb, var(--positive) 14%, transparent); }
+.ts-pill.is-run { color: var(--accent); background: var(--accent-soft); }
+.ts-pill.is-fail { color: var(--negative); background: color-mix(in srgb, var(--negative) 14%, transparent); }
+.ts-bar { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.ts-bar i { display: block; height: 100%; border-radius: inherit; background: var(--brand); transition: width 300ms var(--ease); }
+/* The candle spinner: three bars rising and falling in turn. */
+.ts-candle { display: inline-flex; align-items: flex-end; gap: 2px; width: 14px; height: 14px; }
+.ts-candle i { width: 3px; border-radius: 1px; background: var(--brand); animation: tsCandle 900ms ease-in-out infinite; }
+.ts-candle i:nth-child(1) { height: 50%; } .ts-candle i:nth-child(2) { height: 90%; animation-delay: 150ms; background: var(--negative); } .ts-candle i:nth-child(3) { height: 65%; animation-delay: 300ms; }
+/* Folded row above a finished answer. */
+.ts-fold {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start; margin: 0 0 6px;
+  padding: 5px 10px 5px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  color: var(--text-muted); font: 600 var(--text-xs)/1.3 var(--font-sans); cursor: pointer;
+  transition: border-color 150ms var(--ease), color 150ms var(--ease), background 150ms var(--ease);
+}
+.ts-fold:hover { color: var(--text-strong); border-color: var(--border-strong); background: var(--bg-soft); }
+.ts-fold:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ts-fold .ts-tick { color: var(--positive); width: 14px; height: 14px; }
+.ts-fold .ts-chev { font-size: 15px; line-height: 1; transition: transform 150ms var(--ease); }
+.ts-fold:hover .ts-chev { transform: translateX(2px); }
+.ts-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.msg-body > .ts-fold { display: flex; width: max-content; margin-bottom: 10px; }
+/* Replay sheet. */
+.ts-replay { display: grid; gap: 14px; max-height: min(60dvh, 520px); overflow-y: auto; overscroll-behavior: contain; }
+.ts-replay .ts-step { animation: none; }
+.ts-note { display: flex; gap: 9px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ts-note svg { flex: none; width: 16px; height: 16px; color: var(--accent); margin-top: 2px; }
+.ts-note p { margin: 0; font-size: var(--text-xs); line-height: 1.55; color: var(--text-muted); }
+.ts-note strong { color: var(--text-strong); }
+@keyframes tsSweep { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@keyframes tsIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes tsPop { 0% { transform: scale(.6); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes tsCandle { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.45); } }
+@keyframes tsWord { 0%, 100% { transform: none; } 50% { transform: translateY(-1px) rotate(-4deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ts-word { animation: none; color: var(--text-strong); background: none; }
+  .ts-wico, .ts-candle i, .ts-step, .ts-narr, .ts-think span, .ts-rcpt, .ts-step.is-done .ts-tick { animation: none; }
+}
