@@ -229,6 +229,22 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "read_chart",
+      description:
+        "Read a stock's daily price chart: first and latest close, change over the period, the high and low with their dates, 20-day and 50-day averages, up days, the biggest one-day move and recent volume. Use for 'read / explain / check the chart of X', 'how has X moved', 'is X in an uptrend'. To also SHOW the chart under your reply, add the [[chart SYMBOL RANGE]] marker.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "NSE ticker or company name." },
+          range: { type: "string", description: "1m | 3m (default) | 6m | 1y | 5y" },
+        },
+        required: ["symbol"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_market_movers",
       description:
         "Top gainers, top losers or most-traded NSE stocks for the latest session in NSE's official end-of-day file (the result says which date). Use for 'top gainers', 'biggest losers', 'what moved today/yesterday', 'most active stocks'.",
@@ -701,7 +717,57 @@ async function execMarketMovers(args = {}) {
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 
+// Chart reading as a lookup (24 Nov 2026). It used to be attached by a
+// keyword match on the student's text ("chart" + anything that looked like
+// a symbol), which charted the word "NSE" and switched the turn to the
+// no-lookups prompt.
+async function execReadChart(args = {}) {
+  const raw = String(args.symbol || "").trim();
+  const sym = resolveSymbolFuzzy(raw);
+  if (!sym) return { ok: false, error: `No NSE/BSE stock matches "${raw}". Use search_stocks to find the symbol.` };
+  const r0 = String(args.range || "3m").toLowerCase().replace(/\s/g, "");
+  const range = /^1m/.test(r0) ? "1mo" : /^6m/.test(r0) ? "6mo" : /^1y|^12m/.test(r0) ? "1y" : /^5y/.test(r0) ? "5y" : "3mo";
+  let bars = [];
+  try {
+    const res = await fetch(`/api/history?symbol=${encodeURIComponent(sym)}&range=${range}&interval=1d`);
+    const j = await res.json();
+    bars = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
+  } catch { return { ok: false, error: "Chart data could not be loaded right now." }; }
+  if (bars.length < 15) return { ok: false, error: `Not enough price history for ${sym}.` };
+  const inr = (p) => +(p / 100).toFixed(2);
+  const day = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+  const first = bars[0], last = bars[bars.length - 1];
+  let hi = bars[0], lo = bars[0], big = null, ups = 0;
+  for (let i = 0; i < bars.length; i++) {
+    if (bars[i].h > hi.h) hi = bars[i];
+    if (bars[i].l < lo.l) lo = bars[i];
+    if (i) {
+      const d = (bars[i].c - bars[i - 1].c) / bars[i - 1].c * 100;
+      if (d > 0) ups++;
+      if (!big || Math.abs(d) > Math.abs(big.d)) big = { d, t: bars[i].t };
+    }
+  }
+  const avg = (n) => { const xs = bars.slice(-n); return xs.reduce((a, b) => a + b.c, 0) / xs.length; };
+  const vol = (xs) => xs.reduce((a, b) => a + (b.v || 0), 0) / Math.max(1, xs.length);
+  const a20 = avg(20), a50 = bars.length >= 50 ? avg(50) : null;
+  return {
+    ok: true, symbol: sym, range, sessions: bars.length,
+    from: day(first.t), to: day(last.t),
+    first_close_inr: inr(first.c), price_inr: inr(last.c),
+    change_pct: +((last.c - first.c) / first.c * 100).toFixed(2),
+    high_inr: inr(hi.h), high_on: day(hi.t), low_inr: inr(lo.l), low_on: day(lo.t),
+    below_high_pct: +(Math.abs((last.c - hi.h) / hi.h * 100)).toFixed(1),
+    avg20_inr: inr(a20), above_avg20: last.c >= a20,
+    ...(a50 ? { avg50_inr: inr(a50), above_avg50: last.c >= a50 } : {}),
+    up_days: ups, down_or_flat_days: bars.length - 1 - ups,
+    biggest_day_move_pct: +big.d.toFixed(2), biggest_day_on: day(big.t),
+    recent_volume_vs_average: +(vol(bars.slice(-5)) / Math.max(1, vol(bars.slice(0, -5)))).toFixed(1),
+    how_to_use: "Daily closes from the exchange. Describe the shape (rise, fall, sideways, dip and recovery), where the high and low came, and what being above or below the averages means, in plain words. Add [[chart " + sym + " " + (range === "1mo" ? "1m" : range === "3mo" ? "3m" : range === "6mo" ? "6m" : range) + "]] on its own line to show it.",
+  };
+}
+
 const EXECUTORS = {
+  read_chart: execReadChart,
   screen_stocks: execScreenStocks,
   get_market_movers: execMarketMovers,
   get_stock_price: execGetStockPrice,

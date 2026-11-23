@@ -48,6 +48,7 @@ const SUB = {
   get_limit_orders: ["Reading your queued orders", "Orders retrieved"],
   get_market_news: ["Scanning today's headlines", "Headlines retrieved"],
   search_stocks: ["Searching NSE and BSE", "Matches found"],
+  read_chart: ["Loading daily closes", "Daily closes from the exchange"],
   screen_stocks: ["Ranking about 4,600 companies", "Ranked from the fundamentals store"],
   get_market_movers: ["Reading NSE's end-of-day file", "From NSE's end-of-day file"],
   check: ["Matching every number to a lookup", "Numbers checked"],
@@ -75,6 +76,7 @@ function toolLabel(name, a, done) {
     case "get_limit_orders": return T("Checking your orders", "Checked your orders");
     case "get_market_news": return T(q ? `Reading news on ${q}` : "Reading the latest news", q ? `Read news on ${q}` : "Read the latest news");
     case "search_stocks": return T(q ? `Searching “${q}”` : "Searching stocks", q ? `Searched “${q}”` : "Searched stocks");
+    case "read_chart": return T(`Reading the ${sym || "stock"} chart`, `Read the ${sym || "stock"} chart`);
     case "screen_stocks": {
       const by = { pe: "P/E", pb: "P/B", market_cap: "size", roe: "ROE", dividend_yield: "dividend yield", debt_to_equity: "debt", eps: "EPS" }[String(a.sort || "market_cap").toLowerCase()] || "size";
       const dir = String(a.direction || "desc").toLowerCase() === "asc" ? "lowest" : "highest";
@@ -122,6 +124,10 @@ function receipt(name, facts) {
     }
     case "search_stocks":
       return Number.isFinite(facts.count) ? { text: `${facts.count} match${facts.count === 1 ? "" : "es"}` } : null;
+    case "read_chart": {
+      const v = Number(facts.change_pct);
+      return Number.isFinite(facts.price_inr) ? { text: inr(facts.price_inr), extra: Number.isFinite(v) ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "", dir: v > 0 ? "up" : v < 0 ? "down" : "" } : null;
+    }
     case "screen_stocks": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;
       if (!top) return null;

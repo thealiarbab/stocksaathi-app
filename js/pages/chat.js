@@ -1989,7 +1989,10 @@ async function sendAndReply(userText) {
 
   // A chart question carries its own data (fetched here, attached to the
   // question), so it skips the tool round and is answered from that data.
-  const chartBlock = await chartContext(userText, ownerMessages);
+  // Chart reading is a lookup now (read_chart in coach/agent.js). The old
+  // keyword pre-attach charted the word "NSE" and forced the no-lookups lane.
+  const chartBlock = "";
+  void chartContext;
   if (chartBlock) {
     const lastUser = [...messages].reverse().find(m => m.role === "user");
     if (lastUser) lastUser.content = `${lastUser.content}\n\n[The app attached this chart to the question.]${chartBlock}`;
@@ -2123,7 +2126,7 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
     // contradicts the brief, keyword nudges and prefetched news).
     const system = isOwner()
       ? `${SYSTEM_PROMPT_LEAN}\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}` + chartNote + turnLang
-      : `${SYSTEM_PROMPT}\n\n# TOOL USE\nYou have tools for live data: get_stock_price, get_crypto_price, search_stocks, get_market_news, get_user_portfolio, get_trade_history, get_watchlist, get_limit_orders, get_fundamentals, screen_stocks (rank the whole market by P/E, size, ROE and more), get_market_movers (top gainers, losers, most traded). USE them whenever the user asks about any specific stock, crypto, market state, company fundamentals (profit, EPS, ROE, P/E, debt, market cap), or their portfolio. Never guess numbers — always call the tool.\n\nCRITICAL: Call tools via the STRUCTURED tool_calls API only. NEVER write literal text like 'CALL search_stocks(...)' or '[Tool call: ...]' or fenced ` + "```tool_calls```" + ` JSON in your visible response. Those are internal scaffolding the user must never see. If you want to call a tool, emit the tool_call JSON block and let the system handle it. Your visible reply either (a) answers the user's question with real data you just received from a tool, or (b) says you'll look it up — never describes the mechanics of looking it up.\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}\n\n# TONE\nKeep replies conversational and short by default (1–3 sentences). Only go longer when the user asks for explanation or depth.` + newsBlock + discoveryNudge + chartNote + turnLang;
+      : `${SYSTEM_PROMPT}\n\n# TOOL USE\nYou have tools for live data: get_stock_price, get_crypto_price, search_stocks, get_market_news, get_user_portfolio, get_trade_history, get_watchlist, get_limit_orders, get_fundamentals, screen_stocks (rank the whole market by P/E, size, ROE and more), get_market_movers (top gainers, losers, most traded), read_chart (read a stock's price chart). USE them whenever the user asks about any specific stock, crypto, market state, company fundamentals (profit, EPS, ROE, P/E, debt, market cap), or their portfolio. Never guess numbers — always call the tool.\n\nCRITICAL: Call tools via the STRUCTURED tool_calls API only. NEVER write literal text like 'CALL search_stocks(...)' or '[Tool call: ...]' or fenced ` + "```tool_calls```" + ` JSON in your visible response. Those are internal scaffolding the user must never see. If you want to call a tool, emit the tool_call JSON block and let the system handle it. Your visible reply either (a) answers the user's question with real data you just received from a tool, or (b) says you'll look it up — never describes the mechanics of looking it up.\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}\n\n# TONE\nKeep replies conversational and short by default (1–3 sentences). Only go longer when the user asks for explanation or depth.` + newsBlock + discoveryNudge + chartNote + turnLang;
     try {
       replyText = await runAgent({
         apiKey: state.settings.llmApiKey || null,

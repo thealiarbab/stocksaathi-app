@@ -182,6 +182,42 @@ ids, aliarbab2009 and admin). Client: `getState().user.isAdmin`, read through
 was approved for everyone on 19 Oct). Never a `profiles` column (users can
 update their own profile row).
 
+## Coach: how it is wired since 24 Nov 2026 (read before touching it)
+
+Root cause of the old "you pasted the block" / retracted-facts bugs: code
+second-guessed the model (keyword routing, facts glued onto the student's
+message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
+
+- **One lane.** Every /chat and pop-up turn goes to the tool agent
+  (`runAgent`, profile `fast`); the model decides what to look up. Never
+  route by keywords again (`needsLiveData` is dead on these paths).
+- **Facts are a system message.** `api/_messages.js` moves everything from
+  `# RUNTIME FACTS` on into a mid-conversation `role: "system"` message right
+  after the student's question (same place on every tool hop, so caching and
+  replayed thinking blocks stay valid). Never append facts to the user's text.
+- **Static facts live in the fixed prompt** (NSE holiday list, About facts):
+  never gate what the model sees on words in the question.
+- **Briefs:** `SYSTEM_PROMPT` (old, ~5,000 words) for everyone;
+  `SYSTEM_PROMPT_LEAN` (~1,000 words) for owner accounts (`isOwner()`) until
+  the owner rolls it out. Fix a lesson as a principle or a fact, not as one
+  more "never" rule, and prefer a replay test over a reply checker.
+- **Tools** (`js/coach/agent.js`): the nine lookups plus `screen_stocks`
+  (RPC `coach_screen_stocks`, whole-market ranking over `fundamentals_cache`,
+  sector words mapped by `_coach_sector_pattern`) and `get_market_movers`
+  (RPC `coach_market_movers`, NSE end-of-day file).
+- **Thinking row** (`js/components/thoughtSteps.js`, GR-1 inspired): the
+  server streams thinking summaries (`thinking.display: "summarized"` ->
+  `delta.reasoning_content`); steps show the value they fetched; more than
+  three steps fold into one row; `m.trace` is saved on the message for
+  display only and is never sent to the model. The live block is patched in
+  place (`paintLiveTrace`), never redrawn.
+- **Chat page:** `/chat/<id>` links, AI titles (`/api/ai?op=chat-title`),
+  select-and-quote (`m.quote`), resizable sidebar, `[[about]]` card
+  (`chatCards.js`; all links live in the card, the model never types one).
+- **Fundamentals fetcher:** `_tickertape.lookup_sid` matches the exact ticker
+  only. A loose first-hit fallback once stored another company's numbers
+  under 121 symbols.
+
 ## Coach chat (ChatGPT-style; live for everyone since 19 Oct)
 
 - Conversations are documents in `chat_threads` (`doc.messages`, full branch
