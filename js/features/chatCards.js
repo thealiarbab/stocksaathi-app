@@ -222,6 +222,49 @@ export async function runCommand(raw) {
 // ---- Rendering ---------------------------------------------------------------
 
 /** Placeholder markup; hydrateCards() draws into it. */
+// Who built StockSaathi (owner-approved 24 Nov 2026). Every link and contact
+// lives here, so the model never types one.
+const ABOUT_ICONS = {
+  linkedin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4.98 3.5A2.5 2.5 0 1 1 5 8.5a2.5 2.5 0 0 1-.02-5zM3 9.75h4V21H3zM9.5 9.75h3.83v1.54h.05c.53-1 1.84-2.06 3.79-2.06 4.05 0 4.8 2.67 4.8 6.13V21h-4v-4.98c0-1.19-.02-2.72-1.66-2.72-1.66 0-1.91 1.3-1.91 2.63V21h-4z"/></svg>',
+  x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.75 3h3.07l-6.71 7.67L22 21h-6.18l-4.84-6.33L5.45 21H2.37l7.18-8.2L2 3h6.34l4.37 5.78zm-1.08 16.18h1.7L7.4 4.73H5.58z"/></svg>',
+  web: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm-9 9h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>',
+  ig: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4 7l8 6 8-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
+function aboutLink(href, icon, label, cls = "") {
+  const ext = href.startsWith("http");
+  return `<a class="ss-about-chip ${cls}" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ""}>${ABOUT_ICONS[icon]}<span>${esc(label)}</span></a>`;
+}
+function aboutHtml() {
+  return `<div class="ss-card ss-card-about">
+    <div class="ss-about-person">
+      <span class="ss-about-av" aria-hidden="true">AA</span>
+      <div><div class="ss-about-name">Ali Arbab</div><div class="ss-about-role">${L("Founder and developer · launched 19 Apr 2026", "Founder aur developer · 19 Apr 2026 ko launch")}</div></div>
+    </div>
+    <blockquote class="ss-about-quote">“I kept seeing people my age invest blindly, chasing tips and hype without understanding what they were buying.”</blockquote>
+    <div class="ss-about-chips">
+      ${aboutLink("https://www.linkedin.com/in/thealiarbab", "linkedin", "LinkedIn", "is-li")}
+      ${aboutLink("https://x.com/thealiarbab", "x", "@thealiarbab")}
+      ${aboutLink("https://aliarbab2009.com", "web", "aliarbab2009.com")}
+    </div>
+    <div class="ss-about-person ss-about-amb">
+      <span class="ss-about-av is-amb" aria-hidden="true">DS</span>
+      <div><div class="ss-about-name">Devansh Singh Chauhan</div><div class="ss-about-role">${L("Brand ambassador for students and schools", "Students aur schools ke liye brand ambassador")}</div></div>
+    </div>
+    <div class="ss-about-chips">
+      ${aboutLink("https://www.instagram.com/devaanshh.04/", "ig", "@devaanshh.04", "is-ig")}
+      ${aboutLink("mailto:ambassador@stocksaathi.co.in", "mail", "ambassador@")}
+    </div>
+    <div class="ss-about-foot">
+      <span class="ss-about-k">${L("StockSaathi", "StockSaathi")}</span>
+      ${aboutLink("https://www.instagram.com/stocksaathi.co.in/", "ig", "@stocksaathi.co.in", "is-ig")}
+      ${aboutLink("https://x.com/stocksaathicoin", "x", "@stocksaathicoin")}
+      ${aboutLink("mailto:business@stocksaathi.co.in", "mail", "business@")}
+      ${aboutLink("mailto:grievance@stocksaathi.co.in", "mail", "support")}
+    </div>
+  </div>`;
+}
+
 export function cardHtml(card) {
   if (!card?.type) return "";
   const data = esc(JSON.stringify(card));
@@ -232,6 +275,7 @@ export function cardHtml(card) {
   }
   if (card.type === "whatif") return whatifHtml(card);
   if (card.type === "portfolio") return portfolioHtml(card);
+  if (card.type === "about") return aboutHtml();
   return `<div class="ss-card ss-card-chart" data-card="${data}"><div class="ss-card-loading">${L("Loading chart…", "Chart load ho raha hai…")}</div></div>`;
 }
 
@@ -444,15 +488,20 @@ You can show the user an interactive price chart under your reply. When a chart 
 RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a marker for crypto or a mutual fund. At most one marker per reply.`;
 
 const MARKER_RE = /\[\[\s*(chart|compare)\s+([^\]]{1,60})\]\]/gi;
+// [[about]]: the "who built StockSaathi" card (links and contacts come from
+// here, never from the model).
+const ABOUT_RE = /\[\[\s*about\s*\]\]/gi;
 
 /** Text as shown while it streams: markers (and a half-typed one) hidden. */
 export function hideChartMarkers(text) {
-  return String(text || "").replace(MARKER_RE, "").replace(/\[\[[^\]]{0,60}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(/\[\[[^\]]{0,60}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 /** { text, card } for a finished reply: the first valid marker becomes a card. */
 export function extractChartMarker(text) {
   let card = null;
+  if (ABOUT_RE.test(String(text || ""))) { ABOUT_RE.lastIndex = 0; card = { type: "about" }; }
+  ABOUT_RE.lastIndex = 0;
   for (const m of String(text || "").matchAll(MARKER_RE)) {
     if (card) break;
     const kind = m[1].toLowerCase();
