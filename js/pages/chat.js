@@ -6,7 +6,7 @@
 
 import { getState, setSetting } from "../state.js";
 import { getInstrument, STOCKS } from "../data/universe.js";
-import { SYSTEM_PROMPT, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
 import { createTrace, traceStep, traceReasoning, liveTraceHtml, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
 import { runAgent, streamChat, needsLiveData, callsAppContextFake, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
@@ -21,7 +21,7 @@ import {
   displayOrder, setArchived, notePruned, setFolder,
 } from "../features/chatSessions.js";
 import { nextTs, repairTurnOrder } from "../features/chatOrder.js";
-import { isPreview } from "../features/preview.js";
+import { isPreview, isOwner } from "../features/preview.js";
 import { listProjects, getProject, createProject, renameProject, setInstructions, removeProject, syncProjects, projectNote } from "../features/chatProjects.js";
 import { forkAt, showVersion, branchInfo, stripVers } from "../features/chatBranches.js";
 import { pushThread, pullThreads, upsertShare, listShares, revokeShare, sendFeedback } from "../features/chatCloud.js";
@@ -1904,7 +1904,12 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
     // model answered "latest news on oil and Iran" from memory on 6 Oct
     // with the news tool right there.
     const newsBlock = await prefetchNewsBlock(userText);
-    const system = `${SYSTEM_PROMPT}\n\n# TOOL USE\nYou have tools for live data: get_stock_price, get_crypto_price, search_stocks, get_market_news, get_user_portfolio, get_trade_history, get_watchlist, get_limit_orders, get_fundamentals. USE them whenever the user asks about any specific stock, crypto, market state, company fundamentals (profit, EPS, ROE, P/E, debt, market cap), or their portfolio. Never guess numbers — always call the tool.\n\nCRITICAL: Call tools via the STRUCTURED tool_calls API only. NEVER write literal text like 'CALL search_stocks(...)' or '[Tool call: ...]' or fenced ` + "```tool_calls```" + ` JSON in your visible response. Those are internal scaffolding the user must never see. If you want to call a tool, emit the tool_call JSON block and let the system handle it. Your visible reply either (a) answers the user's question with real data you just received from a tool, or (b) says you'll look it up — never describes the mechanics of looking it up.\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}\n\n# TONE\nKeep replies conversational and short by default (1–3 sentences). Only go longer when the user asks for explanation or depth.` + newsBlock + discoveryNudge + chartNote + turnLang;
+    // Owner preview (24 Nov): the lean brief alone, without the stacked
+    // add-ons (a duplicate tool section, a "1-3 sentences" tone rule that
+    // contradicts the brief, keyword nudges and prefetched news).
+    const system = isOwner()
+      ? `${SYSTEM_PROMPT_LEAN}\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}` + chartNote + turnLang
+      : `${SYSTEM_PROMPT}\n\n# TOOL USE\nYou have tools for live data: get_stock_price, get_crypto_price, search_stocks, get_market_news, get_user_portfolio, get_trade_history, get_watchlist, get_limit_orders, get_fundamentals. USE them whenever the user asks about any specific stock, crypto, market state, company fundamentals (profit, EPS, ROE, P/E, debt, market cap), or their portfolio. Never guess numbers — always call the tool.\n\nCRITICAL: Call tools via the STRUCTURED tool_calls API only. NEVER write literal text like 'CALL search_stocks(...)' or '[Tool call: ...]' or fenced ` + "```tool_calls```" + ` JSON in your visible response. Those are internal scaffolding the user must never see. If you want to call a tool, emit the tool_call JSON block and let the system handle it. Your visible reply either (a) answers the user's question with real data you just received from a tool, or (b) says you'll look it up — never describes the mechanics of looking it up.\n\n${runtimeFacts(marketStatus(), userText)}\n\n${dossier}\n\n# TONE\nKeep replies conversational and short by default (1–3 sentences). Only go longer when the user asks for explanation or depth.` + newsBlock + discoveryNudge + chartNote + turnLang;
     try {
       replyText = await runAgent({
         apiKey: state.settings.llmApiKey || null,

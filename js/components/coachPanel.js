@@ -5,13 +5,13 @@
 
 import { getState, subscribe, setSetting } from "../state.js";
 import { nextTs, byTurn, repairTurnOrder } from "../features/chatOrder.js";
-import { isPreview } from "../features/preview.js";
+import { isPreview, isOwner } from "../features/preview.js";
 import { isCommand, runCommand, cardHtml, hydrateCards, guideHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker } from "../features/chatCards.js";
 import { sendFeedback } from "../features/chatCloud.js";
 import { getInstrument } from "../data/universe.js";
 import { getNews } from "../data/news.js";
 import { formatRupees, formatPct } from "../money.js";
-import { SYSTEM_PROMPT, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
+import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
 import { runAgent, streamChat, needsLiveData, logChatTurn, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, scrubAdvice, looksHinglish, hasFormalHindiRegister, isNewsQuestion, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { getFreshCachedQuote } from "../data/marketData.js";
@@ -202,7 +202,17 @@ async function callLlmAgent(apiKey, history, state, extraSystem = "", onText = n
   const lastUser = [...history].reverse().find((m) => m.role === "user")?.text || "";
   // News-shaped question: fresh headlines fetched by the app (C5).
   const newsBlock = isNewsQuestion(lastUser) ? await prefetchNewsBlock(lastUser) : "";
-  const system = `${SAATHI_SYSTEM}\n\n${runtimeFacts(marketStatus(), lastUser)}\n\n${dossier}\n\n# RUNTIME CONTEXT\n${screen ? screen + "\n" : ""}\n\n# TONE\nKeep replies short by default (1–3 sentences). Go longer only when asked for depth.` + newsBlock + (isPreview() ? CHART_TOOL_NOTE : "") + turnLanguage() + extraSystem;
+  // Owner preview (24 Nov): the lean brief, plus the screen the student is on.
+  const system = isOwner()
+    ? `${SYSTEM_PROMPT_LEAN}
+
+${runtimeFacts(marketStatus(), lastUser)}
+
+${dossier}${screen ? `
+
+# SCREEN
+The student is looking at: ${screen}` : ""}` + (isPreview() ? CHART_TOOL_NOTE : "") + turnLanguage() + extraSystem
+    : `${SAATHI_SYSTEM}\n\n${runtimeFacts(marketStatus(), lastUser)}\n\n${dossier}\n\n# RUNTIME CONTEXT\n${screen ? screen + "\n" : ""}\n\n# TONE\nKeep replies short by default (1–3 sentences). Go longer only when asked for depth.` + newsBlock + (isPreview() ? CHART_TOOL_NOTE : "") + turnLanguage() + extraSystem;
 
   // Preserve full conversation history up to platform limits
   const messages = history.map(m => ({
