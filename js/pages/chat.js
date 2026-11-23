@@ -203,6 +203,97 @@ function chatHost() {
   return (_host && _host.isConnected) ? _host : document.getElementById("main");
 }
 
+// ---- Select and quote (24 Nov 2026) -----------------------------------------
+// Select any text in the chat: a small bar offers "Quote" (a chip above the
+// box; your next message goes out replying to it) and "Explain" (asks right
+// away). The reply button under an answer quotes the whole answer.
+const QUOTE_ICON = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>`;
+let pendingQuote = null;
+function clipQuote(t) {
+  const s = String(t || "").replace(/\s+\n/g, "\n").replace(/[ \t]+/g, " ").trim();
+  return s.length > 600 ? s.slice(0, 599) + "…" : s;
+}
+function quoteChipHtml() {
+  if (!pendingQuote) return `<div class="cc-quote-chip" id="cc-quote-chip" hidden></div>`;
+  return `<div class="cc-quote-chip" id="cc-quote-chip"><span class="cc-quote-ico" aria-hidden="true">${QUOTE_ICON}</span><span class="cc-quote-t">${escapeHtml(pendingQuote)}</span><button type="button" class="cc-quote-x" aria-label="Remove quote">&times;</button></div>`;
+}
+function setQuote(q) {
+  pendingQuote = q ? clipQuote(q) : null;
+  const host = _host?.querySelector("#cc-quote-chip");
+  if (!host) return;
+  const fresh = document.createElement("div");
+  fresh.innerHTML = quoteChipHtml();
+  host.replaceWith(fresh.firstElementChild);
+  if (pendingQuote) {
+    const chip = _host.querySelector("#cc-quote-chip");
+    chip.classList.add("is-in");
+    _host.querySelector("#chat-input")?.focus();
+  }
+}
+let _selBar = null;
+function hideSelBar() { if (_selBar) { _selBar.remove(); _selBar = null; } }
+function wireSelectionQuote(root) {
+  if (root._quoteWired) return;
+  root._quoteWired = true;
+  const showFor = () => {
+    const sel = window.getSelection();
+    const text = sel && !sel.isCollapsed ? sel.toString().trim() : "";
+    const msgs = root.querySelector("#chat-messages");
+    if (!text || !msgs || !sel.rangeCount) return hideSelBar();
+    const range = sel.getRangeAt(0);
+    const anc = range.commonAncestorContainer.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    if (!anc || !msgs.contains(anc) || !anc.closest(".cc-bubble, .cc-quoted")) return hideSelBar();
+    const r = range.getBoundingClientRect();
+    if (!r.width && !r.height) return hideSelBar();
+    hideSelBar();
+    _selBar = document.createElement("div");
+    _selBar.className = "cc-selbar";
+    _selBar.setAttribute("role", "toolbar");
+    _selBar.innerHTML = `<button type="button" data-sel="quote">${QUOTE_ICON}<span>Quote</span></button><span class="cc-selbar-sep" aria-hidden="true"></span><button type="button" data-sel="explain"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.6L18 9l-4.4 1.4L12 15l-1.6-4.6L6 9l4.4-1.4z"/><path d="M18 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg><span>Explain</span></button>`;
+    document.body.appendChild(_selBar);
+    const bw = _selBar.offsetWidth, bh = _selBar.offsetHeight;
+    const above = r.top - bh - 10 > 8;
+    const x = Math.min(window.innerWidth - bw - 8, Math.max(8, r.left + r.width / 2 - bw / 2));
+    _selBar.style.left = x + "px";
+    _selBar.style.top = (above ? r.top - bh - 10 : r.bottom + 10) + "px";
+    _selBar.classList.toggle("is-below", !above);
+    _selBar.addEventListener("pointerdown", (e) => e.preventDefault());   // keep the selection
+    _selBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-sel]");
+      if (!b) return;
+      const kind = b.dataset.sel;
+      hideSelBar();
+      window.getSelection()?.removeAllRanges();
+      setQuote(text);
+      if (kind === "explain") {
+        const input = root.querySelector("#chat-input");
+        const form = root.querySelector("#chat-form");
+        if (input && form && !m_pending) { input.value = "Explain this in simple words"; form.requestSubmit(); }
+      }
+    });
+  };
+  let t = null;
+  const later = () => { clearTimeout(t); t = setTimeout(showFor, 160); };
+  root.addEventListener("mouseup", later);
+  root.addEventListener("touchend", later, { passive: true });
+  document.addEventListener("selectionchange", () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) hideSelBar();
+    else if (matchMedia("(pointer: coarse)").matches) later();   // phones: no mouseup
+  });
+  root.addEventListener("scroll", hideSelBar, true);
+  window.addEventListener("resize", hideSelBar);
+  root.addEventListener("click", (e) => {
+    const x = e.target.closest(".cc-quote-x");
+    if (x) { setQuote(null); return; }
+    const qb = e.target.closest("[data-quote-msg]");
+    if (qb) {
+      const body = qb.closest(".cc-row")?.querySelector(".msg-body");
+      if (body) setQuote(body.innerText);
+    }
+  });
+}
+
 // Sidebar width (desktop): a drag handle on its right edge (owner, 24 Nov).
 const SIDE_W_KEY = "ss.chat.sideW.v1";
 const SIDE_MIN = 200, SIDE_MAX = 460, SIDE_DEF = 260;
@@ -257,6 +348,8 @@ export function renderChat(main, opts = {}) {
   // chat may arrive with the cloud sync a moment later, so render() keeps
   // trying until it is there.
   let wantId = !embedded && opts.id ? String(opts.id) : null;
+  // A link to a chat this account doesn't have: stop waiting for the sync.
+  if (wantId) setTimeout(() => { if (wantId) { wantId = null; try { render(); } catch {} } }, 6000);
   // App-style page: no site footer, only the messages scroll. Not when
   // drawn inside the coach pop-up: the page underneath stays as it is.
   if (!embedded) {
@@ -375,6 +468,7 @@ export function renderChat(main, opts = {}) {
 
             <div class="cc-slash" id="cc-slash" role="listbox" aria-label="Commands" hidden></div>
             <form id="chat-form" class="composer cc-composer">
+              ${quoteChipHtml()}
               <div class="composer-shell ${m_pending ? "is-busy" : ""}">
                 <textarea
                   id="chat-input"
@@ -403,6 +497,7 @@ export function renderChat(main, opts = {}) {
       </div>
     `;
     wireSideGrip(main);
+    wireSelectionQuote(main);
 
     const input = main.querySelector("#chat-input");
     const form = main.querySelector("#chat-form");
@@ -460,7 +555,9 @@ export function renderChat(main, opts = {}) {
       fit();
       main.querySelector(".cc-panel")?.classList.remove("is-empty");
       closeSlash();
-      const userMessage = pushUser(text);
+      const quote = pendingQuote;
+      setQuote(null);
+      const userMessage = pushUser(text, quote);
       const submittedSessionId = getActiveSession(sessionsData).id;
       logChatTurn({
         userText: text, assistantText: "", sessionId: submittedSessionId,
@@ -1133,19 +1230,21 @@ function renderBubble(m) {
         <button type="button" class="cc-act" data-copy aria-label="Copy message">${I.copy}</button>
         <button type="button" class="cc-act" data-edit="${i}" aria-label="Edit message">${I.edit}<span>Edit</span></button>
       </div>` : "";
-    return `<div class="cc-row cc-row-user"${streamAttr} data-i="${i}"><div class="cc-user-col">${m.chart ? chartCard(m.chart) : ""}<div class="cc-bubble cc-user"><span class="msg-body">${escapeHtml(m.text)}</span></div>${acts}</div></div>`;
+    return `<div class="cc-row cc-row-user"${streamAttr} data-i="${i}"><div class="cc-user-col">${m.chart ? chartCard(m.chart) : ""}${m.quote ? `<div class="cc-quoted" title="You quoted this"><span class="cc-quoted-bar" aria-hidden="true"></span><span class="cc-quoted-t">${escapeHtml(m.quote)}</span></div>` : ""}<div class="cc-bubble cc-user"><span class="msg-body">${escapeHtml(m.text)}</span></div>${acts}</div></div>`;
   }
   const done = !(m.streaming || m.status || !m.text);
   const actions = !done ? "" : preview && i >= 0 ? `
     <div class="cc-actions-row">
       ${verNav(i)}
       <button type="button" class="cc-act" data-copy aria-label="Copy reply">${I.copy}<span>Copy</span></button>
+      <button type="button" class="cc-act" data-quote-msg="${i}" aria-label="Reply to this" title="Reply to this">${QUOTE_ICON}</button>
       <button type="button" class="cc-act" data-regen="${i}" aria-label="Regenerate reply">${I.regen}</button>
       <button type="button" class="cc-act ${m.fb === 1 ? "is-on" : ""}" data-fb="1" data-idx="${i}" aria-pressed="${m.fb === 1}" aria-label="Good reply">${I.up}</button>
       <button type="button" class="cc-act ${m.fb === -1 ? "is-on" : ""}" data-fb="-1" data-idx="${i}" aria-pressed="${m.fb === -1}" aria-label="Bad reply">${I.down}</button>
     </div>` : `
     <div class="cc-actions-row">
       <button type="button" class="cc-act" data-copy aria-label="Copy reply">${I.copy}<span>Copy</span></button>
+      <button type="button" class="cc-act" data-quote-msg="${i}" aria-label="Reply to this" title="Reply to this">${QUOTE_ICON}</button>
     </div>`;
   const card = m.card ? cardHtml(m.card) : "";
   const body = m.status ? statusHtml(m.text) : renderMarkdown(hideChartMarkers(m.text));
@@ -1680,10 +1779,10 @@ function renderTyping() {
   return `<div class="cc-row cc-row-bot"><div class="cc-bubble cc-bot cc-typing" aria-label="Saathi is typing"><i></i><i></i><i></i></div></div>`;
 }
 
-function pushUser(text) {
+function pushUser(text, quote = null) {
   const sess = getActiveSession(sessionsData);
   if (sess) delete sess.fromLog;   // this device is writing it now
-  const message = { role: "user", text, ts: nextTs(chatLog) };
+  const message = { role: "user", text, ts: nextTs(chatLog), ...(quote ? { quote } : {}) };
   chatLog.push(message);
   saveChat();
   return message;
@@ -1816,7 +1915,8 @@ async function sendAndReply(userText) {
   const messages = chatLog.map(m => ({
     role: m.role === "user" ? "user" : "assistant",
     content: withLookupProvenance(
-      m.role === "user" && m.chartText ? `${m.text}\n\n[The app attached this chart to the question.]${m.chartText}` : m.text,
+      (m.role === "user" && m.quote ? `> ${String(m.quote).replace(/\n+/g, "\n> ")}\n\n(The student quoted the lines above from the chat and asks:)\n` : "") +
+      (m.role === "user" && m.chartText ? `${m.text}\n\n[The app attached this chart to the question.]${m.chartText}` : m.text),
       m.lookupProvenance,
     ),
   }));
