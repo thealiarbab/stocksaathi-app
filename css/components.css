@@ -1742,7 +1742,11 @@ table.compare { min-width: 560px; }
   .table-wrap { font-size: var(--text-sm); }
   .table th, .table td { padding: 10px 12px; }
   .pf-value { font-size: clamp(1.75rem, 9vw, 2.25rem); }
-  .portfolio-stats { grid-template-columns: repeat(2, 1fr); }
+  /* minmax(0, ...): a very long value used to widen its column past the
+     screen (24 Nov, 360px). */
+  .portfolio-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-tile { min-width: 0; }
+  .stat-tile .v { overflow-wrap: anywhere; }
 }
 
 /* ============================== STOCKS LIST ========================= */
@@ -5371,6 +5375,12 @@ body.chart-fs-open #main { animation: none; transform: none; }
   .nav-inner[data-fit="5"] .nav-link { padding: 8px 8px; }
   .nav-inner[data-fit="6"] .nav-burger { display: grid; }
 }
+
+/* Extra steps for narrow phones (24 Nov; nav.js fitNav sets data-tight 0-3
+   after data-fit runs out): tighter gaps, then the theme button, then Ask. */
+.nav-inner[data-tight="1"] .nav-right, .nav-inner[data-tight="2"] .nav-right, .nav-inner[data-tight="3"] .nav-right { gap: 6px; }
+.nav-inner[data-tight="2"] .nav-theme-toggle, .nav-inner[data-tight="3"] .nav-theme-toggle { display: none; }
+.nav-inner[data-tight="3"] .nav-cmdk-btn { display: none; }
 
 /* Phones (17 Oct): the NSE pill must stay hidden below 820px; the later
    `.market-status { display: inline-flex }` won on equal specificity and

@@ -18,3 +18,11 @@ export function isPreview() {
 export function isOwner() {
   try { return !!getState()?.user?.isAdmin; } catch { return false; }
 }
+
+// The coach's short brief (coach/persona.js SYSTEM_PROMPT_LEAN). Owner
+// accounts first; LEAN_FOR_ALL turns it on for everyone once the replay test
+// set (admin > Coach quality) passes on it.
+const LEAN_FOR_ALL = false;
+export function useLeanBrief() {
+  return LEAN_FOR_ALL || isOwner();
+}

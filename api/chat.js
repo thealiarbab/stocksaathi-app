@@ -115,10 +115,15 @@ export const MESSAGES_TIMEOUT_MS = Number(globalThis.process?.env?.MESSAGES_TIME
 //   reasoning / creative  deliberately left alone. These lanes exist to
 //             think, are not on the interactive path, and nobody is watching
 //             a cursor blink while they run.
+//
+// 24 Nov 2026, owner rule "effort HIGH everywhere": these lanes only run when
+// the main Claude call has failed (58 calls in the week before), and they
+// answered at "minimal" / "low". All three now default to "high"; the notes
+// above are the history of why they were lower. Env vars still override.
 const REASONING_EFFORT = {
-  chat: (globalThis.process?.env?.CHAT_REASONING_EFFORT) || "minimal",
-  fast: (globalThis.process?.env?.FAST_REASONING_EFFORT) || "low",
-  json: (globalThis.process?.env?.JSON_REASONING_EFFORT) || "minimal",
+  chat: (globalThis.process?.env?.CHAT_REASONING_EFFORT) || "high",
+  fast: (globalThis.process?.env?.FAST_REASONING_EFFORT) || "high",
+  json: (globalThis.process?.env?.JSON_REASONING_EFFORT) || "high",
 };
 
 const OPENAI_MODEL   = (globalThis.process?.env?.OPENAI_MODEL)    || "gpt-5.4";

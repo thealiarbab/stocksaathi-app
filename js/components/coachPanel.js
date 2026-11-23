@@ -5,7 +5,7 @@
 
 import { getState, subscribe, setSetting } from "../state.js";
 import { nextTs, byTurn, repairTurnOrder } from "../features/chatOrder.js";
-import { isPreview, isOwner } from "../features/preview.js";
+import { isPreview, isOwner, useLeanBrief } from "../features/preview.js";
 import { isCommand, runCommand, cardHtml, hydrateCards, guideHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker, rememberTable, cardRecord } from "../features/chatCards.js";
 import { sendFeedback } from "../features/chatCloud.js";
 import { getInstrument } from "../data/universe.js";
@@ -204,7 +204,7 @@ async function callLlmAgent(apiKey, history, state, extraSystem = "", onText = n
   // News-shaped question: fresh headlines fetched by the app (C5).
   const newsBlock = isNewsQuestion(lastUser) ? await prefetchNewsBlock(lastUser) : "";
   // Owner preview (24 Nov): the lean brief, plus the screen the student is on.
-  const system = isOwner()
+  const system = useLeanBrief()
     ? `${SYSTEM_PROMPT_LEAN}
 
 ${runtimeFacts(marketStatus(), lastUser)}

@@ -55,7 +55,15 @@ export function mountNav() {
     if (!inner) return;
     let level = 0;
     inner.dataset.fit = "0";
+    inner.dataset.tight = "0";
     while (level < FIT_MAX && overflowing(inner)) inner.dataset.fit = String(++level);
+    // Phones, signed in (24 Nov): logo + Ask + theme + bell + account + menu
+    // need 406px, so on a 360px phone the menu button sat off the screen and
+    // none of the six steps above applies below 821px. Three more steps
+    // (CSS: .nav-inner[data-tight]): 1 tighter gaps, 2 the theme button goes
+    // (the account menu has a theme item), 3 the Ask button goes.
+    let tight = 0;
+    while (tight < 3 && overflowing(inner)) inner.dataset.tight = String(++tight);
   }
   let fitQueued = false;
   const queueFit = () => {
@@ -244,6 +252,7 @@ export function mountNav() {
                 <a class="dropdown-item" href="/report-card">📋 Report card</a>
                 ${state.user.isAdmin ? `<a class="dropdown-item" href="/report-card#achievements">🏅 Achievements</a>` : ""}
                 <a class="dropdown-item" href="/settings">⚙️ Settings</a>
+                <button class="dropdown-item" type="button" data-theme-item>${resolvedTheme(state.settings) === "dark" ? "☀️ Light mode" : "🌙 Dark mode"}</button>
                 <div class="dropdown-divider"></div>
                 <button class="dropdown-item danger" id="logout-btn">Log out</button>
               </div>
@@ -312,6 +321,7 @@ export function mountNav() {
     mobileRoot.querySelector("[data-mobile-menu]")?.addEventListener("click", openDrawer);
     mobileRoot.querySelector("[data-mobile-theme]")?.addEventListener("click", toggleTheme);
     root.querySelector("#theme-toggle-btn")?.addEventListener("click", toggleTheme);
+    root.querySelector("[data-theme-item]")?.addEventListener("click", toggleTheme);
     root.querySelector("#cmdk-open-btn")?.addEventListener("click", () => {
       import("./commandPalette.js").then(m => m.openCommandPalette());
     });

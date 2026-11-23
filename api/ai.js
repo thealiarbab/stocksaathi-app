@@ -321,10 +321,10 @@ async function callLlm({ messages, temperature = 0.4, max_tokens = 400, response
       // 65535 is the Gemini models' own ceiling.
       const body = { model: p.model, messages, temperature, max_tokens: 65535 };
       if (response_format) body.response_format = response_format;
-      // The json/chat lanes replaced non-thinking 2.5 Flash-Lite: keep them
-      // fast. Other lanes keep the model's default thinking.
-      if (isGemini3(p.model) && (p.label === "gemini_json" || p.label === "gemini_chat")) {
-        body.reasoning_effort = "minimal";
+      // Owner rule (24 Nov 2026): effort HIGH everywhere, the fallback
+      // included. These lanes used to ask for "minimal" thinking.
+      if (isGemini3(p.model)) {
+        body.reasoning_effort = "high";
       }
       // Vertex AI OpenAI-compat uses x-goog-api-key for API-key auth.
       // Everything else (OpenAI/Groq/AI Studio/Cerebras) takes Bearer.
