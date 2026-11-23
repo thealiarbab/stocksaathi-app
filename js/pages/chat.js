@@ -203,6 +203,53 @@ function chatHost() {
   return (_host && _host.isConnected) ? _host : document.getElementById("main");
 }
 
+// Sidebar width (desktop): a drag handle on its right edge (owner, 24 Nov).
+const SIDE_W_KEY = "ss.chat.sideW.v1";
+const SIDE_MIN = 200, SIDE_MAX = 460, SIDE_DEF = 260;
+function readSideW() {
+  try { const v = +localStorage.getItem(SIDE_W_KEY); return v >= SIDE_MIN && v <= SIDE_MAX ? v : null; } catch { return null; }
+}
+function wireSideGrip(root) {
+  const cc = root.querySelector(".cc.cc-has-side");
+  const grip = root.querySelector(".cc-side-grip");
+  if (!cc || !grip) return;
+  const saved = readSideW();
+  if (saved) cc.style.setProperty("--cc-side-w", saved + "px");
+  const set = (w, save) => {
+    const v = Math.round(Math.min(SIDE_MAX, Math.max(SIDE_MIN, w)));
+    cc.style.setProperty("--cc-side-w", v + "px");
+    grip.setAttribute("aria-valuenow", String(v));
+    if (save) { try { localStorage.setItem(SIDE_W_KEY, String(v)); } catch {} }
+  };
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    grip.setPointerCapture?.(e.pointerId);
+    const left = cc.getBoundingClientRect().left;
+    cc.classList.add("is-resizing");
+    const move = (ev) => set(ev.clientX - left, false);
+    const up = (ev) => {
+      set(ev.clientX - left, true);
+      cc.classList.remove("is-resizing");
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    grip.addEventListener("pointercancel", up);
+  });
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const cur = parseInt(getComputedStyle(cc).getPropertyValue("--cc-side-w")) || SIDE_DEF;
+    set(cur + (e.key === "ArrowRight" ? 16 : -16), true);
+  });
+  grip.addEventListener("dblclick", () => {
+    cc.style.removeProperty("--cc-side-w");
+    try { localStorage.removeItem(SIDE_W_KEY); } catch {}
+  });
+}
+
 export function renderChat(main, opts = {}) {
   _host = main;
   const embedded = !!opts.embedded;
@@ -282,6 +329,7 @@ export function renderChat(main, opts = {}) {
     main.innerHTML = `
       <div class="cc cc-has-side ${drawerOpen ? "is-drawer-open" : ""} ${sidebarHidden ? "is-side-hidden" : ""}">
         <aside class="cc-side" id="cc-side" aria-label="Your chats">
+          <div class="cc-side-grip" role="separator" aria-orientation="vertical" aria-label="Resize chat list" tabindex="0" title="Drag to resize · double-click to reset"></div>
           <div class="cc-side-top">
             <span class="cc-side-name">Saathi</span>
             <button class="cc-side-close" id="cc-side-close" type="button" aria-label="Close chat list">&times;</button>
@@ -354,6 +402,7 @@ export function renderChat(main, opts = {}) {
         </section>
       </div>
     `;
+    wireSideGrip(main);
 
     const input = main.querySelector("#chat-input");
     const form = main.querySelector("#chat-form");

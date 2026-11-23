@@ -546,7 +546,7 @@
 .main.main-chat { max-width: none; padding: 0; }
 .cc.cc-has-side {
   max-width: none; margin: 0; gap: 0;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--cc-side-w, 260px) minmax(0, 1fr);
   height: calc(100dvh - var(--page-top-h));
   /* Pinned to the visible area under the nav: sized as a full-height block
      inside the padded page, the composer sat below the fold and the page
@@ -1114,3 +1114,19 @@ body.coach-resizing { cursor: col-resize; user-select: none; -webkit-user-select
 @keyframes tsTape { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
 @media (max-width: 420px) { .ts-tape-i:nth-child(n+4) { display: none; } }
 @media (prefers-reduced-motion: reduce) { .ts-batch-body, .ts-chev2, .ts-tape-i { transition: none; animation: none; } }
+
+/* Sidebar width handle (desktop): drag, arrow keys, double-click to reset. */
+.cc-side { position: relative; }
+.cc-side-grip {
+  position: absolute; top: 0; right: -4px; bottom: 0; width: 9px; z-index: 3;
+  cursor: col-resize; touch-action: none; outline: none;
+}
+.cc-side-grip::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px;
+  background: transparent; transition: background 160ms var(--ease), width 160ms var(--ease), left 160ms var(--ease);
+}
+.cc-side-grip:hover::after, .cc-side-grip:focus-visible::after, .cc.is-resizing .cc-side-grip::after { left: 3px; width: 3px; background: var(--brand); border-radius: 2px; }
+.cc.is-resizing, .cc.is-resizing * { cursor: col-resize !important; user-select: none !important; }
+.cc.is-resizing.cc-has-side { transition: none !important; }
+@media (max-width: 900px) { .cc-side-grip { display: none; } }
+.cc.is-side-hidden .cc-side-grip { display: none; }
