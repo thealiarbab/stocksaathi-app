@@ -13,6 +13,7 @@ import { getNews } from "../data/news.js";
 import { formatRupees, formatPct } from "../money.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
+import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "./thoughtSteps.js";
 import { runAgent, streamChat, needsLiveData, logChatTurn, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, scrubAdvice, looksHinglish, hasFormalHindiRegister, isNewsQuestion, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { getFreshCachedQuote } from "../data/marketData.js";
 import { buildDossier } from "../coach/dossier.js";
@@ -194,7 +195,7 @@ async function finishPanelReply(text, userText, retryAgent) {
   return scrubAdvice(out, userText, hi).text;
 }
 
-async function callLlmAgent(apiKey, history, state, extraSystem = "", onText = null, onStep = null, lookupProvenance = null) {
+async function callLlmAgent(apiKey, history, state, extraSystem = "", onText = null, onStep = null, lookupProvenance = null, onReasoning = null) {
   // No client-side off-topic pre-filter. Let the LLM decide how to handle
   // off-topic questions per the system prompt.
   const dossier = await buildDossier();
@@ -222,7 +223,7 @@ The student is looking at: ${screen}` : ""}` + (isPreview() ? CHART_TOOL_NOTE : 
   // Tool-use path: "fast" profile (Gemini 3 Flash Preview) is more reliable
   // at function calling than Lite.
   return await runAgent({
-    apiKey, system, messages, profile: "fast", onText,
+    apiKey, system, messages, profile: "fast", onText, onReasoning,
     onStep: (step) => {
       if (step?.action === "tool_results" && Array.isArray(lookupProvenance)) {
         lookupProvenance.push(...normalizeLookupProvenance(step.lookups));
@@ -631,12 +632,22 @@ function render() {
     // Tool-use path (live data queries): streaming via runAgent callbacks.
     abortController = new AbortController();
     const placeholderIdx = chatHistory.length;
-    chatHistory.push({ role: "assistant", text: "", ts: nextTs(chatHistory), streaming: true });
+    // The GR-1-style thinking row, as on /chat (components/thoughtSteps.js).
+    const trace = createTrace();
+    chatHistory.push({ role: "assistant", text: "", ts: nextTs(chatHistory), streaming: true, trace });
     render();
+    const paintTrace = () => {
+      const host = root?.querySelector("#coach-messages-scroll [data-pc-live]");
+      if (host) paintLiveTrace(host, trace, { hinglish: !!getState()?.settings?.hinglish });
+    };
+    paintTrace();
+    const traceTick = setInterval(paintTrace, 600);
+    const onReasoning = (d) => { traceReasoning(trace, d); paintTrace(); };
     let reply = null;
     let rafPending = false;
     const onToken = (delta) => {
       if (!chatHistory[placeholderIdx]) return;
+      if (!trace.answerAt) trace.answerAt = Date.now();
       chatHistory[placeholderIdx].text += delta;
       if (!rafPending) {
         rafPending = true;
@@ -652,6 +663,15 @@ function render() {
     };
     const onStep = (step) => {
       if (!chatHistory[placeholderIdx]) return;
+      traceStep(trace, step);
+      if (step?.action === "tool_calls" && chatHistory[placeholderIdx].text) {
+        // Words before a tool call were narration, not the answer.
+        chatHistory[placeholderIdx].text = "";
+        trace.answerAt = 0;
+        const ms = root?.querySelector("#coach-messages-scroll");
+        if (ms) ms.innerHTML = renderMessagesHtml(getState());
+      }
+      paintTrace();
       if (step.type === "call") {
         const sym = step.args?.symbol || step.args?.query || "";
         const label = step.name === "get_stock_price" ? `Checking ${sym || "stock"} price…`
@@ -670,7 +690,7 @@ function render() {
       }
     };
     try {
-      reply = await callLlmAgent(s.settings.llmApiKey || null, chatHistory.filter((m, idx) => idx !== placeholderIdx), s, "", onToken, onStep, lookupProvenance);
+      reply = await callLlmAgent(s.settings.llmApiKey || null, chatHistory.filter((m, idx) => idx !== placeholderIdx), s, "", onToken, onStep, lookupProvenance, onReasoning);
     } catch (e) { console.warn("coach panel error:", e); }
     // If it offered to look something up instead of doing it, push once more.
     if (reply && (looksLikeLookupOffer(reply) || looksLikeFetchPromise(reply) || looksLikePricelessList(reply, text))) {
@@ -680,8 +700,10 @@ function render() {
         if (again && again.trim() && !stillBad) reply = again;
       } catch (e) { console.warn("coach panel lookup-offer retry:", e); }
     }
+    clearInterval(traceTick);
     const entry = chatHistory[placeholderIdx];
     if (entry) {
+      entry.trace = freezeTrace(trace);
       entry.streaming = false;
       if (reply && reply.trim()) entry.text = reply;
       else if (!entry.text.trim()) entry.text = "Hmm, I can't reach my brain right now. Give it a sec and try again?";
@@ -737,6 +759,8 @@ function wirePanelExtras(ms, input) {
     onFill: (t) => { if (!input) return; input.value = t; input.focus(); input.setSelectionRange(t.length, t.length); },
   });
   ms.addEventListener("click", async (e) => {
+    const fold = e.target.closest("[data-trace]");
+    if (fold) { openTraceSheet(_panelTraces.get(fold.dataset.trace)); return; }
     const b = e.target.closest("[data-pc]");
     if (!b) return;
     const kind = b.dataset.pc;
@@ -773,6 +797,15 @@ function wirePanelExtras(ms, input) {
   });
 }
 
+// Fold rows find their trace by a small id (traces live on the messages).
+const _panelTraces = new Map();
+let _panelTraceSeq = 0;
+function rememberPanelTrace(t) {
+  if (!t.__id) Object.defineProperty(t, "__id", { value: "p" + (++_panelTraceSeq), enumerable: false });
+  _panelTraces.set(t.__id, t);
+  return t.__id;
+}
+
 function renderMessagesHtml(state) {
   const trade = (state.coachMessages || []).slice(-5).map(m => ({
     role: "assistant", text: m.payload?.reflection || "",
@@ -782,7 +815,7 @@ function renderMessagesHtml(state) {
   })).filter(m => m.text);
 
   // An empty streaming placeholder shows as the typing dots, not a blank row.
-  const chat = chatHistory.slice(-20).filter(m => m.role === "user" || String(m.text || "").trim()).map(m => ({ ...m, isTrade: false }));
+  const chat = chatHistory.slice(-20).filter(m => m.role === "user" || String(m.text || "").trim() || (m.streaming && m.trace)).map(m => ({ ...m, isTrade: false }));
   const all = [...trade, ...chat].sort(byTurn).slice(-25);
   const preview = isPreview();
   const lastUser = [...chat].reverse().find((m) => m.role === "user");
@@ -830,7 +863,12 @@ function renderMessagesHtml(state) {
       `;
     }
     const card = preview && m.card ? cardHtml(m.card) : "";
-    const textHtml = `<div class="cc-bubble cc-bot ${card && !m.cardWithText ? "sr-only" : ""}"><span class="msg-body">${renderMarkdown(hideChartMarkers(m.text))}</span></div>`;
+    // Thinking: an empty host the live row is patched into (no redraws).
+    if (m.streaming && m.trace && !String(m.text || "").trim()) {
+      return `<div class="cc-row cc-row-bot"><span class="cc-avatar" aria-hidden="true">S</span><div class="cc-bot-col"><div class="cc-bubble cc-bot"><span class="msg-body" data-pc-live>${liveTraceHtml()}</span></div></div></div>`;
+    }
+    const fold = m.trace ? foldedTraceHtml(m.trace, rememberPanelTrace(m.trace)) : "";
+    const textHtml = `${fold}<div class="cc-bubble cc-bot ${card && !m.cardWithText ? "sr-only" : ""}"><span class="msg-body">${renderMarkdown(hideChartMarkers(m.text))}</span></div>`;
     const acts = preview && !m.streaming && m.text ? `<div class="cc-actions-row">
         <button type="button" class="cc-act" data-pc="copy" data-ts="${m.ts}" aria-label="Copy reply">${ICON.copy}</button>
         ${m.ts === lastBot?.ts && !pending ? `<button type="button" class="cc-act" data-pc="regen" aria-label="Regenerate reply">${ICON.regen}</button>` : ""}
