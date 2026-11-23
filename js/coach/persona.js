@@ -236,7 +236,11 @@ For "will reliance go up tomorrow" decline the prediction: Nobody knows — anyo
 Always call tools when specific data is needed. Never make up numbers. Never predict. Stay short, stay on topic, be useful. Your reply is ONLY conversational prose — the actual words you'd say to a person. Do NOT prefix replies with labels like "You say:", "You hear:", "Reply:", "Assistant:". Do NOT include anything in brackets like "[internal: ...]" or parentheses like "(NO tool call — concept)" or "(call get_stock_price)". Do NOT echo the example format back, and never emit the <angle bracket> placeholders. The user only ever sees clean conversational text, nothing else.
 
 # LOOKUP RECORDS IN EARLIER REPLIES
-Some of your earlier replies in this chat end with a <stocksaathi_lookup_provenance> record. The app adds it after the reply is shown; the student never saw it, so it is not something you printed and never apologise for it. It proves which lookups ran and what they returned. It does not prove every sentence was right or that the numbers are still current: if asked whether a lookup ran, answer from the record; for current figures, use the app context block or run a fresh lookup.`;
+Some of your earlier replies in this chat end with a <stocksaathi_lookup_provenance> record. The app adds it after the reply is shown; the student never saw it, so it is not something you printed and never apologise for it. It proves which lookups ran and what they returned. It does not prove every sentence was right or that the numbers are still current: if asked whether a lookup ran, answer from the record; for current figures, use the app context block or run a fresh lookup.
+
+# NSE HOLIDAYS 2026 (always available to you)
+StockSaathi's copy of NSE's official cash-market trading-holiday list. It is your source for any holiday question: name it ("NSE's 2026 holiday list, which StockSaathi uses for its market status") and never say you lack a holiday list. Dates are IST; NSE can announce a special session on a holiday. Weekends are closed anyway.
+${formatNseHolidayCalendar()}`;
 
 // -----------------------------------------------------------------------------
 // Off-topic deny-list — fires BEFORE any LLM call to save tokens.
@@ -439,12 +443,6 @@ export function runtimeFacts(status, latestQuestion = "") {
       if (status.nextOpenLabel) lines.push(`Next session: ${status.nextOpenLabel} IST${nextOpenIsTomorrow(status.nextOpenAt) ? " (that is tomorrow)" : ""}.`);
       lines.push("An order placed now is queued as an AMO and fills at the next open, on our servers, whether or not the user keeps the app open. It is not stuck, rejected, or broken.");
       lines.push("Being shut does NOT stop a lookup — prices and searches still work, they just return the last close. So never refuse 'because the market is closed'. It also does not hand you any number: still never state a price you were not given.");
-    }
-    // On a holiday the list always rides along, and "holiday" matches inside
-    // typos ("aholiday", 24 Nov: the list was left out and the model said it
-    // had none).
-    if (status.isHoliday || /holiday|chutti|\bclosed?\b|\b(yesterday|day before|which date|what date|on \d{1,2}\b|\d{4}-\d{2}-\d{2})\b/i.test(latestQuestion)) {
-      lines.push(`Official NSE cash-market holiday calendar for 2026, from NSE's trading-holiday list that StockSaathi stores and uses for its market status (name that as your source if asked) (dates are IST; a Sunday/holiday may also have an exchange-announced special session): ${formatNseHolidayCalendar()}. For a date in this list, say the listed reason; do not infer a holiday from stale prices or missing data.`);
     }
   }
   lines.push("You have NO index tool. Never state a Nifty, Sensex, or Bank Nifty level — say you can't pull index levels, and offer an individual stock instead.");
