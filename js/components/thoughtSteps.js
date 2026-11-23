@@ -212,11 +212,54 @@ function stepInner(s) {
   const t = s.ms ? ` · ${(s.ms / 1000).toFixed(1)}s` : "";
   return `<span class="ts-ico">${s.state === "run" ? candle : s.state === "done" ? tick : cross}</span><span class="ts-text"><span class="ts-label">${esc(s.label)}</span><span class="ts-sub">${esc(subLine(s))}${t}</span></span><span class="ts-right">${right}</span>`;
 }
+// A batch: more than BATCH_AT steps in one round fold into one row with a
+// small market tape (owner, 24 Nov: 20 price rows cluttered the chat).
+const BATCH_AT = 3;
+const NOUN = {
+  get_stock_price: ["price", "prices"], get_crypto_price: ["price", "prices"],
+  get_fundamentals: ["company", "companies"], get_market_news: ["news search", "news searches"],
+  search_stocks: ["search", "searches"],
+};
+function batchLabel(g) {
+  const steps = g.steps;
+  const done = steps.filter((x) => x.state !== "run").length;
+  const names = new Set(steps.map((x) => x.name));
+  const n = steps.length;
+  const noun = names.size === 1 && NOUN[[...names][0]] ? NOUN[[...names][0]][n === 1 ? 0 : 1] : (n === 1 ? "lookup" : "lookups");
+  const running = done < n;
+  const verb = names.size === 1 && [...names][0] === "get_fundamentals" ? (running ? "Pulling" : "Pulled") : (running ? "Checking" : "Checked");
+  return { text: `${verb} ${n} ${noun}`, sub: running ? `${done} of ${n} back` : `${(Math.max(...steps.map((x) => x.ms || 0)) / 1000).toFixed(1)}s`, running };
+}
+function stepSym(st) {
+  const a = st.a || {};
+  const sym = String(a.symbol || a.ticker || a.coin || "").toUpperCase();
+  if (sym) return sym;
+  const m = String(st.label || "").match(/\b([A-Z][A-Z0-9&-]{1,14})\b/);
+  return m ? m[1] : "";
+}
+function tapeHtml(g) {
+  const done = g.steps.filter((x) => x.state !== "run");
+  const shown = done.slice(0, 5);
+  const chips = shown.map((x) => {
+    const sym = stepSym(x) || "·";
+    const dir = x.state === "fail" ? "is-fail" : x.r?.dir === "up" ? "is-up" : x.r?.dir === "down" ? "is-down" : "";
+    return `<span class="ts-tape-i ${dir}">${esc(sym)}</span>`;
+  }).join("");
+  const more = g.steps.length - shown.length;
+  return `<span class="ts-tape" aria-hidden="true">${chips}${more > 0 ? `<span class="ts-tape-more">+${more}</span>` : ""}</span>`;
+}
+function batchHeadInner(g) {
+  const b = batchLabel(g);
+  return `<span class="ts-ico">${b.running ? candle : tick}</span><span class="ts-text"><span class="ts-label">${esc(b.text)}</span><span class="ts-sub">${esc(b.sub)}</span></span>${tapeHtml(g)}<svg class="ts-chev2" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
 function stepsHtml(groups) {
   return groups.map((g) => `
     <div class="ts-group">
       ${g.text ? `<p class="ts-narr">${esc(g.text)}</p>` : ""}
-      ${g.steps.length ? `<ul class="ts-steps">${g.steps.map((s) => `<li class="ts-step is-${s.state}">${stepInner(s)}</li>`).join("")}</ul>` : ""}
+      ${g.steps.length > BATCH_AT
+        ? `<div class="ts-batch"><button type="button" class="ts-batch-head" aria-expanded="false">${batchHeadInner(g)}</button><div class="ts-batch-body"><div class="ts-batch-in"><ul class="ts-steps">${g.steps.map((s) => `<li class="ts-step is-${s.state}">${stepInner(s)}</li>`).join("")}</ul></div></div></div>`
+        : g.steps.length ? `<ul class="ts-steps">${g.steps.map((s) => `<li class="ts-step is-${s.state}">${stepInner(s)}</li>`).join("")}</ul>` : ""}
     </div>`).join("");
 }
 
@@ -237,6 +280,20 @@ export function paintLiveTrace(host, trace, { hinglish = false } = {}) {
   if (!host || !trace) return;
   let root = host.querySelector(".ts-live");
   if (!root) { host.innerHTML = liveTraceHtml(); root = host.querySelector(".ts-live"); }
+  root._trace = trace;
+  if (!root._bound) {
+    root._bound = true;
+    root.addEventListener("click", (e) => {
+      const head = e.target.closest(".ts-batch-head");
+      if (!head) return;
+      const gEl = head.closest(".ts-group");
+      const g = root._trace?.groups?.[Number(gEl?.dataset.g)];
+      if (!g) return;
+      g.open = !g.open;
+      gEl.querySelector(".ts-batch").classList.toggle("is-open", g.open);
+      head.setAttribute("aria-expanded", String(g.open));
+    });
+  }
   const words = hinglish ? WORDS_HI : WORDS_EN;
   const word = words[Math.floor((Date.now() - trace.t0) / WORD_MS) % words.length];
   const w = root.querySelector(".ts-word");
@@ -268,13 +325,26 @@ export function paintLiveTrace(host, trace, { hinglish = false } = {}) {
     if (!gEl) {
       gEl = document.createElement("div");
       gEl.className = "ts-group";
-      gEl.innerHTML = `<p class="ts-narr" hidden></p><ul class="ts-steps" hidden></ul>`;
+      gEl.innerHTML = `<p class="ts-narr" hidden></p><div class="ts-batch is-flat"><button type="button" class="ts-batch-head" aria-expanded="false" hidden></button><div class="ts-batch-body"><div class="ts-batch-in"><ul class="ts-steps" hidden></ul></div></div></div>`;
       gWrap.appendChild(gEl);
     }
+    gEl.dataset.g = String(gi);
     const narr = gEl.querySelector(".ts-narr");
     if (g.text && narr.textContent !== g.text) { narr.textContent = g.text; narr.hidden = false; }
     const ul = gEl.querySelector(".ts-steps");
     ul.hidden = !g.steps.length;
+    // More than a few steps: one summary row with the tape; the list opens on tap.
+    const batch = gEl.querySelector(".ts-batch");
+    const head = gEl.querySelector(".ts-batch-head");
+    const isBatch = g.steps.length > BATCH_AT;
+    batch.classList.toggle("is-flat", !isBatch);
+    batch.classList.toggle("is-open", isBatch && !!g.open);
+    head.hidden = !isBatch;
+    if (isBatch) {
+      const hh = batchHeadInner(g);
+      if (head._h !== hh) { head.innerHTML = hh; head._h = hh; }
+      head.setAttribute("aria-expanded", String(!!g.open));
+    }
     g.steps.forEach((st, si) => {
       let li = ul.children[si];
       if (!li) { li = document.createElement("li"); ul.appendChild(li); }
@@ -312,7 +382,20 @@ export function openTraceSheet(trace) {
   const n = lookups(trace);
   const meta = `<p class="ts-meta">${n ? `${n} lookup${n === 1 ? "" : "s"}` : "No lookups"} · thought for ${secs(trace)}s</p>`;
   const note = `<div class="ts-note">${BRAIN}<p><strong>Where these numbers come from.</strong> Your portfolio, the time and market status come from StockSaathi itself; every other figure comes from the lookups above. A step gets a tick only after its lookup came back.</p></div>`;
-  openSheet({ title: "How Saathi got this", className: "ts-sheet", html: `${meta}<div class="ts-replay">${thoughts}${steps}</div>${note}` });
+  openSheet({
+    title: "How Saathi got this", className: "ts-sheet",
+    html: `${meta}<div class="ts-replay">${thoughts}${steps}</div>${note}`,
+    onMount(card) {
+      card.addEventListener("click", (e) => {
+        const head = e.target.closest(".ts-batch-head");
+        if (!head) return;
+        const b = head.closest(".ts-batch");
+        const open = !b.classList.contains("is-open");
+        b.classList.toggle("is-open", open);
+        head.setAttribute("aria-expanded", String(open));
+      });
+    },
+  });
 }
 
 // A compact copy for saving on the message (display only).
