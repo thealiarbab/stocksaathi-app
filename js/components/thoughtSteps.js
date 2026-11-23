@@ -126,7 +126,7 @@ function receipt(name, facts) {
       return Number.isFinite(facts.count) ? { text: `${facts.count} match${facts.count === 1 ? "" : "es"}` } : null;
     case "read_chart": {
       const v = Number(facts.change_pct);
-      return Number.isFinite(facts.price_inr) ? { text: inr(facts.price_inr), extra: Number.isFinite(v) ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "", dir: v > 0 ? "up" : v < 0 ? "down" : "" } : null;
+      return Number.isFinite(+facts.price_inr) ? { text: inr(+facts.price_inr), extra: Number.isFinite(v) ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "", dir: v > 0 ? "up" : v < 0 ? "down" : "" } : null;
     }
     case "screen_stocks": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;

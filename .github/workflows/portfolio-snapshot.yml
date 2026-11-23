@@ -72,11 +72,15 @@ jobs:
           d = json.load(open('/tmp/snapshot.json'))
           rpc = d.get('rpc') or {}
           written = rpc.get('snapshots_written', 0)
-          skipped = rpc.get('skipped_already_today', 0)
+          # A second run on the same day refreshes the rows the 16:00 IST
+          # database job already wrote. That is a success: this job failed
+          # every day from 4 Nov to 23 Nov because it only read the old
+          # 'skipped_already_today' field.
+          skipped = rpc.get('snapshots_refreshed', 0) + rpc.get('skipped_already_today', 0)
           traders = rpc.get('traders', 0)
           priced  = d.get('symbols_priced', 0)
           quotable = d.get('symbols_quotable', 0)
-          print(f"traders={traders} written={written} skipped={skipped} "
+          print(f"traders={traders} written={written} refreshed={skipped} "
                 f"priced={priced}/{quotable}")
           if traders and (written + skipped) == 0:
               print("::error::no snapshot rows written for any of "

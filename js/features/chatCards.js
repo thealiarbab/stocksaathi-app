@@ -397,7 +397,7 @@ async function drawChart(el) {
   const ticks = [lo + padv, (lo + hi) / 2, hi - padv];
   const head = isCompare
     ? syms.map((s, k) => `<span class="ss-ch-key k${k}"><i></i>${esc(s)} ${pct(vals[k].at(-1))}</span>`).join("")
-    : `<strong>${esc(syms[0])}</strong><b>${fmtV(vals[0].at(-1))}</b><span class="${up ? "up" : "down"}">${pct(chg)}</span>`;
+    : `<strong>${esc(syms[0])}</strong><b>₹${vals[0].at(-1).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b><span class="${up ? "up" : "down"}">${pct(chg)}</span>`;
   const btn = (r, label) => `<button type="button" data-ch-range="${r}" aria-pressed="${r === range}">${label}</button>`;
   const tog = (k, label) => `<button type="button" data-ch-toggle="${k}" aria-pressed="${show[k]}">${label}</button>`;
 

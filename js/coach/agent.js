@@ -739,7 +739,9 @@ async function execReadChart(args = {}) {
     bars = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
   } catch { return { ok: false, error: "Chart data could not be loaded right now." }; }
   if (bars.length < 15) return { ok: false, error: `Not enough price history for ${sym}.` };
-  const inr = (p) => +(p / 100).toFixed(2);
+  // Rupee figures as text with two decimals: a number drops "301.00" to 301,
+  // and the reply then read "₹301" (prices are never rounded).
+  const inr = (p) => (p / 100).toFixed(2);
   const day = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
   const first = bars[0], last = bars[bars.length - 1];
   let hi = bars[0], lo = bars[0], big = null, ups = 0;
