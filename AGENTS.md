@@ -202,9 +202,19 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
   the owner rolls it out. Fix a lesson as a principle or a fact, not as one
   more "never" rule, and prefer a replay test over a reply checker.
 - **Tools** (`js/coach/agent.js`): the nine lookups plus `screen_stocks`
-  (RPC `coach_screen_stocks`, whole-market ranking over `fundamentals_cache`,
-  sector words mapped by `_coach_sector_pattern`) and `get_market_movers`
-  (RPC `coach_market_movers`, NSE end-of-day file).
+  (RPC `coach_screen_stocks_v2`, whole-market ranking over
+  `fundamentals_cache`; every row carries price and day move, so a ranking is
+  ONE lookup; sector words mapped by `_coach_sector_pattern`),
+  `get_market_movers` (RPC `coach_market_movers`, NSE end-of-day file) and
+  `read_chart`.
+- **Rankings are a table card, never typed rows.** Screener and movers
+  results carry `how_to_show`; the model writes `[[table]]` and
+  `js/features/chatCards.js` draws the rows it fetched (`rememberTable` ->
+  `extractChartMarker` -> `tableHtml`: sortable, folds after 8 rows, each row
+  opens the stock). `cardRecord(m.card)` puts the shown rows back into the
+  history in the lookup-record tag, so follow-ups and the figure check see
+  them. Replies may also use markdown tables (`renderMarkdown`, kept in sync
+  in `chat.js` and `coachPanel.js`).
 - **Thinking row** (`js/components/thoughtSteps.js`, GR-1 inspired): the
   server streams thinking summaries (`thinking.display: "summarized"` ->
   `delta.reasoning_content`); steps show the value they fetched; more than

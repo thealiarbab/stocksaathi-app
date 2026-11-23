@@ -25,7 +25,7 @@ import { isPreview, isOwner } from "../features/preview.js";
 import { listProjects, getProject, createProject, renameProject, setInstructions, removeProject, syncProjects, projectNote } from "../features/chatProjects.js";
 import { forkAt, showVersion, branchInfo, stripVers } from "../features/chatBranches.js";
 import { pushThread, pullThreads, upsertShare, listShares, revokeShare, sendFeedback } from "../features/chatCloud.js";
-import { COMMANDS, isCommand, runCommand, cardHtml, hydrateCards, guideHtml, guideCompactHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker } from "../features/chatCards.js";
+import { COMMANDS, isCommand, runCommand, cardHtml, hydrateCards, guideHtml, guideCompactHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker, rememberTable, cardRecord } from "../features/chatCards.js";
 import { toast } from "../components/toast.js";
 import { onBackdropClick } from "../components/backdrop.js";
 import { logEvent } from "../features/telemetry.js";
@@ -1764,10 +1764,27 @@ export function renderMarkdown(text) {
     if (list) { out.push(`</${list}>`); list = null; }
   };
 
-  for (const rawLine of lines) {
+  const tableLine = /^\s*\|.+\|\s*$/;
+  const tableRule = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+  for (let li = 0; li < lines.length; li++) {
+    const rawLine = lines[li];
     const line = rawLine.trimEnd();
+    // A markdown table: a row of cells, then a |---|---| rule.
+    if (tableLine.test(line) && tableRule.test(lines[li + 1] || "") && (lines[li + 1] || "").includes("-")) {
+      flushPara(); closeList();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      const body = [];
+      li += 2;
+      while (li < lines.length && tableLine.test(lines[li])) { body.push(cells(lines[li])); li++; }
+      li--;
+      const isNum = head.map((_, c) => body.length > 0 && body.every((r) => /^[₹+\-−]?\s?[\d,.]+\s?(%|x|cr|crore|lakh)?$/i.test(String(r[c] || "").replace(/\*/g, ""))));
+      const cls = (c) => (isNum[c] ? ' class="num"' : "");
+      out.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head.map((h, c) => `<th${cls(c)}>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${head.map((_, c) => `<td${cls(c)}>${inline(r[c] || "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
     const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-    const numbered = line.match(/^\s*(\d{1,2})[.)]\s+(.*)$/);
+    const numbered = line.match(/^\s*(\d{1,3})[.)]\s+(.*)$/);
 
     if (!line.trim()) { flushPara(); closeList(); continue; }
 
@@ -1779,7 +1796,8 @@ export function renderMarkdown(text) {
     }
     if (numbered) {
       flushPara();
-      if (list !== "ol") { closeList(); out.push('<ol class="md-list">'); list = "ol"; }
+      // A list that starts at 13 keeps its number (it used to restart at 1).
+      if (list !== "ol") { closeList(); out.push(`<ol class="md-list"${+numbered[1] > 1 ? ` start="${+numbered[1]}"` : ""}>`); list = "ol"; }
       out.push(`<li>${inline(numbered[2])}</li>`);
       continue;
     }
@@ -1934,7 +1952,7 @@ async function sendAndReply(userText) {
       (m.role === "user" && m.quote ? `> ${String(m.quote).replace(/\n+/g, "\n> ")}\n\n(The student quoted the lines above from the chat and asks:)\n` : "") +
       (m.role === "user" && m.chartText ? `${m.text}\n\n[The app attached this chart to the question.]${m.chartText}` : m.text),
       m.lookupProvenance,
-    ),
+    ) + (m.role === "user" ? "" : cardRecord(m.card)),
   }));
 
   // Heuristic: does the message obviously need live data (stock price,
@@ -2044,6 +2062,7 @@ Reply in English.`;
     const collectLookupStep = (step) => {
       if (step?.action === "tool_results") {
         lookupProvenance.push(...normalizeLookupProvenance(step.lookups));
+        rememberTable(step.lookups);
       }
     };
     // Live bubble: a status line while tools run ("Checking TCS price…"),
@@ -2128,7 +2147,7 @@ Reply in English.`;
       ? `
 
 # THIS TURN
-This is a discovery question. Search for the instruments AND call get_stock_price for every symbol you plan to name - in parallel, in ONE turn - then reply with the names and their prices together. A list of names with no prices is not an acceptable answer, and do not ask whether the user wants the prices.`
+This is a discovery question. Search for the instruments AND call get_stock_price for every symbol you plan to name - in parallel, in ONE turn - then reply with the names and their prices together. (Rows from the screener or the movers lookup already carry prices: show those with [[table]] and do not look their prices up again.) A list of names with no prices is not an acceptable answer, and do not ask whether the user wants the prices.`
       : "";
     // News-shaped question: the app fetches the headlines itself (C5). The
     // model answered "latest news on oil and Iran" from memory on 6 Oct
@@ -2285,6 +2304,7 @@ You already offered to look this up and the user already asked. Do NOT ask again
   const collectLookupStep = (step) => {
     if (step?.action === "tool_results") {
       lookupProvenance.push(...normalizeLookupProvenance(step.lookups));
+      rememberTable(step.lookups);
     }
   };
 

@@ -211,7 +211,7 @@ const TOOLS = [
     function: {
       name: "screen_stocks",
       description:
-        "Screen the WHOLE market (about 3,800 NSE/BSE companies; ETFs and funds are left out) and rank by a fundamental: P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'lowest debt', 'stocks with P/E under 15'. IMPORTANT: 'top N stocks sorted by X' means the N LARGEST companies ranked by X: set top_by_size to N (and limit to N). Without top_by_size or min_market_cap_cr, the highest P/Es are tiny companies with near-zero earnings, so for 'highest P/E' questions prefer top_by_size (e.g. 200) or a market-cap floor and say which you used. Returns up to 50 rows in one call.",
+        "Screen the WHOLE market (about 3,800 NSE/BSE companies; ETFs and funds are left out) and rank by a fundamental: P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'lowest debt', 'stocks with P/E under 15'. IMPORTANT: 'top N stocks sorted by X' means the N LARGEST companies ranked by X: set top_by_size to N (and limit to N). With no size filter, only companies worth ₹1,000 crore or more are ranked (min_market_cap_cr 0 includes the smallest); say which size filter applied. Every row already carries the last price (price_inr) and that session's move (change_pct), so never call get_stock_price for rows this returned. Returns up to 50 rows in one call.",
       parameters: {
         type: "object",
         properties: {
@@ -698,9 +698,17 @@ async function execScreenStocks(args = {}) {
       p_top_by_size: num(args.top_by_size),
     });
     if (error || !data) return { ok: false, error: "Screener lookup failed." };
-    return data;
+    return withTableHint(data);
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
+// Screener and movers rows are drawn by the app as a table ([[table]]), so the
+// model writes about them instead of retyping them. 24 Nov: a 48-company
+// ranking took 48 price lookups and came back as one paragraph.
+const TABLE_HINT = "The app can draw these rows for the student as a table (rank, company, the ranked figure, price and day move). To show it, put [[table]] on its own line in your reply. When you do, do NOT list the rows yourself: write two to four sentences on what stands out and what the figure means. The rows already carry the last price and that session's move, so do not look prices up again.";
+function withTableHint(data) {
+  return Array.isArray(data?.results) && data.results.length >= 3 ? { ...data, how_to_show: TABLE_HINT } : data;
+}
+
 async function execMarketMovers(args = {}) {
   try {
     const client = await sb();
@@ -710,7 +718,7 @@ async function execMarketMovers(args = {}) {
       p_limit: Number.isFinite(+args.limit) && args.limit != null ? +args.limit : 10,
     });
     if (error || !data) return { ok: false, error: "Movers lookup failed." };
-    return data;
+    return withTableHint(data);
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 
@@ -1216,7 +1224,7 @@ export async function runAgent({ apiKey, system, messages, onStep, onText, onRea
             tool_call_id: tc.id,
             // Cap large payloads, on a row boundary: a cut mid-JSON once made
             // the model say "my results got cut off" (24 Nov).
-            content: capToolResult(result, 9000),
+            content: capToolResult(result, 12000),
           },
           provenance: {
             tool: name,
@@ -2058,6 +2066,8 @@ export function isDiscoveryQuery(text) {
 export function looksLikePricelessList(replyText, userText) {
   const s = String(replyText || "").trim();
   if (!s) return false;
+  // The rows (with prices) are in the table the app draws under the reply.
+  if (/\[\[\s*table\s*\]\]/i.test(s)) return false;
   // Any rupee figure or percentage means numbers were delivered. Not our case.
   if (/₹\s?[0-9]|[0-9]+(?:\.[0-9]+)?\s?%/.test(s)) return false;
   // Only applies when the user actually asked a discovery/screening question.

@@ -6,7 +6,7 @@
 import { getState, subscribe, setSetting } from "../state.js";
 import { nextTs, byTurn, repairTurnOrder } from "../features/chatOrder.js";
 import { isPreview, isOwner } from "../features/preview.js";
-import { isCommand, runCommand, cardHtml, hydrateCards, guideHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker } from "../features/chatCards.js";
+import { isCommand, runCommand, cardHtml, hydrateCards, guideHtml, CHART_TOOL_NOTE, hideChartMarkers, extractChartMarker, rememberTable, cardRecord } from "../features/chatCards.js";
 import { sendFeedback } from "../features/chatCloud.js";
 import { getInstrument } from "../data/universe.js";
 import { getNews } from "../data/news.js";
@@ -218,7 +218,7 @@ The student is looking at: ${screen}` : ""}` + (isPreview() ? CHART_TOOL_NOTE : 
   // Preserve full conversation history up to platform limits
   const messages = history.map(m => ({
     role: m.role === "user" ? "user" : "assistant",
-    content: withLookupProvenance(m.text, m.lookupProvenance),
+    content: withLookupProvenance(m.text, m.lookupProvenance) + (m.role === "user" ? "" : cardRecord(m.card)),
   }));
   // Tool-use path: "fast" profile (Gemini 3 Flash Preview) is more reliable
   // at function calling than Lite.
@@ -228,6 +228,7 @@ The student is looking at: ${screen}` : ""}` + (isPreview() ? CHART_TOOL_NOTE : 
       if (step?.action === "tool_results" && Array.isArray(lookupProvenance)) {
         lookupProvenance.push(...normalizeLookupProvenance(step.lookups));
       }
+      if (step?.action === "tool_results") rememberTable(step.lookups);
       onStep?.(step);
     },
   });
@@ -940,10 +941,27 @@ function renderMarkdown(text) {
     if (list) { out.push(`</${list}>`); list = null; }
   };
 
-  for (const rawLine of lines) {
+  const tableLine = /^\s*\|.+\|\s*$/;
+  const tableRule = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+  for (let li = 0; li < lines.length; li++) {
+    const rawLine = lines[li];
     const line = rawLine.trimEnd();
+    // A markdown table: a row of cells, then a |---|---| rule.
+    if (tableLine.test(line) && tableRule.test(lines[li + 1] || "") && (lines[li + 1] || "").includes("-")) {
+      flushPara(); closeList();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      const body = [];
+      li += 2;
+      while (li < lines.length && tableLine.test(lines[li])) { body.push(cells(lines[li])); li++; }
+      li--;
+      const isNum = head.map((_, c) => body.length > 0 && body.every((r) => /^[₹+\-−]?\s?[\d,.]+\s?(%|x|cr|crore|lakh)?$/i.test(String(r[c] || "").replace(/\*/g, ""))));
+      const cls = (c) => (isNum[c] ? ' class="num"' : "");
+      out.push(`<div class="md-table-wrap"><table class="md-table"><thead><tr>${head.map((h, c) => `<th${cls(c)}>${inline(h)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${head.map((_, c) => `<td${cls(c)}>${inline(r[c] || "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
     const bullet = line.match(/^\s*[-*•]\s+(.*)$/);
-    const numbered = line.match(/^\s*(\d{1,2})[.)]\s+(.*)$/);
+    const numbered = line.match(/^\s*(\d{1,3})[.)]\s+(.*)$/);
 
     if (!line.trim()) { flushPara(); closeList(); continue; }
 
@@ -955,7 +973,8 @@ function renderMarkdown(text) {
     }
     if (numbered) {
       flushPara();
-      if (list !== "ol") { closeList(); out.push('<ol class="md-list">'); list = "ol"; }
+      // A list that starts at 13 keeps its number (it used to restart at 1).
+      if (list !== "ol") { closeList(); out.push(`<ol class="md-list"${+numbered[1] > 1 ? ` start="${+numbered[1]}"` : ""}>`); list = "ol"; }
       out.push(`<li>${inline(numbered[2])}</li>`);
       continue;
     }

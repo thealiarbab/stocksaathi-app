@@ -276,6 +276,7 @@ export function cardHtml(card) {
   if (card.type === "whatif") return whatifHtml(card);
   if (card.type === "portfolio") return portfolioHtml(card);
   if (card.type === "about") return aboutHtml();
+  if (card.type === "table") return tableHtml(card);
   return `<div class="ss-card ss-card-chart" data-card="${data}"><div class="ss-card-loading">${L("Loading chart…", "Chart load ho raha hai…")}</div></div>`;
 }
 
@@ -458,6 +459,13 @@ export function hydrateCards(root, { onAsk, onRun, onFill } = {}) {
     const ask = e.target.closest("[data-card-ask]");
     const run = e.target.closest("[data-card-run]");
     const fill = e.target.closest("[data-card-fill]");
+    const tbAll = e.target.closest("[data-tb-all]");
+    const tbSort = e.target.closest("[data-tb-sort]");
+    if (tbAll || tbSort) {
+      const tb = e.target.closest(".ss-card-table");
+      if (tb) tableClick(tb, tbAll, tbSort);
+      return;
+    }
     if (run) { (onRun || onAsk)?.(run.dataset.cardRun); return; }
     if (fill) { onFill?.(fill.dataset.cardFill); return; }
     if (r || t) {
@@ -492,9 +500,159 @@ const MARKER_RE = /\[\[\s*(chart|compare)\s+([^\]]{1,60})\]\]/gi;
 // here, never from the model).
 const ABOUT_RE = /\[\[\s*about\s*\]\]/gi;
 
+// ---- Tables from a lookup -----------------------------------------------------
+// After a screener or movers lookup the model writes [[table]] on its own line
+// and the app draws the rows that lookup returned: rank, company, the ranked
+// figure, day move and price. The model never retypes the rows (24 Nov: a
+// 48-company ranking arrived as one run-on paragraph after 48 price lookups).
+const TABLE_RE = /\[\[\s*table\s*\]\]/gi;
+const TABLE_KEEP_MS = 5 * 60 * 1000;
+const TABLE_FIRST = 8;       // rows shown before "Show all"
+let _lastTable = null;
+
+const fin = (v) => (v != null && Number.isFinite(+v) ? +v : null);
+const num2 = (v) => Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const capText = (cr) => (cr >= 1e5 ? `₹${(cr / 1e5).toFixed(2)}L Cr` : `₹${Math.round(cr).toLocaleString("en-IN")} Cr`);
+const volText = (v) => (v >= 1e7 ? `${(v / 1e7).toFixed(2)} Cr` : v >= 1e5 ? `${(v / 1e5).toFixed(2)} lakh` : Math.round(v).toLocaleString("en-IN"));
+const TABLE_METRICS = {
+  pe: { label: "P/E", fmt: num2 },
+  pb: { label: "P/B", fmt: num2 },
+  market_cap: { label: "Market cap", title: "market cap", fmt: capText },
+  roe: { label: "ROE", fmt: (v) => `${num2(v)}%` },
+  dividend_yield: { label: "Div. yield", title: "dividend yield", fmt: (v) => `${num2(v)}%` },
+  debt_to_equity: { label: "Debt/equity", title: "debt to equity", fmt: num2 },
+  eps: { label: "EPS", fmt: (v) => `₹${num2(v)}` },
+  volume: { label: "Shares", fmt: volText },
+};
+const trimName = (n) => String(n || "").replace(/\s+(limited|ltd\.?)$/i, "").trim();
+
+function tableCardFrom(tool, f) {
+  const rows = Array.isArray(f?.results) ? f.results : [];
+  if (rows.length < 3) return null;
+  if (tool === "screen_stocks") {
+    const by = TABLE_METRICS[f.sorted_by] && f.sorted_by !== "volume" ? f.sorted_by : "market_cap";
+    return {
+      type: "table", kind: "screen", by, dir: f.direction === "asc" ? "asc" : "desc",
+      top: fin(f.top_by_size), sector: f.sector_filter ? String(f.sector_filter).slice(0, 24) : null,
+      rows: rows.slice(0, 50).map((r) => ({
+        s: String(r.symbol || ""), n: trimName(r.name || r.symbol).slice(0, 40),
+        v: fin(by === "pe" ? r.pe : by === "market_cap" ? r.market_cap_cr : r.value),
+        p: fin(r.price_inr), c: fin(r.change_pct),
+      })).filter((r) => r.s),
+    };
+  }
+  if (tool === "get_market_movers") {
+    const by = ["losers", "volume"].includes(f.kind) ? f.kind : "gainers";
+    return {
+      type: "table", kind: "movers", by, session: f.session ? String(f.session).slice(0, 10) : null,
+      rows: rows.slice(0, 25).map((r) => {
+        const inst = getInstrument(String(r.symbol || ""));
+        return {
+          s: String(r.symbol || ""), n: trimName(inst && !inst._stub && inst.name ? inst.name : r.symbol).slice(0, 40),
+          v: by === "volume" ? fin(r.volume) : null, p: fin(r.close_inr), c: fin(r.change_pct),
+        };
+      }).filter((r) => r.s),
+    };
+  }
+  return null;
+}
+
+/** Called with each round of lookup results; keeps the latest rows a table can show. */
+export function rememberTable(lookups) {
+  for (const l of lookups || []) {
+    if (l?.status !== "returned" || !l.facts) continue;
+    const card = tableCardFrom(l.tool, l.facts);
+    if (card && card.rows.length >= 3) _lastTable = { card, at: Date.now() };
+  }
+}
+
+function tableTitle(c) {
+  if (c.kind === "movers") {
+    const what = c.by === "losers" ? L("Biggest fallers", "Sabse zyada gire") : c.by === "volume" ? L("Most traded", "Sabse zyada trade hue") : L("Biggest gainers", "Sabse zyada badhe");
+    const d = c.session ? new Date(`${c.session}T00:00:00`) : null;
+    return d && !isNaN(d) ? `${what}, ${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : what;
+  }
+  const label = TABLE_METRICS[c.by]?.title || TABLE_METRICS[c.by]?.label || "size";
+  const sector = c.sector ? `${c.sector.toLowerCase()} ` : "";
+  if (c.top) return `${c.top} largest ${sector}companies by ${label}`;
+  return `${sector ? sector[0].toUpperCase() + sector.slice(1) : ""}${sector ? "companies" : "Companies"} by ${label}`;
+}
+
+function tableRowsHtml(c, key = "rank", dir = "asc", open = false) {
+  const m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
+  const rows = c.rows.map((r, i) => ({ ...r, i: i + 1 }));
+  const val = { rank: (r) => r.i, name: (r) => r.n.toLowerCase(), metric: (r) => r.v, move: (r) => r.c }[key] || ((r) => r.i);
+  rows.sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null || y == null) return (x == null) - (y == null);     // blanks last, whichever way
+    const d = typeof x === "string" ? x.localeCompare(y) : x - y;
+    return (dir === "asc" ? d : -d) || a.i - b.i;
+  });
+  const row = (r) => `<a class="ss-tb-row" role="row" href="/stocks/${encodeURIComponent(r.s)}">
+      <span class="ss-tb-rank" role="cell">${r.i}</span>
+      <span class="ss-tb-co" role="cell"><b>${esc(r.n)}</b><i>${esc(r.s)}</i></span>
+      ${m ? `<span class="ss-tb-num" role="cell">${r.v == null ? "—" : esc(m.fmt(r.v))}</span>` : ""}
+      <span class="ss-tb-px" role="cell"><b class="${r.c > 0 ? "up" : r.c < 0 ? "down" : ""}">${r.c == null ? "—" : `${r.c > 0 ? "+" : r.c < 0 ? "−" : ""}${Math.abs(r.c).toFixed(2)}%`}</b><i>${r.p == null ? "" : `₹${num2(r.p)}`}</i></span>
+    </a>`;
+  const first = rows.length > TABLE_FIRST + 2 ? rows.slice(0, TABLE_FIRST) : rows;
+  const rest = rows.slice(first.length);
+  return `<div class="ss-tb-body">${first.map(row).join("")}</div>${rest.length
+    ? `<div class="ss-tb-more"${open ? "" : " inert"}><div>${rest.map(row).join("")}</div></div>` : ""}`;
+}
+
+function tableHtml(c) {
+  if (!Array.isArray(c.rows) || !c.rows.length) return "";
+  const m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
+  const n = c.rows.length;
+  const sub = c.kind === "movers"
+    ? L("From NSE's end-of-day file for that session.", "NSE ki us din ki end-of-day file se.")
+    : `${c.dir === "asc" ? L("Lowest first.", "Sabse kam pehle.") : L("Highest first.", "Sabse zyada pehle.")} ${L("Day move and price are from the last session.", "Day move aur price pichhle session ke hain.")}`;
+  const allLabel = L(`Show all ${n}`, `Saare ${n} dikhao`);
+  const th = (key, label, cls = "") => `<button type="button" class="ss-tb-th ${cls}" role="columnheader" aria-sort="none" data-tb-sort="${key}">${esc(label)}</button>`;
+  return `<div class="ss-card ss-card-table${m ? "" : " no-metric"}" data-card="${esc(JSON.stringify(c))}" data-sort="rank" data-dir="asc"${m && /^(pe|pb|roe|dividend_yield|debt_to_equity)$/.test(c.by) ? ' style="--tb-m:62px"' : ""}>
+    <div class="ss-tb-head"><div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
+    <div class="ss-tb" role="table" aria-label="${esc(tableTitle(c))}">
+      <div class="ss-tb-row ss-tb-cols" role="row">${th("rank", "#", "ss-tb-rank")}${th("name", L("Company", "Company"), "ss-tb-co")}${m ? th("metric", m.label, "ss-tb-num") : ""}${th("move", L("Day move", "Day move"), "ss-tb-px")}</div>
+      <div class="ss-tb-rows">${tableRowsHtml(c)}</div>
+    </div>
+    ${n > TABLE_FIRST + 2 ? `<div class="ss-card-actions"><button type="button" class="ss-card-btn ss-tb-all" data-tb-all aria-expanded="false" data-tb-label="${esc(allLabel)}">${esc(allLabel)}</button></div>` : ""}
+  </div>`;
+}
+
+function tableClick(el, all, sort) {
+  if (all) {
+    const open = el.classList.toggle("is-open");
+    all.setAttribute("aria-expanded", String(open));
+    const more = el.querySelector(".ss-tb-more");
+    if (more) more.inert = !open;
+    all.textContent = open ? L("Show fewer", "Kam dikhao") : all.dataset.tbLabel;
+    if (!open) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return;
+  }
+  let card;
+  try { card = JSON.parse(el.dataset.card); } catch { return; }
+  const key = sort.dataset.tbSort;
+  const dir = el.dataset.sort === key ? (el.dataset.dir === "asc" ? "desc" : "asc") : (key === "name" || key === "rank" ? "asc" : "desc");
+  el.dataset.sort = key; el.dataset.dir = dir;
+  el.querySelector(".ss-tb-rows").innerHTML = tableRowsHtml(card, key, dir, el.classList.contains("is-open"));
+  el.querySelectorAll("[data-tb-sort]").forEach((b) => b.setAttribute("aria-sort", b === sort ? (dir === "asc" ? "ascending" : "descending") : "none"));
+}
+
+/**
+ * What a table card showed, for the model's view of the chat history and for
+ * the figure check (same tag as the lookup records, so its numbers count as
+ * looked up). Empty for every other card.
+ */
+export function cardRecord(card) {
+  if (card?.type !== "table" || !Array.isArray(card.rows)) return "";
+  const m = card.kind === "movers" && card.by !== "volume" ? null : TABLE_METRICS[card.by];
+  const rows = card.rows.map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
+  return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_table: tableTitle(card), rows })}</stocksaathi_lookup_provenance>`;
+}
+
 /** Text as shown while it streams: markers (and a half-typed one) hidden. */
 export function hideChartMarkers(text) {
-  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(/\[\[[^\]]{0,60}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(/\[\[[^\]]{0,60}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 /** { text, card } for a finished reply: the first valid marker becomes a card. */
@@ -516,5 +674,8 @@ export function extractChartMarker(text) {
       if (a && b && a !== b) card = { type: "compare", syms: [a, b], range: parseRange(rangeTok, "1y") };
     }
   }
+  // [[table]]: the rows of the latest screener or movers lookup.
+  if (!card && TABLE_RE.test(String(text || "")) && _lastTable && Date.now() - _lastTable.at < TABLE_KEEP_MS) card = _lastTable.card;
+  TABLE_RE.lastIndex = 0;
   return { text: hideChartMarkers(text), card };
 }
