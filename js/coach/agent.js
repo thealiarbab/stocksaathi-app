@@ -1970,7 +1970,10 @@ const ADVICE_RULES = [
   // every day, like Zomato or Tata". Case-sensitive on the names so "a
   // sector like IT or Banking" (a clean reply) is left alone by the
   // company/stock/something anchor.
-  { rule: "pick", re: /\b(?:compan(?:y|ies)|stocks?|something)\b[^.?!\n]{0,40}\blike\s+[A-Z][\w&.]*(?:\s+[A-Z][\w&.]*)?\s+or\s+[A-Z]/ },
+  // Only when the sentence steers them to put money in. Without that anchor
+  // it ate a greeting ("ask me about a stock like Reliance or TCS") and the
+  // whole reply to "yo" became the canned "I don't pick stocks" line (24 Nov).
+  { rule: "pick", re: /\b(?:buy(?:ing)?|invest(?:ing)?\s+in|start(?:ing)?\s+with|begin\s+with|put\s+(?:your\s+)?money\s+(?:in|into)|kharid(?:o|na)?|le\s+lo)\b[^.?!\n]{0,60}\b(?:compan(?:y|ies)|stocks?|something)\b[^.?!\n]{0,40}\blike\s+[A-Z][\w&.]*(?:\s+[A-Z][\w&.]*)?\s+or\s+[A-Z]/i },
   { rule: "pick", re: /\b(?:safe|best|good)["'”’]?\s+bet\b/i },
   { rule: "pick", re: /\b(?:great|good|best|perfect)\s+(?:place|stock|company|pick)\s+to\s+start\b/i },
   { rule: "judge", re: /\b(?:sahi|accha|achha|acha|great|smart|good|solid|perfect|bad|galat|wrong)\s+(?:move|time|entry|exit|decision|trade|call)\b/i },
