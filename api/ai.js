@@ -767,6 +767,32 @@ async function opPortfolioDigest(req, origin) {
 // same paragraph that admitted no headline mentioned TCS.
 const SYSTEM_STOCK_WHY = `You are Saathi. Write a 40-70 word paragraph on a stock's move in the session named in the data. Open with the numbers (ticker + price + the session's %), and call the session what the data calls it ("today" only if it says today; otherwise its day, e.g. "on Friday"). State a cause ONLY if one of the provided headlines names it, and say which outlet reported it. If no headline explains the move, say plainly that there is no clear news reason in today's headlines, and do not guess one: no sector rotation, macro mood, profit-booking, theme or "optimism" unless a headline says so. You may add one neutral thing a learner could look at (the company's next results date, its sector's move in the data). No predictions or buy/sell advice. Return strict JSON: { "explanation": "..." }.`;
 
+// A short sidebar title for a coach chat, from its first exchange (24 Nov
+// 2026; titles used to be the first 42 characters of the first message, so
+// half the sidebar read "yo").
+async function opChatTitle(req, origin) {
+  let body; try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
+  const q = String(body.question || "").slice(0, 600).trim();
+  const a = String(body.answer || "").slice(0, 900).trim();
+  if (!q) return j(400, { error: "missing_question" }, origin);
+  try {
+    const text = await callLlm({ op: "chat-title", feature: "chat-title",
+      messages: [
+        { role: "system", content: "Write a title for this chat for a sidebar list. 2 to 5 words, sentence case, no quotes, no emoji, no full stop. Name the topic (stock names, concepts), not the greeting. If the chat is only a greeting, use 'Quick hello'. Reply with JSON: {\"title\": \"...\"}" },
+        { role: "user", content: `Student: ${q}
+Saathi: ${a}` },
+      ],
+      max_tokens: 60, temperature: 0.3, response_format: { type: "json_object" }, profile: "json", effort: "high",
+    });
+    const parsed = parseJsonLoose(text);
+    const title = typeof parsed?.title === "string" ? parsed.title.replace(/["“”.]+/g, "").replace(/\s+/g, " ").trim().slice(0, 48) : "";
+    if (!title) return j(502, { error: "no_title" }, origin);
+    return j(200, { title }, origin);
+  } catch (e) {
+    return j(502, { error: "llm_failed" }, origin);
+  }
+}
+
 async function opStockWhy(req, origin) {
   let body; try { body = await req.json(); } catch { return j(400, { error: "bad_body" }, origin); }
   const sym = String(body.symbol || "").toUpperCase().slice(0, 24);
@@ -1680,6 +1706,7 @@ async function route(req) {
       case "news-tldr":           if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opNewsTldr(req, origin);
       case "portfolio-digest":    if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opPortfolioDigest(req, origin);
       case "stock-why":           if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opStockWhy(req, origin);
+      case "chat-title":          if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opChatTitle(req, origin);
       case "trade-nudge":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opTradeNudge(req, origin);
       case "market-mood":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opMarketMood(req, origin);
       case "market-search":       if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opMarketSearch(req, origin);

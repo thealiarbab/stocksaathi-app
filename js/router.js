@@ -91,10 +91,11 @@ const ROUTES = [
   // Send / receive money was removed (16 Oct 2026). Old links land on the portfolio.
   { name: "friends",       match: /^\/friends\/?$/,                        render: () => go("/portfolio", { replace: true }), public: true },
   { name: "news",          match: /^\/news\/?$/,                           load: () => import("./pages/news.js").then(m => m.renderNews), public: true },
-  { name: "chat",          match: /^\/chat\/?$/,                           load: () => Promise.all([
+  // /chat/<id> opens that conversation (24 Nov 2026: every chat has a link).
+  { name: "chat",          match: /^\/chat(?:\/([A-Za-z0-9_-]{3,60}))?\/?$/,  load: () => Promise.all([
     ensureCoachStyles(),
     import("./pages/chat.js"),
-  ]).then(([, m]) => m.renderChat), public: true },
+  ]).then(([, m]) => m.renderChat), param: "id", public: true },
   // A chat someone shared (chat_shares). Public, read-only, works signed out.
   { name: "shared-chat",   match: /^\/share\/([a-f0-9]{8,40})\/?$/,          load: () => Promise.all([
     ensureCoachStyles(),

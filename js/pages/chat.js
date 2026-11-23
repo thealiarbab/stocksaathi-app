@@ -206,6 +206,10 @@ function chatHost() {
 export function renderChat(main, opts = {}) {
   _host = main;
   const embedded = !!opts.embedded;
+  // A chat link (/chat/<id>) opens that conversation. On a new device the
+  // chat may arrive with the cloud sync a moment later, so render() keeps
+  // trying until it is there.
+  let wantId = !embedded && opts.id ? String(opts.id) : null;
   // App-style page: no site footer, only the messages scroll. Not when
   // drawn inside the coach pop-up: the page underneath stays as it is.
   if (!embedded) {
@@ -225,7 +229,7 @@ export function renderChat(main, opts = {}) {
   }
   const leaveChat = () => {
     // The router fires ss:navigate for this page too; only undo on a real exit.
-    if (location.pathname.replace(/\/+$/, "") === "/chat") return;
+    if (/^\/chat(\/|$)/.test(location.pathname)) return;
     main.classList.remove("main-chat");
     document.body.classList.remove("chat-app");
     window.removeEventListener("ss:navigate", leaveChat);
@@ -255,7 +259,19 @@ export function renderChat(main, opts = {}) {
     } : null);
     updateDraft = null;
     const state = getState();
+    if (wantId && sessionsData.sessions?.some((x) => x.id === wantId)) {
+      sessionsData.activeId = wantId;
+      wantId = null;
+    }
     const active = getActiveSession(sessionsData);
+    // Keep the address bar on this chat's own link (a new, empty chat is
+    // plain /chat), so a chat can be bookmarked, shared or reopened.
+    if (!embedded && active && !wantId) {
+      const want = active.messages?.length ? `/chat/${active.id}` : "/chat";
+      if (location.pathname.replace(/\/+$/, "") !== want) {
+        try { history.replaceState(history.state, "", want + location.search + location.hash); } catch {}
+      }
+    }
     // A repaint of the chat on screen (cloud sync, another tab, the language
     // switch) keeps the reader's place; opening a chat starts at the end.
     const prevEl = main.querySelector("#chat-messages");
@@ -891,7 +907,11 @@ export function renderChat(main, opts = {}) {
       let done = false;
       const finish = (save) => {
         if (done) return; done = true;
-        if (save) renameSession(sessionsData, id, inp.value);
+        if (save) {
+          renameSession(sessionsData, id, inp.value);
+          const renamed = sessionsData.sessions.find(x => x.id === id);
+          if (renamed) { renamed.titleEdited = true; saveSessions(sessionsData); }
+        }
         if (save && isPreview()) pushThread(sessionsData.sessions.find(x => x.id === id));
         render();
       };
@@ -1506,6 +1526,35 @@ function rememberTrace(t) {
   return t.__id;
 }
 
+// An AI-written sidebar title (/api/ai?op=chat-title) after the first real
+// exchange; a chat that opened with "yo" is titled again once it has a topic.
+async function autoTitle(session, question, answer, done) {
+  try {
+    const asked = (session.messages || []).filter((m) => m.role === "user").length;
+    if (session.titleEdited || asked > 3) return;
+    if (session.aiTitle && session.title !== "Quick hello") return;
+    const res = await fetch("/api/ai?op=chat-title", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Saathi-Feature": "chat-title" },
+      body: JSON.stringify({ question: String(question || "").slice(0, 600), answer: String(answer || "").slice(0, 900) }),
+    });
+    if (!res.ok) return;
+    const { title } = await res.json();
+    if (!title || session.titleEdited) return;
+    session.title = title;
+    session.aiTitle = true;
+    saveSessions(sessionsData);
+    done?.();
+  } catch (e) { console.warn("[chat] title:", e?.message || e); }
+}
+
+// The newest streaming bubble (there should be one; if an old one lingers,
+// the live turn is always the last).
+function lastStreamBody(host) {
+  const all = host?.querySelectorAll('#chat-messages [data-streaming="1"] .msg-body');
+  return all && all.length ? all[all.length - 1] : null;
+}
+
 // "Checking TCS price…" while tools run: a pulsing dot, not a reply.
 function statusHtml(text) {
   return `<span class="cc-status" role="status"><i aria-hidden="true"></i>${escapeHtml(text)}</span>`;
@@ -1619,6 +1668,15 @@ async function sendAndReply(userText) {
   const ownerSession = getActiveSession(sessionsData);
   const ownerMessages = ownerSession.messages;
   const ownerSessionId = ownerSession.id;
+  // A reply that never finished (closed tab, error mid-turn) left a
+  // "still working" bubble behind; the next turn's box then got patched into
+  // the old one and showed up empty or doubled (24 Nov). Settle them first.
+  for (let i = ownerMessages.length - 1; i >= 0; i--) {
+    const m = ownerMessages[i];
+    if (m?.role !== "assistant" || !m.streaming) continue;
+    if (String(m.text || "").trim() && !m.status) { m.streaming = false; m.status = false; }
+    else ownerMessages.splice(i, 1);
+  }
   const isOwnerActive = () => sessionsData.activeId === ownerSessionId;
 
   // Manually toggle the form DOM so the input disables + Send becomes Stop
@@ -1852,7 +1910,7 @@ Reply in English.`;
     let liveTarget = "", liveRaf = false, liveStatus = false;
     const paintLive = () => {
       if (!isOwnerActive() || !live) return;
-      const bubble = outer?.querySelector('#chat-messages [data-streaming="1"] .msg-body');
+      const bubble = lastStreamBody(outer);
       if (!bubble) { reRenderOuter(); return; }
       // While thinking, patch the live block in place (a full redraw restarted
       // its animations and flickered); once the answer streams, draw it.
@@ -2056,6 +2114,7 @@ Your draft called the app context block pasted or unverifiable. That is wrong: S
       if (firstUser) ownerSession.title = String(firstUser.text).slice(0, 42).replace(/\s+/g, " ").trim();
     }
     saveSessions(sessionsData);
+    if (replyText && replyText.trim()) autoTitle(ownerSession, userText, finalText, () => { if (isOwnerActive()) reRenderOuter(); });
     if (replyText && replyText.trim()) {
       logChatTurn({
         userText: "", assistantText: finalText, model: "gemini-chat",
@@ -2113,7 +2172,7 @@ Your draft called the app context block pasted or unverifiable. That is wrong: S
     // the whole chat list. This is 10-50× cheaper than the full
     // reRenderOuter and is what makes the reveal feel buttery.
     const outerEl = chatHost();
-    const streamBubble = outerEl?.querySelector('#chat-messages [data-streaming="1"] .msg-body');
+    const streamBubble = lastStreamBody(outerEl);
     if (streamBubble) {
       streamBubble.innerHTML = renderMarkdown(hideChartMarkers(displayedText));
       const msgs = outerEl?.querySelector("#chat-messages");
