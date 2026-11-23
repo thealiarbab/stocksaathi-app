@@ -1935,9 +1935,9 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
       const timeout = setTimeout(done, 2000);
       requestAnimationFrame(() => { clearTimeout(timeout); done(); });
     });
-    m_pending = false;
-    m_abortController = null;
-    restoreForm();
+    // The send box stays locked until the reply checks below have finished
+    // (24 Nov: it unlocked here, a new question went out while a check was
+    // still rerunning the old turn, and the old answer landed above it).
     // Write into the OWNER session's messages directly so a mid-stream
     // session switch doesn't land the reply in the wrong chat.
     let cleanedReply = stripScaffolding(replyText);
@@ -1949,8 +1949,16 @@ This is a discovery question. Search for the instruments AND call get_stock_pric
     // structurally cannot see: a long list of instruments with no numbers,
     // which is what "fetch a list of 20 top bank stocks" actually returned in
     // production. See looksLikePricelessList in coach/agent.js.
+    // A check that reruns the AI puts the bubble back into the thinking row
+    // instead of leaving a draft on screen that then changes under the reader.
+    const recheck = () => {
+      trace.answerAt = 0;
+      traceStep(trace, { action: "figure_check" });
+      if (live) { live.status = true; live.text = ""; paintLive(); }
+    };
     const pricelessList = looksLikePricelessList(cleanedReply, userText);
     if (looksLikeLookupOffer(cleanedReply) || looksLikeFetchPromise(cleanedReply) || pricelessList) {
+      recheck();
       try {
         // Bounded — see the note on the streaming escalation below. A retry
         // that outlives the user's patience is worse than the reply we're
@@ -1980,6 +1988,7 @@ You already offered to look this up and the user already asked. Do NOT ask again
     // pasted or untrustworthy is wrong by construction: run it once more with
     // the correction, and never keep the bad text (24 Nov 2026).
     if (callsAppContextFake(cleanedReply)) {
+      recheck();
       try {
         const retry = await withDeadline(runAgent({
           apiKey: state.settings.llmApiKey || null,
@@ -2012,6 +2021,9 @@ Your draft called the app context block pasted or unverifiable. That is wrong: S
     }
     const replyTs = qIdx >= 0 ? (ownerMessages[qIdx].ts || Date.now()) + 1 : Date.now();
     clearInterval(traceTick);
+    m_pending = false;
+    m_abortController = null;
+    restoreForm();
     if (live) {
       live.trace = freezeTrace(trace);
       live.text = finalText; live.streaming = false; live.status = false; live.ts = replyTs;
