@@ -376,8 +376,6 @@ export async function heardOnRoute() {
     if (!/^\/portfolio\/?$/.test(location.pathname)) return;
     // Cheap checks first, so most visits never call the database.
     if (user.heardFrom || user.heardBackfillShownAt || !user.onboarded) return;
-    const made = Date.parse(user.createdAt || "");
-    if (!(made > Date.now() - 14 * 86400_000)) return;
     let seen = false;
     try { seen = localStorage.getItem(`${BACKFILL_LS}.${user.id}`) === "1"; } catch {}
     if (seen) return;

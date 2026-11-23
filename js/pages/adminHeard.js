@@ -4,9 +4,9 @@
 //
 //   Card (popup_mode)        off | admin_only | live. Until live, everyone
 //                            but admin accounts keeps the old dropdown.
-//   One-time ask (backfill)  off | admin_only | live. Accounts from the last
-//                            14 days, onboarded, no answer yet: asked once on
-//                            their next /portfolio visit.
+//   One-time ask (backfill)  off | admin_only | live. Any onboarded account
+//                            with no answer yet (no age limit since 23 Nov):
+//                            asked once on their next /portfolio visit.
 //
 // Data: /api/ai?op=admin-heard → admin_heard_overview(); buttons go to
 // op=admin-heard-set → admin_heard_set(). Preview the card on any page with
@@ -33,7 +33,7 @@ export function renderHeardTab(host, { adminGet, adminPost }) {
     const key = b.dataset.k, val = b.dataset.v;
     if (val === "live" && !confirm(key === "popup_mode"
       ? "Show the new card to EVERY account and remove the old dropdown?"
-      : "Ask every eligible account from the last 14 days, once, on their next portfolio visit?")) return;
+      : "Ask every account with no answer, once, on their next portfolio visit?")) return;
     st.busy = true;
     try { st.data = await adminPost("/api/ai?op=admin-heard-set", { [key]: val }); }
     catch (err) { alert(String(err.message || err)); }
@@ -63,7 +63,7 @@ function paint(root) {
       </div>
       <div>
         <h3 style="margin:0 0 4px">One-time ask for recent accounts</h3>
-        <p class="muted text-sm" style="margin:0 0 10px">Onboarded in the last 14 days with no answer: asked once on the next /portfolio visit, then never again.
+        <p class="muted text-sm" style="margin:0 0 10px">Any account with no answer, however old: asked once on the next /portfolio visit, then never again.
           Eligible now: <strong>${e(d.backfill_eligible ?? "–")}</strong> · already asked: <strong>${e(d.backfill_shown ?? "–")}</strong></p>
         ${seg("backfill_mode", s.backfill_mode)}
       </div>
