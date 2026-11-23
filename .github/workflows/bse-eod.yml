@@ -15,6 +15,15 @@ on:
   schedule:
     # 13:45 UTC = 19:15 IST, after BSE publishes (~18:00 IST). Mon-Fri.
     - cron: "45 13 * * 1-5"
+    # GitHub starts this repo's scheduled runs about 8 hours late (measured
+    # 16-23 Nov 2026: the 19:00 IST run above began between 02:57 and 04:29
+    # IST), so the day's closes and "top gainers" were a session behind all
+    # evening. These two earlier entries land around 19:00-22:30 IST with
+    # that delay. A run that starts before the exchange has published just
+    # re-imports the previous day, which changes nothing (the import is an
+    # upsert and apply_nse_eod never replaces a newer price).
+    - cron: "45 5 * * 1-5"
+    - cron: "45 7 * * 1-5"
   workflow_dispatch:
     inputs:
       days:
