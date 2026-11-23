@@ -29,8 +29,13 @@ const ICONS = {
   calc: `<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="1.8" width="10" height="12.4" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 4.8h5M5.6 8h.1M8 8h.1M10.4 8h.1M5.6 10.6h.1M8 10.6h.1M10.4 10.6h.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
   spark: `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 2.5l1.2 3.3 3.3 1.2-3.3 1.2L7 11.5 5.8 8.2 2.5 7l3.3-1.2zM12.2 10.3l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
 };
-const WORDS_EN = [["Reading the charts…", "chart"], ["Thinking…", "brain"], ["Checking the numbers…", "calc"], ["Crafting your answer…", "spark"]];
-const WORDS_HI = [["Charts dekh raha hoon…", "chart"], ["Soch raha hoon…", "brain"], ["Numbers check kar raha hoon…", "calc"], ["Jawab bana raha hoon…", "spark"]];
+// Neutral waiting words, like GR-1's ("Thinking…", "Brewing…", "Crafting…",
+// "Reasoning…"). Never claim work that is not happening: a "yo" is not
+// "Reading the charts" (owner, 24 Nov). What Saathi is actually doing shows
+// in the thought lines and steps underneath.
+const WORDS_EN = ["Thinking…", "Brewing…", "Reasoning…", "Crafting…"];
+const WORDS_HI = ["Soch raha hoon…", "Samajh raha hoon…", "Jod raha hoon…"];
+const WORD_MS = 3200;
 
 // The smaller line under each step.
 const SUB = {
@@ -47,7 +52,7 @@ const SUB = {
 };
 
 export function createTrace() {
-  return { t0: Date.now(), groups: [], think: "", answerAt: 0, endAt: 0 };
+  return { t0: Date.now(), groups: [], think: "", thoughts: [], answerAt: 0, endAt: 0 };
 }
 
 function args(tc) {
@@ -141,18 +146,22 @@ export function traceStep(trace, st) {
 }
 
 // Summaries can mention the instructions; those lines are never shown.
-const HIDE_RE = /\b(system prompt|instructions?|the rules?|tool|function call|app context|context block|stocksaathi_|<\/?\w+>|json)\b/i;
+const HIDE_RE = /\b(system prompt|system message|instructions?|the rules?|tools?|function call|app context|context block|stocksaathi_|json|the user)\b|<\/?\w+>/i;
+// The model's thinking summary streams in pieces. Each finished sentence
+// becomes one thought line (GR-1's narration lines, the owner's "thinking
+// breakdown"); lines that talk about the setup are dropped.
 export function traceReasoning(trace, delta) {
   if (!trace || !delta) return;
-  trace.think = (trace.think + delta).slice(-1500);
-}
-function latestThought(trace) {
-  const parts = String(trace.think || "")
-    .replace(/\*\*/g, "")
-    .split(/(?<=[.!?])\s+|\n+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 12 && s.length < 200 && !HIDE_RE.test(s));
-  return parts.length ? parts[parts.length - 1] : "";
+  trace.think += delta;
+  const parts = trace.think.split(/(?<=[.!?])\s+|\n+/);
+  trace.think = parts.pop() || "";                     // the unfinished tail
+  for (let p of parts) {
+    p = p.replace(/\*\*/g, "").replace(/^[-*•]\s*/, "").trim();
+    if (p.length < 12 || p.length > 240 || HIDE_RE.test(p)) continue;
+    if (trace.thoughts[trace.thoughts.length - 1] === p) continue;
+    trace.thoughts.push(p);
+    if (trace.thoughts.length > 40) trace.thoughts.shift();
+  }
 }
 
 function clip(s, n) { s = String(s || "").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
@@ -160,13 +169,14 @@ function clip(s, n) { s = String(s || "").trim(); return s.length > n ? s.slice(
 const candle = `<span class="ts-candle" aria-hidden="true"><i></i><i></i><i></i></span>`;
 const tick = `<svg class="ts-tick" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.2 8.3l2 2 3.8-4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const cross = `<svg class="ts-tick ts-x" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+const BRAIN = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2c-.8-1-2.6-1-3.3.3-1.4 0-2.2 1.5-1.6 2.6-1 .8-.9 2.5.2 3.1-.2 1.4 1 2.6 2.4 2.3.7 1 2.3 1 2.3-.2V3.2zm0 0c.8-1 2.6-1 3.3.3 1.4 0 2.2 1.5 1.6 2.6 1 .8.9 2.5-.2 3.1.2 1.4-1 2.6-2.4 2.3-.7 1-2.3 1-2.3-.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
 
 function subLine(s) {
   if (s.state === "fail") return "Couldn't get it this time";
   const pair = SUB[s.name] || ["Looking it up", "Retrieved"];
   return s.state === "run" ? pair[0] : pair[1];
 }
-function stepHtml(s) {
+function stepInner(s) {
   const right = s.state === "run"
     ? `<span class="ts-pill is-run">Running</span>`
     : s.state === "fail"
@@ -174,18 +184,14 @@ function stepHtml(s) {
       : s.r
         ? `<span class="ts-rcpt">${esc(s.r.text)}${s.r.extra ? `<b class="${s.r.dir === "up" ? "positive" : s.r.dir === "down" ? "negative" : ""}">${esc(s.r.extra)}</b>` : ""}</span>`
         : `<span class="ts-pill is-done">Done</span>`;
-  const t = s.ms ? `<span class="ts-ms">${(s.ms / 1000).toFixed(1)}s</span>` : "";
-  return `<li class="ts-step is-${s.state}">
-      <span class="ts-ico">${s.state === "run" ? candle : s.state === "done" ? tick : cross}</span>
-      <span class="ts-text"><span class="ts-label">${esc(s.label)}</span><span class="ts-sub">${esc(subLine(s))}${t ? ` · ${t}` : ""}</span></span>
-      <span class="ts-right">${right}</span>
-    </li>`;
+  const t = s.ms ? ` · ${(s.ms / 1000).toFixed(1)}s` : "";
+  return `<span class="ts-ico">${s.state === "run" ? candle : s.state === "done" ? tick : cross}</span><span class="ts-text"><span class="ts-label">${esc(s.label)}</span><span class="ts-sub">${esc(subLine(s))}${t}</span></span><span class="ts-right">${right}</span>`;
 }
 function stepsHtml(groups) {
   return groups.map((g) => `
     <div class="ts-group">
       ${g.text ? `<p class="ts-narr">${esc(g.text)}</p>` : ""}
-      ${g.steps.length ? `<ul class="ts-steps">${g.steps.map(stepHtml).join("")}</ul>` : ""}
+      ${g.steps.length ? `<ul class="ts-steps">${g.steps.map((s) => `<li class="ts-step is-${s.state}">${stepInner(s)}</li>`).join("")}</ul>` : ""}
     </div>`).join("");
 }
 
@@ -195,43 +201,93 @@ function secs(trace) {
 }
 function lookups(trace) { return trace.groups.flatMap((g) => g.steps).filter((s) => s.state === "done" && s.name !== "check").length; }
 
-// The live block while Saathi works.
-export function liveTraceHtml(trace, { hinglish = false } = {}) {
+// The empty live block. paintLiveTrace() fills it and then patches only what
+// changed: redrawing it whole twice a second restarted every animation and
+// made it flicker (owner, 24 Nov).
+export function liveTraceHtml() {
+  return `<div class="ts-live" role="status" aria-live="polite"><div class="ts-head"><span class="ts-wico" aria-hidden="true">${BRAIN}</span><span class="ts-word"></span><span class="ts-pill is-done ts-count" hidden></span><span class="ts-secs"></span></div><ol class="ts-thoughts"></ol><div class="ts-groups"></div><div class="ts-bar" hidden><i></i></div></div>`;
+}
+
+export function paintLiveTrace(host, trace, { hinglish = false } = {}) {
+  if (!host || !trace) return;
+  let root = host.querySelector(".ts-live");
+  if (!root) { host.innerHTML = liveTraceHtml(); root = host.querySelector(".ts-live"); }
   const words = hinglish ? WORDS_HI : WORDS_EN;
-  const [word, icon] = words[Math.floor((Date.now() - trace.t0) / 2400) % words.length];
-  const thought = latestThought(trace);
+  const word = words[Math.floor((Date.now() - trace.t0) / WORD_MS) % words.length];
+  const w = root.querySelector(".ts-word");
+  if (w.textContent !== word) {
+    w.textContent = word;
+    w.classList.remove("ts-swap"); void w.offsetWidth; w.classList.add("ts-swap");
+  }
+  const sec = `${secs(trace)}s`;
+  const se = root.querySelector(".ts-secs");
+  if (se.textContent !== sec) se.textContent = sec;
+
+  // Thought lines: the newest four; lines already shown are kept, not redrawn.
+  const list = root.querySelector(".ts-thoughts");
+  const show = trace.thoughts.slice(-4);
+  [...list.children].forEach((li) => { if (!show.includes(li.dataset.t)) li.remove(); });
+  for (const t of show) {
+    if (![...list.children].some((li) => li.dataset.t === t)) {
+      const li = document.createElement("li");
+      li.dataset.t = t; li.textContent = t;
+      list.appendChild(li);
+    }
+  }
+  [...list.children].forEach((li, i, arr) => li.classList.toggle("is-old", i < arr.length - 1));
+
+  // Groups and steps, by position; a node changes only if its HTML changed.
+  const gWrap = root.querySelector(".ts-groups");
+  trace.groups.forEach((g, gi) => {
+    let gEl = gWrap.children[gi];
+    if (!gEl) {
+      gEl = document.createElement("div");
+      gEl.className = "ts-group";
+      gEl.innerHTML = `<p class="ts-narr" hidden></p><ul class="ts-steps" hidden></ul>`;
+      gWrap.appendChild(gEl);
+    }
+    const narr = gEl.querySelector(".ts-narr");
+    if (g.text && narr.textContent !== g.text) { narr.textContent = g.text; narr.hidden = false; }
+    const ul = gEl.querySelector(".ts-steps");
+    ul.hidden = !g.steps.length;
+    g.steps.forEach((st, si) => {
+      let li = ul.children[si];
+      if (!li) { li = document.createElement("li"); ul.appendChild(li); }
+      const cls = `ts-step is-${st.state}`;
+      const html = stepInner(st);
+      if (li.className !== cls) li.className = cls;
+      if (li._h !== html) { li.innerHTML = html; li._h = html; }
+    });
+  });
   const all = trace.groups.flatMap((g) => g.steps);
   const done = all.filter((x) => x.state !== "run").length;
-  const pct = all.length ? Math.round((done / all.length) * 100) : 0;
-  return `<div class="ts-live" role="status" aria-live="polite">
-    <div class="ts-head">
-      <span class="ts-wico ts-w-${icon}" aria-hidden="true">${ICONS[icon]}</span>
-      <span class="ts-word">${esc(word)}</span>
-      ${done ? `<span class="ts-pill is-done">${done} done</span>` : ""}
-      <span class="ts-secs">${secs(trace)}s</span>
-    </div>
-    ${thought ? `<p class="ts-think">${ICONS.brain}<span>${esc(thought)}</span></p>` : ""}
-    ${stepsHtml(trace.groups)}
-    ${all.length > 1 ? `<div class="ts-bar" aria-hidden="true"><i style="width:${pct}%"></i></div>` : ""}
-  </div>`;
+  const cnt = root.querySelector(".ts-count");
+  cnt.hidden = !done;
+  if (done) cnt.textContent = `${done} done`;
+  const bar = root.querySelector(".ts-bar");
+  bar.hidden = all.length < 2;
+  if (all.length > 1) bar.firstElementChild.style.width = `${Math.round((done / all.length) * 100)}%`;
 }
 
 // The folded row above a finished answer. `idx` lets the page find the trace.
 export function foldedTraceHtml(trace, idx) {
-  if (!trace || (!trace.groups?.length && !trace.think)) return "";
+  if (!trace || (!trace.groups?.length && !trace.thoughts?.length)) return "";
   const n = lookups(trace);
   const label = n ? `Checked ${n} thing${n === 1 ? "" : "s"} · thought ${secs(trace)}s` : `Thought for ${secs(trace)}s`;
   return `<button type="button" class="ts-fold" data-trace="${idx}" aria-haspopup="dialog">${n ? tick : `<span class="ts-dot" aria-hidden="true"></span>`}<span>${esc(label)}</span><span class="ts-chev" aria-hidden="true">›</span></button>`;
 }
 
+// "How Saathi got this": the whole breakdown, like GR-1's "Chain of thought"
+// sheet: every thought line, then each narration with its ticked steps.
 export function openTraceSheet(trace) {
   if (!trace) return;
-  const thought = latestThought(trace);
-  const body = trace.groups.length
-    ? stepsHtml(trace.groups)
-    : `<p class="ts-narr">${esc(thought || "Saathi answered from what it already had: no lookups this time.")}</p>`;
-  const note = `<div class="ts-note">${ICONS.spark}<p><strong>Where these numbers come from.</strong> Your portfolio, the time and market status come from StockSaathi itself; every other figure comes from the lookups above. A step shows a tick only after its lookup came back.</p></div>`;
-  openSheet({ title: "How Saathi got this", className: "ts-sheet", html: `<div class="ts-replay">${body}</div>${note}` });
+  const thoughts = (trace.thoughts || []).length
+    ? `<ol class="ts-thoughts ts-all">${trace.thoughts.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>` : "";
+  const steps = trace.groups.length ? stepsHtml(trace.groups) : "";
+  const n = lookups(trace);
+  const meta = `<p class="ts-meta">${n ? `${n} lookup${n === 1 ? "" : "s"}` : "No lookups"} · thought for ${secs(trace)}s</p>`;
+  const note = `<div class="ts-note">${BRAIN}<p><strong>Where these numbers come from.</strong> Your portfolio, the time and market status come from StockSaathi itself; every other figure comes from the lookups above. A step gets a tick only after its lookup came back.</p></div>`;
+  openSheet({ title: "How Saathi got this", className: "ts-sheet", html: `${meta}<div class="ts-replay">${thoughts}${steps}</div>${note}` });
 }
 
 // A compact copy for saving on the message (display only).
@@ -239,7 +295,7 @@ export function freezeTrace(trace) {
   if (!trace) return null;
   const now = Date.now();
   return {
-    t0: trace.t0, answerAt: trace.answerAt || now, endAt: now, think: "",
+    t0: trace.t0, answerAt: trace.answerAt || now, endAt: now, think: "", thoughts: (trace.thoughts || []).slice(-24),
     groups: trace.groups.map((g) => ({ text: g.text, steps: g.steps.map((s) => ({ name: s.name, a: {}, state: s.state === "run" ? "done" : s.state, label: s.label, r: s.r || null, ms: s.ms || 0 })) })),
   };
 }

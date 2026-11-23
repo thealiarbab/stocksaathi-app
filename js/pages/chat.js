@@ -8,7 +8,7 @@ import { getState, setSetting } from "../state.js";
 import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
-import { createTrace, traceStep, traceReasoning, liveTraceHtml, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
+import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
 import { runAgent, streamChat, needsLiveData, callsAppContextFake, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
@@ -1494,7 +1494,7 @@ export function chartCard(c) {
 function liveBotBody(m) {
   const hinglish = !!getState()?.settings?.hinglish;
   if (!m.trace) return m.status ? statusHtml(m.text) : renderMarkdown(hideChartMarkers(m.text));
-  if (m.status || !m.text) return liveTraceHtml(m.trace, { hinglish });
+  if (m.status || !m.text) return liveTraceHtml();
   return foldedTraceHtml(m.trace, rememberTrace(m.trace)) + renderMarkdown(hideChartMarkers(m.text));
 }
 // Fold rows find their trace by a small id (traces live on the messages).
@@ -1831,6 +1831,7 @@ Reply in English.`;
         live = { role: "assistant", text: "", ts: nextTs(ownerMessages), streaming: true, status: true, trace };
         ownerMessages.push(live);
         reRenderOuter();
+        requestAnimationFrame(() => paintLive());
       }
       if (!isStatus && t && !trace.answerAt) trace.answerAt = Date.now();
       // Status lines show at once; answer text streams directly via requestAnimationFrame.
@@ -1853,7 +1854,10 @@ Reply in English.`;
       if (!isOwnerActive() || !live) return;
       const bubble = outer?.querySelector('#chat-messages [data-streaming="1"] .msg-body');
       if (!bubble) { reRenderOuter(); return; }
-      bubble.innerHTML = liveBotBody(live);
+      // While thinking, patch the live block in place (a full redraw restarted
+      // its animations and flickered); once the answer streams, draw it.
+      if (live.trace && (live.status || !live.text)) paintLiveTrace(bubble, live.trace, { hinglish: !!getState()?.settings?.hinglish });
+      else bubble.innerHTML = liveBotBody(live);
       const msgs = outer?.querySelector("#chat-messages");
       stickBottom(msgs);
     };
