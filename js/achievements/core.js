@@ -20,6 +20,11 @@
 // for holding through a dip, spreading money out, patience, learning and
 // coming back to learn. Streaks forgive a missed day (GRACE_DAYS) and never
 // warn about losing a streak.
+//
+// You have to be around (25 Nov 2026): days held, a dip held through and a
+// comeback count only while the user has been active in the last 14 days
+// (ACTIVE_DAYS). Measured on every account: about 9 in 10 "patience" awards
+// were going to accounts that had left, for a holding nobody was watching.
 // =============================================================================
 
 export const TIERS = [
@@ -43,6 +48,10 @@ export const CATEGORIES = [
 export const GRACE_DAYS = 2;
 // Weekly regular: one missed week is forgiven the same way.
 export const GRACE_WEEKS = 2;
+// Time-based metrics count only for a user active this recently.
+export const ACTIVE_DAYS = 14;
+// Red Day Calm: a session where the market (Nifty 50 ETF close) fell this much.
+export const RED_DAY_DROP = 0.01;
 // Trades flagged by the coach (bias_flags with a severity) start counting
 // on this day; older trades carry no flags at all.
 export const FLAG_ERA = "2026-10-24";
@@ -100,13 +109,13 @@ export const FAMILIES = [
     why: { en: "Your first fund was {symbol}.", hi: "Tumhara pehla fund {symbol} tha." },
   },
   {
-    family: "old_friend", category: "milestone", emoji: "🤝", metric: "member_days", tiers: [30, 90, 180],
+    family: "old_friend", category: "streak", emoji: "🤝", metric: "member_days", tiers: [30, 90, 180],
     name: { en: "Old Friend", hi: "Purana Dost" },
     desc: { en: "Still learning with Saathi {t} days after joining.", hi: "Join karne ke {t} din baad bhi Saathi ke saath seekh rahe ho." },
     why: { en: "You joined {days} days ago and you're still here.", hi: "Tum {days} din pehle jude the aur abhi bhi yahin ho." },
   },
   {
-    family: "regular", category: "milestone", emoji: "📅", metric: "visit_days", tiers: [10, 20, 40],
+    family: "regular", category: "streak", emoji: "📅", metric: "visit_days", tiers: [10, 20, 40],
     name: { en: "Regular", hi: "Regular" },
     desc: { en: "Open StockSaathi on {t} different days.", hi: "{t} alag-alag din StockSaathi kholo." },
     why: { en: "You've opened the app on {n} different days.", hi: "Tumne {n} alag din app khola hai." },
@@ -192,6 +201,19 @@ export const FAMILIES = [
     why: { en: "Flagged trades went from {before_pct}% to {after_pct}% of your recent trades.", hi: "Flag wale trades {before_pct}% se {after_pct}% ho gaye." },
   },
 
+  {
+    family: "set_and_wait", category: "habit", emoji: "🎣", metric: "limit_waits", tiers: [1, 3, 6],
+    name: { en: "Set and Wait", hi: "Daam Lagao, Ruko" },
+    desc: { en: "Get {t} limit order{s} filled after waiting a day or more for your price.", hi: "{t} limit order apne daam ke liye ek din ya zyada ruk kar fill karwao." },
+    why: { en: "Limit orders that waited a day or more for your price: {n}.", hi: "Tumhare {n} limit order ek din ya zyada ruk kar tumhare daam pe fill hue." },
+  },
+  {
+    family: "red_day_calm", category: "habit", emoji: "☂️", metric: "red_days", tiers: [1, 3, 6],
+    name: { en: "Red Day Calm", hi: "Laal Din, Shaant Mann" },
+    desc: { en: "On {t} day{s} the market falls 1% or more, open the app, look at your holdings and sell nothing.", hi: "{t} din jab market 1% ya zyada gire, app kholo, apni holdings dekho aur kuch mat becho." },
+    why: { en: "Falling days you watched without selling: {n} (latest: {date}).", hi: "Tumne {n} girte din bina beche dekhe, sabse naya {date}." },
+  },
+
   // ---------------------------------------------------------------- learning
   {
     family: "time_traveller", category: "learning", emoji: "⏱️", metric: "replays", tiers: [1, 3, 5],
@@ -200,9 +222,9 @@ export const FAMILIES = [
     why: { en: "Crash replays you've finished: {n}.", hi: "Tumne {n} crash replay poore kiye." },
   },
   {
-    family: "curious_mind", category: "learning", emoji: "💬", metric: "question_days", tiers: [2, 5, 10],
+    family: "curious_mind", category: "learning", emoji: "💬", metric: "question_days", tiers: [1, 5, 10],
     name: { en: "Curious Mind", hi: "Jigyasu" },
-    desc: { en: "Ask Saathi questions on {t} different days.", hi: "{t} alag din Saathi se sawaal poocho." },
+    desc: { en: "Ask Saathi a question on {t} day{s}.", hi: "{t} din Saathi se sawaal poocho." },
     why: { en: "Days you asked Saathi something: {n}.", hi: "Tumne {n} din Saathi se sawaal pooche." },
   },
   {
@@ -218,24 +240,56 @@ export const FAMILIES = [
     why: { en: "You've looked into {n} different stocks.", hi: "Tumne {n} alag stocks dekhe." },
   },
   {
-    family: "news_hound", category: "learning", emoji: "📰", metric: "news_days", tiers: [2, 3, 5],
+    family: "news_hound", category: "learning", emoji: "📰", metric: "news_days", tiers: [2, 5, 10],
     name: { en: "News Reader", hi: "Khabri" },
     desc: { en: "Read market news on {t} different days.", hi: "{t} alag din market news padho." },
     why: { en: "You read the news on {n} different days.", hi: "Tumne {n} alag din news padhi." },
   },
 
+  {
+    family: "on_my_radar", category: "learning", emoji: "📡", metric: "watchlist_adds", tiers: [1, 5, 10],
+    name: { en: "On My Radar", hi: "Nazar Mein" },
+    desc: { en: "Add {t} stock{s} to your watchlist.", hi: "{t} stock watchlist mein daalo." },
+    why: { en: "Stocks you've put on your watchlist: {n}.", hi: "Tumne {n} stock watchlist mein daale." },
+  },
+  {
+    family: "chart_reader", category: "learning", emoji: "👓", metric: "chart_stocks", tiers: [3, 10, 25],
+    name: { en: "Chart Reader", hi: "Chart Padhne Wale" },
+    desc: { en: "Use the chart on {t} different stocks.", hi: "{t} alag stocks ka chart dekho." },
+    why: { en: "Stocks whose chart you've explored: {n}.", hi: "Tumne {n} stocks ke chart dekhe." },
+  },
+  {
+    family: "sector_scholar", category: "learning", emoji: "🧭", metric: "sectors_viewed", tiers: [5, 8, 11],
+    name: { en: "Sector Scholar", hi: "Sector Ka Gyaan" },
+    desc: { en: "Look up stocks from {t} different sectors. No buying needed.", hi: "{t} alag sectors ke stocks dekho. Kharidna zaroori nahi." },
+    why: { en: "Sectors you've looked into: {n}.", hi: "Tumne {n} sectors ke stocks dekhe." },
+  },
+  {
+    family: "asked_why", category: "learning", emoji: "💡", metric: "bias_reads", tiers: [1, 3, 5],
+    name: { en: "Asked Why", hi: "Kyun Poocha" },
+    desc: { en: "Open the explainer for {t} pattern{s} the coach noted on your trades.", hi: "Coach ne tumhare trades pe jo pattern note kiye, unme se {t} ka explainer kholo." },
+    why: { en: "Patterns you've read up on after a coach note: {n}.", hi: "Coach ke note ke baad tumne {n} pattern samjhe." },
+  },
+
   // ---------------------------------------------------------------- coming back
   {
-    family: "learning_streak", category: "streak", emoji: "🔥", metric: "learn_streak", tiers: [3, 4, 6],
+    family: "learning_streak", category: "streak", emoji: "🔥", metric: "learn_streak", tiers: [3, 5, 7],
     name: { en: "On a Roll", hi: "Lagataar" },
     desc: { en: "Learn something on {t} days in a row. One day off is fine.", hi: "{t} din lagataar kuch seekho. Ek din ki chhutti chalegi." },
     why: { en: "Your best run: {days} learning days, never more than one day off in between.", hi: "Tumhara best: {days} din seekhna, beech mein ek din se zyada gap nahi." },
   },
   {
-    family: "weekly_regular", category: "streak", emoji: "🗓", metric: "week_streak", tiers: [3, 4, 6, 8],
+    family: "weekly_regular", category: "streak", emoji: "🗓", metric: "week_streak", tiers: [2, 4, 6, 8],
     name: { en: "Week After Week", hi: "Har Hafte" },
     desc: { en: "Come back {t} weeks in a row. One week off is fine.", hi: "{t} hafte lagataar wapas aao. Ek hafte ki chhutti chalegi." },
     why: { en: "You came back {weeks} weeks running.", hi: "Tum {weeks} hafte lagataar aaye." },
+  },
+
+  {
+    family: "weekend_scholar", category: "streak", emoji: "🛋️", metric: "weekend_learn", tiers: [1, 3, 6],
+    name: { en: "Weekend Scholar", hi: "Weekend Ki Padhai" },
+    desc: { en: "Learn something on {t} weekend{s}, when the market is shut.", hi: "{t} weekend pe kuch seekho, jab market band hota hai." },
+    why: { en: "Weekends you learned on: {n}.", hi: "Tumne {n} weekend pe seekha." },
   },
 
   // ---------------------------------------------------------------- market calendar
@@ -264,9 +318,9 @@ export const FAMILIES = [
   },
   {
     family: "diwali_holder", category: "season", emoji: "🪔", metric: "season", tiers: [1, 2, 3],
-    rule: { event_kind: "diwali", pad: [14, 7], need: { held_through: 1 } },
+    rule: { event_kind: "diwali", pad: [14, 7], need: { held_through: 1, visit_days: 1 } },
     name: { en: "Diwali Holder", hi: "Diwali Wala Investor" },
-    desc: { en: "Hold a stock from two weeks before Diwali to a week after, {t} year{s}.", hi: "Diwali se do hafte pehle se ek hafte baad tak stock hold karo, {t} saal." },
+    desc: { en: "Hold a stock from two weeks before Diwali to a week after, and look in at least once, {t} year{s}.", hi: "Diwali se do hafte pehle se ek hafte baad tak stock hold karo aur beech mein ek baar app kholo, {t} saal." },
     why: { en: "Diwalis you held through: {n} (latest: {event}).", hi: "Tumne {n} Diwali hold kiya, sabse naya {event}." },
   },
   {
@@ -479,6 +533,8 @@ export function deriveFacts(input) {
   const events = input.events || [];
   const m = {}, ev = {};
   const set = (k, v, e) => { m[k] = v; if (e) ev[k] = e; };
+  // Time only counts while the user is around (see ACTIVE_DAYS).
+  const recent = events.some((x) => now - ms(x.at) <= ACTIVE_DAYS * DAY) || trades.some((t) => now - ms(t.created_at) <= ACTIVE_DAYS * DAY);
 
   // -- trades and episodes
   const sorted = [...trades].sort((a, b) => ms(a.created_at) - ms(b.created_at));
@@ -496,7 +552,8 @@ export function deriveFacts(input) {
       if (q <= 0) continue;
       const avg = v / q;
       if (Number(r.price_paise) > avg) {
-        if (!profit || ms(r.created_at) < ms(profit.at)) profit = { at: r.created_at, symbol: r.symbol, pct: round1((Number(r.price_paise) / avg - 1) * 100) };
+        // First profit: sold on a later day than the holding began, not a same-day flip.
+        if (istDate(r.created_at) > istDate(e.t0) && (!profit || ms(r.created_at) < ms(profit.at))) profit = { at: r.created_at, symbol: r.symbol, pct: round1((Number(r.price_paise) / avg - 1) * 100) };
         if (ms(r.created_at) - e.t0 >= 30 * DAY) patient.push({ symbol: r.symbol, at: ms(r.created_at), key: r.symbol + ":" + e.t0 });
       }
     }
@@ -514,8 +571,8 @@ export function deriveFacts(input) {
     if (!best || days > best.days) best = { days, symbol: e.symbol };
     if (inst[e.symbol]?.isFund && (!bestFund || days > bestFund.days)) bestFund = { days, symbol: e.symbol };
   }
-  set("max_hold_days", best?.days || 0, best);
-  set("fund_hold_days", bestFund?.days || 0, bestFund);
+  set("max_hold_days", recent ? best?.days || 0 : 0, best);
+  set("fund_hold_days", recent ? bestFund?.days || 0 : 0, bestFund);
   const fundBuys = sorted.filter((t) => t.side === "BUY" && inst[t.symbol]?.isFund);
   set("fund_buys", fundBuys.length, fundBuys[0] ? { symbol: fundBuys[0].symbol } : null);
   const months = new Set(fundBuys.map((t) => istDate(t.created_at).slice(0, 7)));
@@ -560,9 +617,9 @@ export function deriveFacts(input) {
     if (low && low.dd > 0 && (!dip || low.dd > dip.dd)) dip = { dd: low.dd, symbol: e.symbol, date: low.d };
     if (recoveredAt) comebacks.push({ symbol: e.symbol, d: recoveredAt });
   }
-  set("dip_pct", dip ? floor1(dip.dd * 100) : 0, dip ? { pct: floor1(dip.dd * 100), symbol: dip.symbol, date: dip.date } : null);
+  set("dip_pct", dip && recent ? floor1(dip.dd * 100) : 0, dip ? { pct: floor1(dip.dd * 100), symbol: dip.symbol, date: dip.date } : null);
   comebacks.sort((a, b) => (a.d < b.d ? 1 : -1));
-  set("comebacks", comebacks.length, comebacks[0] ? { n: comebacks.length, symbol: comebacks[0].symbol } : null);
+  set("comebacks", recent ? comebacks.length : 0, comebacks[0] ? { n: comebacks.length, symbol: comebacks[0].symbol } : null);
 
   // Balanced basket, on today's holdings at real prices.
   const hv = (input.holdings || []).filter((h) => Number(h.qty) > 0).map((h) => ({ symbol: h.symbol, v: Number(h.qty) * Number(h.price_paise || 0) })).filter((h) => h.v > 0);
@@ -649,9 +706,29 @@ export function deriveFacts(input) {
 
   // Old friend: days since joining, only while they still come back (active
   // in the last 14 days).
-  const recent = events.some((x) => now - ms(x.at) <= 14 * DAY) || sorted.some((t) => now - ms(t.created_at) <= 14 * DAY);
   const member = input.createdAt && recent ? Math.floor((now - ms(input.createdAt)) / DAY) : 0;
   set("member_days", member, member ? { days: member } : null);
+
+  // -- added 25 Nov 2026: parts of the site that earned nothing
+  const wl = new Set([...(input.watchlist || []).map((w) => w.symbol), ...events.filter((x) => x.kind === "watchlist_add" && x.subject).map((x) => x.subject)]);
+  set("watchlist_adds", wl.size, { n: wl.size });
+  const charts = new Set(events.filter((x) => x.kind === "chart_interact" && x.subject).map((x) => x.subject));
+  set("chart_stocks", charts.size, { n: charts.size });
+  const secsSeen = new Set([...sv].map((sym) => sectorOf(inst[sym])).filter(Boolean));
+  set("sectors_viewed", secsSeen.size, { n: secsSeen.size });
+  const biasReads = new Set(events.filter((x) => x.kind === "learn" && String(x.subject || "").startsWith("bias:")).map((x) => x.subject));
+  set("bias_reads", biasReads.size, { n: biasReads.size });
+  const weekends = new Set(learnDays.filter((d) => { const w = new Date(d + "T00:00:00Z").getUTCDay(); return w === 0 || w === 6; }).map(weekOf));
+  set("weekend_learn", weekends.size, { n: weekends.size });
+  set("limit_waits", Number(input.limitWaits || 0), { n: Number(input.limitWaits || 0) });
+  // Red day calm: on a day the market fell (input.redDays, from the Nifty 50
+  // ETF's real closes) the user opened the app, held something bought on an
+  // earlier day and sold nothing that day.
+  const visitSet = new Set(visit);
+  const sellDays = new Set(sorted.filter((t) => t.side === "SELL").map((t) => istDate(t.created_at)));
+  const redCalm = [...new Set(input.redDays || [])].filter((d) => d <= today && visitSet.has(d) && !sellDays.has(d)
+    && eps.some((e) => istDate(e.t0) < d && (e.tEnd == null || istDate(e.tEnd) > d))).sort();
+  set("red_days", redCalm.length, redCalm.length ? { n: redCalm.length, date: redCalm[redCalm.length - 1] } : null);
 
   return { m, ev };
 }

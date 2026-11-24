@@ -380,7 +380,7 @@ effort for A/B runs; unset to restore the per-op settings.
 - Vercel Firewall: no config existed and the API refused to create one;
   the owner must open the Firewall tab once before rules can be added.
 
-## Achievements (13 Nov 2026; owner preview, not rolled out)
+## Achievements (13 Nov 2026, pins and rules v2 on 25 Nov; owner preview, not rolled out)
 
 - **Tables:** `achievement_defs` (one row per tier: copy EN/Hinglish, `metric`
   + `threshold`, or `metric='season'` + `rule` {event_kind|event_id, pad,
@@ -410,12 +410,54 @@ effort for A/B runs; unset to restore the per-op settings.
   `/report-card#achievements`; ui.js opens the list from that hash. Since
   13 Nov the report card shows the latest six medals for owner accounts
   (reportCard.js imports ui.js lazily, only when isOwner()); everyone else
-  still sees the 8 old badges. List layout (owner asked for a redesign from
-  real apps): an 86-square tier strip (Khan Academy), "Next up" with bars
-  (Duolingo), the shelf of earned medals with a story under the tapped row
-  (Strava), "Still to earn" as outline medals (Apple Fitness); a tiered
-  medal prints its target on the face (Nike Run Club). Telemetry:
-  web_events kind `achievement` (shown/opened/dismissed).
+  still sees the 8 old badges. Telemetry: web_events kind `achievement`
+  (shown/opened/dismissed, and `go` for a Next up button).
+- **Pins (25 Nov 2026, the owner approved this exact style; keep it):**
+  `js/achievements/pins.js` draws one enamel pin per family as SVG, no
+  emoji anywhere. Each pin is `{ sil, art, plate }` on a 64-unit grid: the
+  outline shapes drawn twice (once 3.2 units lower in the plating's dark
+  colour = the side wall, once in the plating gradient), flat enamel cells
+  with a thin metal line, and a tab that prints the tier's target. The
+  subject always breaks out of the backplate. Backplate by group: milestone
+  circle, habit shield, learning hexagon, coming back rounded square,
+  calendar 12-point star. Tier = plating; platinum is the rainbow gradient.
+  Not earned = the same pin at low opacity, mostly grey (`.is-locked`).
+  A new family needs a drawing in `PIN` (else a plain plate with a sparkle
+  shows). AI-drafted seasonal achievements get `eventPinSvg()`: a star in
+  the event kind's colour, a centre picked from the rule's `need`, and the
+  event date on a ribbon; nothing to draw per draft. The plating gradients
+  (`pinDefs()`) are added to the page once by `ensureStyle()`.
+- **The sheet:** header ("2 of 40 pins", and the tier count), "Next up"
+  (`chooseNext`: one thing to finish today, the closest pin, a calendar pin
+  that is open or opens within 7 days), "On the way" (`chooseWaiting`: pins
+  that only need time, no button) and the board (one grid per group, plus
+  "Limited editions"; a missed limited edition is not shown). `UNITS` in
+  ui.js says what one step of each metric is in words and where its button
+  goes; a metric not listed there is situational (a dip, a comeback) and
+  never becomes a to-do. A step that needs a purchase ranks last and its
+  button opens /stocks, never an order screen. A new metric needs a `UNITS`
+  entry or it only shows on the board.
+- **No celebration on top of a trade:** the toast has no confetti and no
+  sound, and a trade no longer triggers a check. The server is asked on the
+  next page the user opens (or the 10-minute sweep finds it).
+- **Owner preview of other users:** `/report-card?ach_debug=new#achievements`
+  and `?ach_debug=typical` draw the sheet for a user with 0 or 2 pins
+  (owner accounts only; nothing is saved or marked seen). Measured 25 Nov:
+  the typical active user holds 2 pins, 29% hold none, so judge the sheet
+  in those two states, in dark mode (62% of users) and at 360px.
+- **Rules v2 (migration `2026-11-25a`):** days held, a dip held and a
+  comeback count only while the user was active in the last 14 days
+  (`ACTIVE_DAYS`): about 9 in 10 of those awards were going to accounts
+  that had left. First Profit is a sale on a later day than the buy. An
+  older account's first awards are saved with no bell row and no push
+  (`backfilled`); the app shows one summary. The nightly pass covers users
+  active in the last 14 days, not every profile. The app calls
+  `ach_unseen()` on page load (reads unseen rows only) and
+  `my_achievements()` when the sheet opens; that one also returns
+  `facts.ev`, `calendar` (next window per calendar code) and, for an
+  AI-drafted def, `event_kind`, `event_on`, `need`, `win_from`, `win_to`.
+  The rules cost about 30 ms per user; the `authenticated` role's
+  statement limit is 8 s.
 - **Approval queue:** /a → Achievements. `op=ach-draft` (callLlm, op
   `ach-draft`, recorded in llm_usage) drafts 3-4 seasonal concepts for ONE
   event; `admin_ach_draft_insert` re-checks them (metric whitelist, no trade

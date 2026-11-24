@@ -95,7 +95,8 @@ const INST = {
 {
   // Bought at 1000, real close falls to 870 (-13%), then recovers to 1020.
   const path = (d) => (d > 20 ? 1000 : d > 10 ? 1000 - (20 - d) * 13 : 870 + (10 - d) * 15);
-  const f = A.deriveFacts({ now: NOW, createdAt: at(40), trades: [buy("INFY", 10, 1000, 30)], instruments: INST, events: [], closes: { INFY: closes(30, path) } });
+  const here = [{ kind: "page_view", at: at(2), subject: "/portfolio" }];   // still around
+  const f = A.deriveFacts({ now: NOW, createdAt: at(40), trades: [buy("INFY", 10, 1000, 30)], instruments: INST, events: here, closes: { INFY: closes(30, path) } });
   const got = earned(f);
   ok("dip: 13% low measured on real closes", f.m.dip_pct === 13 && f.ev.dip_pct.symbol === "INFY", f.ev.dip_pct);
   ok("dip: held the line silver, not gold", got.has("held_the_line_silver") && !got.has("held_the_line_gold"));
@@ -116,7 +117,7 @@ const INST = {
   const f2 = A.deriveFacts({ now: NOW, trades: [buy("ITC", 10, 400, 30)], instruments: INST, events: [], closes: { ITC: closes(30, (d) => (d > 10 ? 400 : 200)) } });
   ok("corporate action: not a 50% dip", f2.m.dip_pct === 0, f2.m.dip_pct);
   // No real close at all (a fund priced only by NAV): not judged either.
-  const f3 = A.deriveFacts({ now: NOW, trades: [buy("NIFTYBEES", 10, 280, 30)], instruments: INST, events: [], closes: {} });
+  const f3 = A.deriveFacts({ now: NOW, trades: [buy("NIFTYBEES", 10, 280, 30)], instruments: INST, events: [{ kind: "page_view", at: at(1), subject: "/portfolio" }], closes: {} });
   ok("no closes: not judged", f3.m.dip_pct === 0 && f3.m.fund_hold_days === 30);
 }
 
@@ -231,6 +232,78 @@ const INST = {
   ok("draft: silly minimums refused", A.validateDraft({ ...good, need: { stock_views: 500 } }).length > 0);
   ok("draft: wide windows refused", A.validateDraft({ ...good, pad: [0, 40] }).includes("pad"));
   ok("draft: tier 4 refused", A.validateDraft({ ...good, tier: 4 }).includes("tier"));
+}
+
+// ---------------------------------------------------------------- you have to be around (25 Nov 2026)
+{
+  // Bought 60 days ago, dipped 13%, came back: but the user left 40 days ago.
+  const path = (d) => (d > 50 ? 1000 : d > 40 ? 1000 - (50 - d) * 13 : Math.min(1020, 870 + (40 - d) * 15));
+  const base = { now: NOW, createdAt: at(70), trades: [buy("INFY", 10, 1000, 60)], instruments: INST, closes: { INFY: closes(60, path) } };
+  const gone = A.deriveFacts({ ...base, events: [{ kind: "page_view", at: at(40), subject: "/portfolio" }] });
+  ok("left: no days held for a holding nobody is watching", gone.m.max_hold_days === 0 && !earned(gone).has("long_termer_bronze"), gone.m);
+  ok("left: no dip or comeback either", gone.m.dip_pct === 0 && gone.m.comebacks === 0);
+  ok("left: old friend was already zero", gone.m.member_days === 0);
+  // The same user opens the app again today: everything counts from that visit.
+  const back = A.deriveFacts({ ...base, events: [{ kind: "page_view", at: at(40), subject: "/portfolio" }, { kind: "page_view", at: at(0), subject: "/portfolio" }] });
+  ok("back: days held count again", back.m.max_hold_days === 60 && earned(back).has("long_termer_silver"), back.m.max_hold_days);
+  ok("back: the dip and the comeback count again", back.m.dip_pct === 13 && back.m.comebacks === 1, back.m);
+  // Diwali Holder now also needs one visit inside its window.
+  ok("diwali: needs a visit in the window", byCode.get("diwali_holder_bronze").rule.need.visit_days === 1 && byCode.get("diwali_holder_bronze").rule.need.held_through === 1);
+}
+
+// ---------------------------------------------------------------- first profit is not a same-day flip
+{
+  const flip = A.deriveFacts({ now: NOW, trades: [buy("ITC", 10, 400, 3, { created_at: at(3, 4) }), sell("ITC", 10, 410, 3, { created_at: at(3, 8) })], instruments: INST, events: [] });
+  ok("first profit: a same-day flip does not count", flip.m.profit_booked === 0 && !earned(flip).has("first_profit"));
+  const next = A.deriveFacts({ now: NOW, trades: [buy("ITC", 10, 400, 3), sell("ITC", 10, 410, 2)], instruments: INST, events: [] });
+  ok("first profit: sold the next day counts", next.m.profit_booked === 1 && earned(next).has("first_profit"));
+}
+
+// ---------------------------------------------------------------- ladders and groups changed on 25 Nov 2026
+{
+  const t = (fam) => DEFS.filter((d) => d.family === fam).map((d) => d.threshold).join("/");
+  ok("ladder: week after week 2/4/6/8", t("weekly_regular") === "2/4/6/8", t("weekly_regular"));
+  ok("ladder: on a roll 3/5/7", t("learning_streak") === "3/5/7", t("learning_streak"));
+  ok("ladder: news reader 2/5/10", t("news_hound") === "2/5/10", t("news_hound"));
+  ok("ladder: curious mind 1/5/10", t("curious_mind") === "1/5/10", t("curious_mind"));
+  ok("copy: curious mind bronze reads right for one day", byCode.get("curious_mind_bronze").desc_en === "Ask Saathi a question on 1 day.");
+  ok("groups: old friend and regular are about coming back", byCode.get("old_friend_bronze").category === "streak" && byCode.get("regular_bronze").category === "streak");
+  ok("catalogue: 40 pin designs, 107 tiers", new Set(DEFS.map((d) => d.family)).size === 40 && DEFS.length === 107, [new Set(DEFS.map((d) => d.family)).size, DEFS.length]);
+  const one = A.deriveFacts({ now: NOW, trades: [], instruments: INST, events: [{ kind: "chat_user", at: at(0) }] });
+  ok("curious mind: a first question earns bronze on day one", earned(one).has("curious_mind_bronze"));
+}
+
+// ---------------------------------------------------------------- the seven new families
+{
+  const sat = at(6), sun = at(5), nextSat = at(-1);          // 7, 8 and 14 Nov 2026
+  ok("fixture: those days are a weekend", [new Date(sat).getUTCDay(), new Date(sun).getUTCDay(), new Date(nextSat).getUTCDay()].join() === "6,0,6");
+  const events = [
+    { kind: "watchlist_add", at: at(9), subject: "TCS" }, { kind: "watchlist_add", at: at(8), subject: "ITC" },
+    { kind: "chart_interact", at: at(9), subject: "TCS" }, { kind: "chart_interact", at: at(9), subject: "TCS" }, { kind: "chart_interact", at: at(8), subject: "ITC" }, { kind: "chart_interact", at: at(8), subject: "INFY" },
+    { kind: "stock_view", at: at(9), subject: "TCS" }, { kind: "stock_view", at: at(9), subject: "INFY" }, { kind: "stock_view", at: at(8), subject: "ITC" }, { kind: "stock_view", at: at(8), subject: "JUNK" }, { kind: "stock_view", at: at(8), subject: "NIFTYBEES" },
+    { kind: "learn", at: at(7), subject: "bias:panic_sell" }, { kind: "learn", at: at(7), subject: "bias:panic_sell" }, { kind: "learn", at: at(4), subject: "term:pe_ratio" },
+    { kind: "news_click", at: sat, subject: "a" }, { kind: "news_click", at: sun, subject: "b" },
+    { kind: "page_view", at: at(3), subject: "/portfolio" }, { kind: "page_view", at: at(1), subject: "/portfolio" },
+  ];
+  const f = A.deriveFacts({
+    now: Date.parse(nextSat), trades: [buy("TCS", 5, 3000, 20), buy("ITC", 5, 400, 2), sell("ITC", 5, 390, 1)], instruments: INST, events,
+    watchlist: [{ symbol: "TCS", added_at: at(9) }, { symbol: "SUNPHARMA", added_at: at(30) }], limitWaits: 2, redDays: [ymd(3), ymd(1), ymd(12)],
+  });
+  ok("radar: watchlist rows and add events, each stock once", f.m.watchlist_adds === 3, f.m.watchlist_adds);
+  ok("chart reader: different stocks, not taps", f.m.chart_stocks === 3 && earned(f).has("chart_reader_bronze"), f.m.chart_stocks);
+  ok("sector scholar: funds are one bucket, Other never counts", f.m.sectors_viewed === 3, f.m.sectors_viewed);
+  ok("asked why: different patterns, and a term is not a pattern", f.m.bias_reads === 1 && earned(f).has("asked_why_bronze"), f.m.bias_reads);
+  ok("weekend scholar: Saturday and Sunday are one weekend", f.m.weekend_learn === 1 && earned(f).has("weekend_scholar_bronze"), f.m.weekend_learn);
+  ok("set and wait: taken from the orders", f.m.limit_waits === 2 && earned(f).has("set_and_wait_bronze"));
+  // Red days: 3 days ago (opened the app, held TCS, sold nothing) counts.
+  // Yesterday does not: ITC was sold that day. 12 days ago does not: no visit.
+  ok("red day calm: a watched fall with no sale counts", f.m.red_days === 1 && f.ev.red_days.date === ymd(3), f.ev.red_days);
+  ok("red day calm: bronze", earned(f).has("red_day_calm_bronze") && !earned(f).has("red_day_calm_silver"));
+  const noHold = A.deriveFacts({ now: NOW, trades: [], instruments: INST, events: [{ kind: "page_view", at: at(3), subject: "/" }], redDays: [ymd(3)] });
+  ok("red day calm: nothing held means nothing to stay calm about", noHold.m.red_days === 0);
+  for (const fam of ["on_my_radar", "chart_reader", "sector_scholar", "asked_why", "weekend_scholar", "set_and_wait", "red_day_calm"]) {
+    ok(`new family ${fam}: three tiers`, DEFS.filter((d) => d.family === fam).length === 3);
+  }
 }
 
 console.log(`achievements: ${pass}/${pass + fail} passing`);
