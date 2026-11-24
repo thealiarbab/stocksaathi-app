@@ -57,6 +57,18 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          # GitHub starts this job hours late (22:06 UTC on 23 Nov 2026 for a
+          # 10:30 UTC schedule, and later every month). The database decides
+          # "today" by the UTC date, so a start after midnight UTC would find
+          # no rows and write a second set stamped in the small hours (and a
+          # Saturday point after a late Friday run). The 16:00 IST database
+          # job has already written the day by then, so do nothing.
+          hour=$((10#$(date -u +%H)))
+          if [ "$hour" -lt 10 ]; then
+            echo "::notice::started at ${hour}h UTC, after the day it was scheduled for; skipped (the 16:00 IST database job wrote the rows)"
+            echo '{"skipped_late": true}' > /tmp/snapshot.json
+            exit 0
+          fi
           code=$(curl -sS -o /tmp/snapshot.json -w '%{http_code}' --max-time 90 \
             -X POST \
             -H "Authorization: Bearer $CRON_SECRET" \
