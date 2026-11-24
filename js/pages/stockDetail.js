@@ -28,6 +28,7 @@ import { go } from "../navigation.js";
 import { bootTitleFor } from "./staticPage.js";
 import { aiLang } from "../features/aiLang.js";
 import { onBackdropClick } from "../components/backdrop.js";
+import { morphHtml } from "../components/morph.js";
 
 // Timeframe → Yahoo range/interval. Granularity tuned to match Groww/
 // Zerodha density at every TF the user lives in (1D, 1W, 1M).
@@ -110,6 +111,8 @@ let _stockWhyKey = null;                     // "SYMBOL_day" — prevents refire
 let _stockWhyLast = null;                    // last explanation rendered for this mount
 let _historyAbortCtrl = null;                // cancel a previous in-flight refresh
 let _historyPoll = null;                     // setInterval for periodic 1D refresh
+let _hoverDetach = null;                     // cleanup fn returned by attachStockChartHover
+let _wireAbort = null;                       // removes every listener the last draw attached
 let _zoomDetach = null;                      // cleanup fn returned by attachChartZoom
 let _gestureActive = false;                  // true while a zoom/pan gesture is in flight
 let _prevLastDataMs = null;                  // tracked for sticky-right-edge logic in refreshHistory
@@ -447,6 +450,8 @@ export function renderStockDetail(main, params) {
     if (_historyPoll) { clearInterval(_historyPoll); _historyPoll = null; }
     if (_historyAbortCtrl) { try { _historyAbortCtrl.abort(); } catch {} _historyAbortCtrl = null; }
     if (_zoomDetach) { _zoomDetach(); _zoomDetach = null; }
+    if (_hoverDetach) { try { _hoverDetach(); } catch {} _hoverDetach = null; }
+    _wireAbort?.abort();
     _gestureActive = false;
     exitChartFs({ fromHistory: true, rerender: false });
   };
@@ -1298,9 +1303,20 @@ function render(inst, symbol) {
   // portfolio.js). A redraw on every quote poll made the page flicker.
   // The stamp sits on the first node this draw created, so another page (or
   // another stock) having replaced the content always redraws.
-  if (main.firstElementChild && main.firstElementChild.__drawnHtml === html) return;
-  main.innerHTML = html;
-  if (main.firstElementChild) main.firstElementChild.__drawnHtml = html;
+  const drawn = main.firstElementChild;
+  if (drawn && drawn.__drawnHtml === html && drawn.__drawnFor === symbol) return;
+  // A real change (a new price, a tab, a typed quantity): change only the
+  // nodes that differ instead of rebuilding the page, so the chart, the
+  // order box and the text around them do not blink on every quote poll.
+  // Kept nodes would keep the last draw's listeners, so those are removed
+  // here and attached again in attachListeners() through on().
+  if (_hoverDetach) { try { _hoverDetach(); } catch {} _hoverDetach = null; }
+  if (_zoomDetach) { try { _zoomDetach(); } catch {} _zoomDetach = null; }
+  _wireAbort?.abort();
+  _wireAbort = new AbortController();
+  if (drawn && drawn.__drawnHtml != null && drawn.__drawnFor === symbol) morphHtml(main, html, { syncInputs: true });
+  else main.innerHTML = html;
+  if (main.firstElementChild) { main.firstElementChild.__drawnHtml = html; main.firstElementChild.__drawnFor = symbol; }
 
   // Paint the cached Saathi take if we already generated one this mount
   const whyBody = main.querySelector("#stock-why-body");
@@ -1440,8 +1456,11 @@ async function fetchStockWhy(main, symbol, inst, curPricePaise, changePct, navDa
 }
 
 function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessionWindow) {
+  // Every listener below dies with this signal on the next draw (render()).
+  const wire = _wireAbort?.signal;
+  const on = (el, type, fn, opts) => { if (el) el.addEventListener(type, fn, wire ? { ...(opts || {}), signal: wire } : opts); };
   main.querySelectorAll(".tf-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
+    on(btn, "click", () => {
       const tf = btn.dataset.tf;
       // Hotfix49b: CUSTOM opens a CSS modal (was native prompt() pair).
       // Native prompts steal focus, look like a 1995 alert(), and ignore
@@ -1484,7 +1503,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   });
 
   // Reset-zoom pill click handler. Only present in DOM when scale > 1.
-  main.querySelector("#zoom-reset-btn")?.addEventListener("click", () => {
+  on(main.querySelector("#zoom-reset-btn"), "click", () => {
     resetZoom(inst, symbol);
   });
   // Refresh button — forces a fresh upstream fetch (bypasses our cache
@@ -1492,7 +1511,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   // tick on demand. Useful when the visible "as of" timestamp lags
   // noticeably behind real-time (e.g. Yahoo's free feed is officially
   // 15-min delayed but in practice often only 1-2 min).
-  main.querySelector("#price-refresh-btn")?.addEventListener("click", async () => {
+  on(main.querySelector("#price-refresh-btn"), "click", async () => {
     const btn = main.querySelector("#price-refresh-btn");
     if (btn) { btn.disabled = true; btn.textContent = "Refreshing…"; }
     // Always say what happened: 249 repeated taps in a week came from the
@@ -1544,12 +1563,12 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
       }
     }, 0);
   }
-  main.querySelector("#ob-toggle")?.addEventListener("click", () => { _obOpen = !_obOpen; render(inst, symbol); });
-  main.querySelector("#chart-fs-btn")?.addEventListener("click", () => enterChartFs(() => render(inst, symbol), symbol));
-  main.querySelector("#chart-fs-close")?.addEventListener("click", () => exitChartFs());
+  on(main.querySelector("#ob-toggle"), "click", () => { _obOpen = !_obOpen; render(inst, symbol); });
+  on(main.querySelector("#chart-fs-btn"), "click", () => enterChartFs(() => render(inst, symbol), symbol));
+  on(main.querySelector("#chart-fs-close"), "click", () => exitChartFs());
   // Candle/Line mode toggle — no refetch, just re-render with other mode.
   main.querySelectorAll(".chart-mode-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
+    on(btn, "click", () => {
       ui.chartMode = btn.dataset.mode;
       render(inst, symbol);
     });
@@ -1574,7 +1593,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
         const hoverOhlc = (inst.kind === "MF" && ui.chartMode === "candle")
           ? _synthMfDayOverDayOhlc(chartOhlc)
           : chartOhlc;
-        attachStockChartHover(host, hoverOhlc, { mode: ui.chartMode });
+        _hoverDetach = attachStockChartHover(host, hoverOhlc, { mode: ui.chartMode });
       } catch (e) {
         // Hotfix50a: don't let a hover-attach failure (most likely from
         // synthMfOhlc on edge-case data shapes) cascade up into the
@@ -1608,7 +1627,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   }
 
   main.querySelectorAll("[data-side]").forEach(btn => {
-    btn.addEventListener("click", () => {
+    on(btn, "click", () => {
       // Students tap the "Buy" tab expecting it to buy (60 rapid repeat taps
       // on 18 Oct). It used to reset the quantity to 1 and redraw, so their
       // chosen quantity vanished. Same side: keep everything and point at
@@ -1628,7 +1647,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   });
 
   main.querySelectorAll("[data-otype]").forEach(btn => {
-    btn.addEventListener("click", () => {
+    on(btn, "click", () => {
       ui.orderType = btn.dataset.otype;
       // Same liveQuote gate as the AMO branch — never seed from
       // getPriceAt() synthetic walk. Stays empty until a real price
@@ -1642,7 +1661,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
 
   const limitInput = main.querySelector("#limit-price-input");
   if (limitInput) {
-    limitInput.addEventListener("input", (e) => {
+    on(limitInput, "input", (e) => {
       const v = parseFloat(e.target.value);
       if (Number.isFinite(v) && v > 0) {
         ui.limitPrice = v;
@@ -1655,7 +1674,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
     });
   }
 
-  main.querySelector(".watch-btn")?.addEventListener("click", () => {
+  on(main.querySelector(".watch-btn"), "click", () => {
     if (getState().watchlist.includes(symbol)) {
       removeFromWatchlist(symbol);
       track("watchlist_remove", symbol);
@@ -1665,8 +1684,8 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
     }
   });
 
-  if (inst.kind !== "MF") main.querySelector(".trade-box")?.addEventListener("pointerdown", () => primeRealCloses(symbol), { once: true });
-  main.querySelector("#place-trade-btn")?.addEventListener("click", async () => {
+  if (inst.kind !== "MF") on(main.querySelector(".trade-box"), "pointerdown", () => primeRealCloses(symbol), { once: true });
+  on(main.querySelector("#place-trade-btn"), "click", async () => {
     if (!getState().isAuthed) { promptSignupToTrade(symbol); return; }
     // Wrap in try/catch so any silent throw inside reviewTrade surfaces
     // as a visible toast instead of the button appearing "dead".
@@ -1698,12 +1717,12 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
       if (unitsEl) unitsEl.textContent = units;
       if (totalEl) totalEl.textContent = `₹${(amount || 0).toLocaleString("en-IN")}`;
     };
-    mfAmt.addEventListener("input", updateEstimate);
+    on(mfAmt, "input", updateEstimate);
   }
 
   // MF Invest button — converts ₹ amount → unit count at current NAV,
   // then routes through the standard reviewTrade flow with that unit count.
-  main.querySelector("#mf-invest-btn")?.addEventListener("click", async () => {
+  on(main.querySelector("#mf-invest-btn"), "click", async () => {
     if (!getState().isAuthed) { promptSignupToTrade(symbol); return; }
     try {
       const amountInput = main.querySelector("#mf-amount-input");
@@ -1731,7 +1750,7 @@ function attachListeners(main, inst, symbol, curPrice, holding, chartOhlc, sessi
   });
 
   // MF Redeem — same conversion, opposite side.
-  main.querySelector("#mf-redeem-btn")?.addEventListener("click", async () => {
+  on(main.querySelector("#mf-redeem-btn"), "click", async () => {
     if (!getState().isAuthed) { promptSignupToTrade(symbol); return; }
     try {
       const redeemInput = main.querySelector("#mf-redeem-input");

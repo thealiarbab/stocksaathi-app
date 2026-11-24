@@ -31,6 +31,7 @@ import { attachChartZoom } from "../components/chartZoom.js";
 import { fetchDigest, cachedDigest } from "../features/portfolioDigest.js";
 import { computeTradeStats, returnSummary } from "../data/tradeStats.js";
 import { openPickSheet } from "../components/pickSheet.js";
+import { morphHtml } from "../components/morph.js";
 
 let newsItems = [];
 let quoteCache = {};
@@ -67,6 +68,8 @@ const PF_RANGES = [
 let pfChart = { range: "ALL", zoom: { scale: 1, centerMs: null, manualPan: false } };
 let pfHoverDetach = null;
 let pfZoomDetach = null;
+// Removes every listener the last draw attached (see render()).
+let pfWireAbort = null;
 let pfGestureActive = false;
 
 // The chart is drawn at the size of the box it sits in. It used to be drawn
@@ -319,6 +322,7 @@ export function renderPortfolio(main) {
     unsub?.();
     pollUnsub?.();
     ordersUnsub();
+    pfWireAbort?.abort();
     // Hotfix57a: detach the universe-loaded listeners so navigating away
     // from /portfolio doesn't leave them firing render() against a stale
     // closure (which would either throw or silently rebuild a DOM that's
@@ -749,10 +753,22 @@ export function renderPortfolio(main) {
       </div>
     `;
     // Same page as the last draw (a price tick with no change, a state
-    // notice about something not shown here): leave the DOM alone. Redrawing
-    // it every 15 s made the page flicker and dropped hover and scroll.
-    if (main.firstElementChild && main.firstElementChild.__drawnHtml === html) return;
-    main.innerHTML = html;
+    // notice about something not shown here): leave the DOM alone.
+    const drawn = main.firstElementChild;
+    if (drawn && drawn.__drawnHtml === html) return;
+    // Otherwise change only what differs (morphHtml). Replacing the whole
+    // page on every 15 s price tick made it flicker, restarted its
+    // animations and dropped hover and inner scroll. Kept nodes would keep
+    // the last draw's listeners, so those are all removed first and
+    // attached again below through on().
+    if (pfHoverDetach) { try { pfHoverDetach(); } catch {} pfHoverDetach = null; }
+    if (pfZoomDetach) { try { pfZoomDetach(); } catch {} pfZoomDetach = null; }
+    pfWireAbort?.abort();
+    pfWireAbort = new AbortController();
+    const wire = pfWireAbort.signal;
+    const on = (el, type, fn, opts) => { if (el) el.addEventListener(type, fn, { ...(opts || {}), signal: wire }); };
+    if (drawn && drawn.__drawnHtml != null) morphHtml(main, html, { syncInputs: true });
+    else main.innerHTML = html;
     if (main.firstElementChild) main.firstElementChild.__drawnHtml = html;
 
     // Chart: crosshair + tooltip, and the range selector. Both have to be
@@ -798,7 +814,7 @@ export function renderPortfolio(main) {
       });
     }
     main.querySelectorAll("[data-pf-range]").forEach(btn => {
-      btn.addEventListener("click", () => {
+      on(btn, "click", () => {
         const key = btn.dataset.pfRange;
         if (!key || key === pfChart.range) return;
         // Every range switch resets zoom: centerMs from the previous window
@@ -808,7 +824,7 @@ export function renderPortfolio(main) {
       });
     });
 
-    main.querySelector("#pf-zoom-reset")?.addEventListener("click", () => {
+    on(main.querySelector("#pf-zoom-reset"), "click", () => {
       pfChart.zoom = { scale: 1, centerMs: null, manualPan: false };
       render();
     });
@@ -849,7 +865,7 @@ export function renderPortfolio(main) {
     // par nahi khul raha" to the coach on 2026-10-12. The whole row opens
     // the stock page now; the button's own link still works as before.
     main.querySelectorAll("tr.clickable[data-sym]").forEach(row => {
-      row.addEventListener("click", (e) => {
+      on(row, "click", (e) => {
         if (e.target.closest("a, button")) return;
         const sym = row.dataset.sym;
         if (sym) go("/stocks/" + sym);
@@ -858,7 +874,7 @@ export function renderPortfolio(main) {
     // Trade history: toggle, filters, paging. State lives at module level
     // because render() replaces the whole page every 15 s quote tick.
     main.querySelectorAll("[data-act]").forEach(el => {
-      el.addEventListener("click", () => {
+      on(el, "click", () => {
         const a = el.dataset.act;
         if (a === "toggle") { actView.open = !actView.open; actView.limit = ACT_PAGE; }
         else if (a === "more") actView.limit += ACT_PAGE;
@@ -867,7 +883,7 @@ export function renderPortfolio(main) {
         if (a === "toggle" && !actView.open) main.querySelector("#pf-activity")?.scrollIntoView({ block: "nearest" });
       });
     });
-    main.querySelector("[data-act-sym]")?.addEventListener("click", async () => {
+    on(main.querySelector("[data-act-sym]"), "click", async () => {
       const st = getState();
       const counts = new Map();
       for (const t of st.transactions) counts.set(t.symbol, (counts.get(t.symbol) || 0) + 1);
@@ -883,7 +899,7 @@ export function renderPortfolio(main) {
     });
     loadActQuotes(() => { if (!cancelled) render(); });
     main.querySelectorAll("[data-cancel-order]").forEach(btn => {
-      btn.addEventListener("click", async () => {
+      on(btn, "click", async () => {
         const id = btn.dataset.cancelOrder;
         if (!id) return;
         btn.disabled = true;
@@ -913,7 +929,7 @@ export function renderPortfolio(main) {
     // the console with one violation per banner render. Delegated JS
     // listener keeps the smooth-scroll behaviour without tripping CSP.
     main.querySelectorAll("[data-scroll-to]").forEach(el => {
-      el.addEventListener("click", (e) => {
+      on(el, "click", (e) => {
         e.preventDefault();
         const target = el.getAttribute("data-scroll-to");
         if (!target) return;

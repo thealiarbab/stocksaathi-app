@@ -12,7 +12,7 @@ import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, 
 import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { morphHtml } from "../components/morph.js";
-import { turnSystem, discoveryNudgeFor } from "../coach/turnSystem.js";
+import { turnSystem, discoveryNudgeFor, turnLangNote } from "../coach/turnSystem.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
 import { getNews } from "../data/news.js";
 import {
@@ -2070,15 +2070,7 @@ async function sendAndReply(userText) {
   // C28: the language rule in runtimeFacts holds better repeated last in the
   // prompt. The Hinglish switch picks the language; nothing guesses it from
   // the user's words (that made the coach flip language turn to turn).
-  const turnLang = getState().settings.hinglish
-    ? `
-
-# THIS TURN: LANGUAGE
-Hinglish mode is on. Reply in casual Hinglish: mix everyday Roman Hindi with natural English words and phrases. Keep finance terms like P/E, SIP, NAV, price, profit, company and stock in English. Avoid formal Hindi translations such as 'tulna', 'ummeed', 'nirnay', 'nivesh', 'laabh', 'saalana', 'keemat' and 'moolya'.`
-    : `
-
-# THIS TURN: LANGUAGE
-Reply in English.`;
+  const turnLang = turnLangNote(!!getState().settings.hinglish);
   // Preview: Saathi can put an interactive chart under any answer (chatCards.js).
   const chartNote = isPreview() ? CHART_TOOL_NOTE + projectNote(ownerSession.folder) : "";
 

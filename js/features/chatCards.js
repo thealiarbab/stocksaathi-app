@@ -231,37 +231,49 @@ const ABOUT_ICONS = {
   ig: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17.3" cy="6.7" r="1.1" fill="currentColor"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M4 7l8 6 8-6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
-function aboutLink(href, icon, label, cls = "") {
+function aboutLink(href, icon, label) {
   const ext = href.startsWith("http");
-  return `<a class="ss-about-chip ${cls}" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ""}>${ABOUT_ICONS[icon]}<span>${esc(label)}</span></a>`;
+  return `<a class="ss-about-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ""}>${ABOUT_ICONS[icon]}<span>${esc(label)}</span></a>`;
 }
+// One line of the contact list: what the address is for, then the address in
+// full (readable and copyable, not hidden behind a short label).
+function aboutMail(purpose, addr) {
+  return `<div class="ss-about-row"><dt>${esc(purpose)}</dt><dd><a class="ss-about-link" href="mailto:${esc(addr)}"><span>${esc(addr)}</span></a></dd></div>`;
+}
+// Redesign 24 Nov 2026 (owner: the old card looked machine-made). No initials
+// in gradient circles, no pills, no tinted quote box, nothing that animates on
+// load. The founder's own words lead, set as text; the two people sit side by
+// side; the contact list says what each address is for.
 function aboutHtml() {
   return `<div class="ss-card ss-card-about">
-    <div class="ss-about-person">
-      <span class="ss-about-av" aria-hidden="true">AA</span>
-      <div><div class="ss-about-name">Ali Arbab</div><div class="ss-about-role">${L("Founder and developer · launched 19 Apr 2026", "Founder aur developer · 19 Apr 2026 ko launch")}</div></div>
-    </div>
     <blockquote class="ss-about-quote">“I kept seeing people my age invest blindly, chasing tips and hype without understanding what they were buying.”</blockquote>
-    <div class="ss-about-chips">
-      ${aboutLink("https://www.linkedin.com/in/thealiarbab", "linkedin", "LinkedIn", "is-li")}
-      ${aboutLink("https://x.com/thealiarbab", "x", "@thealiarbab")}
-      ${aboutLink("https://aliarbab2009.com", "web", "aliarbab2009.com")}
+    <div class="ss-about-people">
+      <div class="ss-about-person">
+        <div class="ss-about-name">Ali Arbab</div>
+        <div class="ss-about-role">${L("Founder and developer. Launched StockSaathi on 19 Apr 2026.", "Founder aur developer. StockSaathi 19 Apr 2026 ko launch kiya.")}</div>
+        <div class="ss-about-links">
+          ${aboutLink("https://www.linkedin.com/in/thealiarbab", "linkedin", "LinkedIn")}
+          ${aboutLink("https://x.com/thealiarbab", "x", "@thealiarbab")}
+          ${aboutLink("https://aliarbab2009.com", "web", "aliarbab2009.com")}
+        </div>
+      </div>
+      <div class="ss-about-person">
+        <div class="ss-about-name">Devansh Singh Chauhan</div>
+        <div class="ss-about-role">${L("Brand ambassador for students and schools.", "Students aur schools ke liye brand ambassador.")}</div>
+        <div class="ss-about-links">
+          ${aboutLink("https://www.instagram.com/devaanshh.04/", "ig", "@devaanshh.04")}
+        </div>
+      </div>
     </div>
-    <div class="ss-about-person ss-about-amb">
-      <span class="ss-about-av is-amb" aria-hidden="true">DS</span>
-      <div><div class="ss-about-name">Devansh Singh Chauhan</div><div class="ss-about-role">${L("Brand ambassador for students and schools", "Students aur schools ke liye brand ambassador")}</div></div>
-    </div>
-    <div class="ss-about-chips">
-      ${aboutLink("https://www.instagram.com/devaanshh.04/", "ig", "@devaanshh.04", "is-ig")}
-      ${aboutLink("mailto:ambassador@stocksaathi.co.in", "mail", "ambassador@")}
-    </div>
-    <div class="ss-about-foot">
-      <span class="ss-about-k">${L("StockSaathi", "StockSaathi")}</span>
-      ${aboutLink("https://www.instagram.com/stocksaathi.co.in/", "ig", "@stocksaathi.co.in", "is-ig")}
-      ${aboutLink("https://x.com/stocksaathicoin", "x", "@stocksaathicoin")}
-      ${aboutLink("mailto:business@stocksaathi.co.in", "mail", "business@")}
-      ${aboutLink("mailto:grievance@stocksaathi.co.in", "mail", "support")}
-    </div>
+    <dl class="ss-about-dir">
+      ${aboutMail(L("Schools, business and press", "Schools, business aur press"), "business@stocksaathi.co.in")}
+      ${aboutMail(L("The brand ambassador", "Brand ambassador"), "ambassador@stocksaathi.co.in")}
+      ${aboutMail(L("Something is not working", "Kuch kaam nahi kar raha"), "grievance@stocksaathi.co.in")}
+      <div class="ss-about-row"><dt>${L("Follow StockSaathi", "StockSaathi ko follow karein")}</dt><dd class="ss-about-follow">
+        ${aboutLink("https://www.instagram.com/stocksaathi.co.in/", "ig", "@stocksaathi.co.in")}
+        ${aboutLink("https://x.com/stocksaathicoin", "x", "@stocksaathicoin")}
+      </dd></div>
+    </dl>
   </div>`;
 }
 

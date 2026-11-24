@@ -869,6 +869,11 @@ async function execGetProfitAndLoss() {
     note: "Virtual money. Booked profit is from sells, matched first in, first out. Paper profit is on holdings at the latest prices and changes every day. For real shares in India, gains on shares sold within a year are short-term and after a year long-term, and they are taxed at different rates; say that the rates change with each Budget rather than quoting one from memory.",
   };
   if (pf.data_warning) out.data_warning = pf.data_warning;
+  // Holdings with broken data are kept out of the paper profit above. Say so,
+  // by name: leaving them out silently made the answer disagree with the
+  // portfolio page without explaining why.
+  const leftOut = (pf.holdings || []).filter((h) => !clean.includes(h)).map((h) => h.symbol);
+  if (leftOut.length) out.holdings_left_out_of_paper_profit = { symbols: leftOut, why: "Their stored quantity or cost is not believable, so they are not counted. Tell the student which ones were left out." };
   // How the whole portfolio's value moved (one point a trading day).
   const hist = (Array.isArray(state.portfolioHistory) ? state.portfolioHistory : [])
     .map((p) => ({ t: Number(p.ts), v: Number(p.valuePaise) })).filter((p) => p.t > 0 && p.v > 0 && p.v < 1e13).sort((a, b) => a.t - b.t);
@@ -890,8 +895,17 @@ async function execGetPopular(args = {}) {
   try {
     const client = await sb();
     if (!client) return { ok: false, error: "Unavailable right now." };
-    const { data, error } = await client.rpc("coach_platform_popular", { p_days: Number.isFinite(+args.days) && args.days != null ? +args.days : 1, p_limit: 10 });
-    if (error || !data) return { ok: false, error: "Lookup failed." };
+    const asked = Number.isFinite(+args.days) && args.days != null ? Math.min(7, Math.max(1, Math.round(+args.days))) : 1;
+    // A holiday or a quiet morning leaves the latest session with too few
+    // trades to list. Widen the window here, so the model gets rows in one
+    // lookup and never has to explain an empty first try to the student.
+    let data = null;
+    for (const days of [asked, 3, 7].filter((d, i, a) => d >= asked && a.indexOf(d) === i)) {
+      const res = await client.rpc("coach_platform_popular", { p_days: days, p_limit: 10 });
+      if (res.error || !res.data) return { ok: false, error: "Lookup failed." };
+      data = res.data;
+      if (Array.isArray(data.results) && data.results.length) break;
+    }
     return withTableHint(data);
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }

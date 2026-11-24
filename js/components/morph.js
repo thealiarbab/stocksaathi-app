@@ -17,8 +17,24 @@
 //      same way. What the user typed in an input or textarea is kept.
 // Nodes are matched by key when they have one: data-card, id, or data-i.
 // Use it only where listeners are delegated (attached to `el` or above), or
-// kept nodes would not get the listeners a fresh render attaches.
+// where every listener a render attaches is removed before the next one (an
+// AbortController signal: see portfolio.js); otherwise kept nodes collect a
+// second copy of each listener.
+//
+// morphHtml(el, html, { syncInputs: true }) also makes each form field show
+// the value the new HTML gives it, as innerHTML would, except the field the
+// user is typing in right now. Without it, typed text is always kept.
 // =============================================================================
+
+let _syncInputs = false;
+
+function syncField(o, n) {
+  if (o === document.activeElement) return;
+  if (o.tagName === "INPUT" && (o.type === "checkbox" || o.type === "radio")) {
+    const want = n.hasAttribute("checked");
+    if (o.checked !== want) o.checked = want;
+  } else if (o.value !== n.value) o.value = n.value;
+}
 
 function keyOf(n) {
   if (n.nodeType !== 1) return null;
@@ -43,10 +59,21 @@ function morphNode(o, n) {
   }
   if (o.hasAttribute("data-card") && o.getAttribute("data-card") === n.getAttribute("data-card")
       && (o.hasAttribute("data-drawn") || o.classList.contains("ss-card-table"))) return;
-  if (o.isEqualNode(n)) return;
+  if (o.isEqualNode(n)) {
+    // Equal markup can still hide a field whose shown value has drifted.
+    if (_syncInputs) {
+      const a = o.matches("input,textarea,select") ? [o] : o.querySelectorAll("input,textarea,select");
+      const b = n.matches("input,textarea,select") ? [n] : n.querySelectorAll("input,textarea,select");
+      for (let i = 0; i < a.length && i < b.length; i++) syncField(a[i], b[i]);
+    }
+    return;
+  }
   for (const a of Array.from(o.attributes)) if (!n.hasAttribute(a.name)) o.removeAttribute(a.name);
   for (const a of Array.from(n.attributes)) if (o.getAttribute(a.name) !== a.value) o.setAttribute(a.name, a.value);
-  if (o.tagName === "TEXTAREA" || o.tagName === "INPUT" || o.tagName === "SELECT") return;
+  if (o.tagName === "TEXTAREA" || o.tagName === "INPUT" || o.tagName === "SELECT") {
+    if (_syncInputs) syncField(o, n);
+    return;
+  }
   morphChildren(o, n);
 }
 
@@ -74,9 +101,10 @@ function morphChildren(oldParent, newParent) {
   while (o) { const gone = o; o = o.nextSibling; gone.remove(); }
 }
 
-export function morphHtml(el, html) {
+export function morphHtml(el, html, { syncInputs = false } = {}) {
   if (!el) return;
   const tpl = document.createElement("template");
   tpl.innerHTML = String(html ?? "");
-  morphChildren(el, tpl.content);
+  _syncInputs = syncInputs;
+  try { morphChildren(el, tpl.content); } finally { _syncInputs = false; }
 }

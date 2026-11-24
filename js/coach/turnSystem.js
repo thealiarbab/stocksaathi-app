@@ -11,6 +11,21 @@ import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, runtimeFacts } from "./persona.js";
 import { isDiscoveryQuery } from "./agent.js";
 import { marketStatus } from "../data/prices.js";
 
+// The language rule, repeated last in the prompt (it holds better there). The
+// Hinglish switch picks the language; nothing guesses it from the student's
+// words. One copy, used by the chat page and by the replay test set.
+export function turnLangNote(hinglish) {
+  return hinglish
+    ? `
+
+# THIS TURN: LANGUAGE
+Hinglish mode is on. Reply in casual Hinglish: mix everyday Roman Hindi with natural English words and phrases. Keep finance terms like P/E, SIP, NAV, price, profit, company and stock in English. Avoid formal Hindi translations such as 'tulna', 'ummeed', 'nirnay', 'nivesh', 'laabh', 'saalana', 'keemat' and 'moolya'.`
+    : `
+
+# THIS TURN: LANGUAGE
+Reply in English.`;
+}
+
 export function discoveryNudgeFor(userText) {
   return isDiscoveryQuery(userText)
     ? `

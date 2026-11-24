@@ -14,9 +14,9 @@
 // behaviour (which lookups ran, which marker was written, phrases that must
 // never appear), not exact wording.
 // =============================================================================
-import { runAgent } from "./agent.js";
+import { runAgent, looksHinglish, hasFormalHindiRegister } from "./agent.js";
 import { buildDossier } from "./dossier.js";
-import { turnSystem, discoveryNudgeFor } from "./turnSystem.js";
+import { turnSystem, discoveryNudgeFor, turnLangNote } from "./turnSystem.js";
 import { withLookupProvenance, normalizeLookupProvenance } from "./lookupProvenance.js";
 import { rememberTable, extractChartMarker, cardRecord, CHART_TOOL_NOTE } from "../features/chatCards.js";
 
@@ -154,6 +154,18 @@ export const REPLAY_CASES = [
     from: "Baseline: a concept question needs no lookups and no essay.",
     turns: [{ say: "explain pe ratio like i'm 12", expect: { maxLookups: 0, maxWords: 190, never: [LEAKS] } }],
   },
+  {
+    id: "hinglish-concept",
+    title: "Hinglish switch on: a concept",
+    from: "The chat page reruns a turn when the reply is not casual Hinglish. This checks the first answer.",
+    turns: [{ say: "sip kya hota hai bhai", hinglish: true, expect: { hinglish: true, maxLookups: 0, never: [LEAKS] } }],
+  },
+  {
+    id: "hinglish-price",
+    title: "Hinglish switch on: a price",
+    from: "Same check, with a lookup in the turn.",
+    turns: [{ say: "reliance ka price kya chal raha hai", hinglish: true, expect: { hinglish: true, tools: ["get_stock_price"], maxLookups: 2, never: [LEAKS] } }],
+  },
 ];
 
 const words = (t) => (String(t || "").trim().match(/\S+/g) || []).length;
@@ -171,15 +183,18 @@ function judge(expect = {}, { raw, text, card, tools }) {
   if (expect.maxLookups != null) add(`at most ${expect.maxLookups} lookup${expect.maxLookups === 1 ? "" : "s"}`, tools.length <= expect.maxLookups, `${tools.length} ran`);
   if (expect.marker === "table") add("shows a table", card?.type === "table" || /\n\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}/.test(raw));
   else if (expect.marker) add(`shows the ${expect.marker} card`, card?.type === expect.marker);
+  if (expect.hinglish) add("replies in casual Hinglish", looksHinglish(text) && !hasFormalHindiRegister(text));
   if (expect.maxWords != null) add(`at most ${expect.maxWords} words`, words(text) <= expect.maxWords, `${words(text)} words`);
   return out;
 }
 
 /**
  * Run the set. `lean` picks the brief; `only` (ids) limits the cases.
+ * `nudge: false` leaves out the per-turn discovery instruction, to measure
+ * whether the prompt and the lookups hold without it.
  * onCase(result, index, total) fires after each case. Returns all results.
  */
-export async function runReplay({ lean = false, only = null, onCase = null, signal = null } = {}) {
+export async function runReplay({ lean = false, only = null, onCase = null, signal = null, nudge = true } = {}) {
   const dossier = await buildDossier();
   const cases = REPLAY_CASES.filter((c) => !only || only.includes(c.id));
   const results = [];
@@ -193,7 +208,8 @@ export async function runReplay({ lean = false, only = null, onCase = null, sign
       history.push({ role: "user", text: turn.say });
       const system = turnSystem({
         lean, userText: turn.say, dossier, chartNote: CHART_TOOL_NOTE,
-        discoveryNudge: discoveryNudgeFor(turn.say),
+        turnLang: turnLangNote(!!turn.hinglish),
+        discoveryNudge: nudge ? discoveryNudgeFor(turn.say) : "",
       });
       const messages = history.map((m) => ({
         role: m.role,
