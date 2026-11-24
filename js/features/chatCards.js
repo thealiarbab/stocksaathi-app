@@ -904,12 +904,23 @@ function holdingsHtml(c) {
   const all = gain(inv, cur);
   const split = (Array.isArray(c.split) ? c.split : []).filter((x) => x.p > 0);
   const shown = split.length > 6 ? split.slice(0, 5).concat([{ k: L("Everything else", "Baaki sab"), p: +split.slice(5).reduce((a, x) => a + x.p, 0).toFixed(1) }]) : split;
+  // The whole account by kind (GR-1 draws a pie by asset class): shares,
+  // mutual funds and cash. Needs the cash figure, so older saved cards skip it.
+  const kinds = (() => {
+    if (c.cash == null || !(c.cash >= 0)) return [];
+    const st = rows.reduce((a, r) => a + (r.f ? 0 : r.c), 0), fu = rows.reduce((a, r) => a + (r.f ? r.c : 0), 0), tot = st + fu + c.cash;
+    if (!(tot > 0)) return [];
+    return [[L("Shares", "Shares"), st], [L("Mutual funds", "Mutual funds"), fu], [L("Cash", "Cash"), c.cash]]
+      .filter((x) => x[1] > 0).map((x) => ({ k: x[0], p: +((x[1] / tot) * 100).toFixed(1) }));
+  })();
+  const splitBar = (list, cap) => `<div class="ss-al-wrap">${cap ? `<p class="ss-al-cap">${esc(cap)}</p>` : ""}<div class="ss-al" role="img" aria-label="${esc(`${cap ? cap + ": " : ""}${list.map((x) => `${x.k} ${x.p}%`).join(", ")}`)}">${list.map((x, k) => `<span style="--w:${x.p}%;--i:${k}"></span>`).join("")}</div>
+    <ul class="ss-al-key">${list.map((x) => `<li><i aria-hidden="true"></i>${esc(x.k)} <b>${x.p.toFixed(1)}%</b></li>`).join("")}</ul></div>`;
   const title = rows.length === 1 ? L("Your holding", "Aapki holding") : L(`Your ${rows.length} holdings`, `Aapki ${rows.length} holdings`);
   const sub = `${L("Worth", "Abhi")} ${rs2(cur)} ${L("now, on", "ki value,")} ${rs2(inv)} ${L("put in.", "lagaya tha.")}${c.left ? ` ${L(`${c.left} with broken data left out.`, `${c.left} kharab data wali holdings chhodi gayi.`)}` : ""}`;
   return `<div class="ss-card ss-card-hold${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}"${fresh ? ` style="--el:${age}ms"` : ""}>
     <div class="ss-tb-head has-copy">${FOLD_BTN}${COPY_BTN}<div class="ss-card-title">${esc(title)}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
-    ${shown.length > 1 ? `<div class="ss-al-wrap"><div class="ss-al" role="img" aria-label="${esc(shown.map((x) => `${x.k} ${x.p}%`).join(", "))}">${shown.map((x, k) => `<span style="--w:${x.p}%;--i:${k}"></span>`).join("")}</div>
-    <ul class="ss-al-key">${shown.map((x) => `<li><i aria-hidden="true"></i>${esc(x.k)} <b>${x.p.toFixed(1)}%</b></li>`).join("")}</ul></div>` : ""}
+    ${kinds.length > 1 ? splitBar(kinds, L("Your whole account", "Aapka poora account")) : ""}
+    ${shown.length > 1 ? splitBar(shown, kinds.length > 1 ? L("Your holdings by sector", "Holdings, sector ke hisaab se") : "") : ""}
     <div class="ss-hd" role="table" aria-label="${esc(title)}">
       <div class="ss-hd-row ss-hd-cols" role="row"><span role="columnheader">${L("Holding", "Holding")}</span><span class="ss-hd-num" role="columnheader">${L("Worth now", "Abhi ki value")}</span><span class="ss-hd-num" role="columnheader">${L("Profit", "Profit")}</span></div>
       ${first.map(row).join("")}

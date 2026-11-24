@@ -103,7 +103,7 @@ function isCoachAllowed() {
 function applyVisibility() {
   if (!fab) return;
   const allowed = isCoachAllowed();
-  fab.style.display = allowed && !/^\/chat\/?$/.test(location.pathname) ? "" : "none";
+  fab.style.display = allowed && !/^\/chat(\/|$)/.test(location.pathname) ? "" : "none";
 }
 
 export function mountCoachLauncher() {

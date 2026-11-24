@@ -1466,3 +1466,11 @@ body.chat-app .cc-main.is-scrolled .cc-head { box-shadow: 0 1px 0 var(--border);
 .ss-jr-tip i { font-style: normal; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .ss-jr-x[hidden], .ss-jr-pt[hidden], .ss-jr-tip[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .ss-copy svg { transition: none; } }
+
+/* Holdings card: a caption over each split bar when there are two. */
+.ss-al-cap { margin: 0; font-size: var(--text-xs); color: var(--text-dim); }
+
+/* The journey card's four facts wrap by the card's own width, not the screen's
+   (the pop-up coach is narrow on a wide screen). */
+.ss-jr-key { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); }
+@media (max-width: 520px) { .ss-jr-key { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); } }

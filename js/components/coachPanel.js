@@ -48,7 +48,9 @@ function isCoachAllowed() {
   const state = getState();
   if (!state.isAuthed) return false;
   const path = location.pathname || "/";
-  if (COACH_HIDDEN_ROUTES.has(path)) return false;
+  // A chat with an id (/chat/c_...) is the chat page too: the pop-up used to
+  // open over it and show the same chat twice (seen 24 Nov 2026).
+  if (COACH_HIDDEN_ROUTES.has(path) || path.startsWith("/chat/")) return false;
   return true;
 }
 
