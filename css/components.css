@@ -501,7 +501,11 @@
 .coach-trade-card.strong-caution { border-color: var(--negative); background: var(--negative-soft); }
 .coach-trade-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: var(--text-xs); color: var(--text-dim); }
 
-@media (min-width: 1280px) { .coach-fab { display: none; } }
+/* Wide screens: the docked pop-up runs the full height of the window. It used
+   to start under the top bar, which left an empty block in the corner above
+   it. (The round button is no longer hidden here; coachLauncher.js hides it
+   only while the pop-up is open.) */
+@media (min-width: 1280px) { .coach-panel { top: 0; } }
 @media (max-width: 1279px) {
   body.coach-docked { padding-right: 0; }
   .coach-panel {

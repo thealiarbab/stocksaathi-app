@@ -103,7 +103,12 @@ function isCoachAllowed() {
 function applyVisibility() {
   if (!fab) return;
   const allowed = isCoachAllowed();
-  fab.style.display = allowed && !/^\/chat(\/|$)/.test(location.pathname) ? "" : "none";
+  // On a wide screen the open pop-up is docked beside the page and has its own
+  // close button, so the round button steps aside while it is open. (Until 24
+  // Nov 2026 it was hidden on wide screens altogether, which left no visible
+  // way to open the coach there.)
+  const dockedOpen = window.innerWidth >= 1280 && !!getState().settings.coachPanelOpen;
+  fab.style.display = allowed && !dockedOpen && !/^\/chat(\/|$)/.test(location.pathname) ? "" : "none";
 }
 
 export function mountCoachLauncher() {
@@ -128,6 +133,7 @@ export function mountCoachLauncher() {
   placeFab();
   applyVisibility();
   window.addEventListener("resize", placeFab);
+  window.addEventListener("resize", applyVisibility);
   window.addEventListener("ss:navigate", applyVisibility);
   subscribe(applyVisibility);
 }

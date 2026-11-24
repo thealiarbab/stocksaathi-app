@@ -597,3 +597,5 @@ The intended design: primary serving path Cloudflare Worker (`edge/front-door/`)
 ### Cache coherency
 
 `sw.js` caches hashed `/assets/` files forever and the rest per build id. Pages would need the same `node build/bundle.mjs` build step as Vercel, or it serves the unbundled source (which also works).
+
+- **Coach pop-up = the /chat view in a box** (`coachPanel.js` mounts `chat.js` with `{ embedded: true }` into `#coach-embed`; the flat panel code below the `return` in its `render()` no longer runs). Inside it `chat.js` is a guest: page-wide listeners must check `embedded`/`_embedded` (keys only while focus is inside the box, never steal focus), and anything that asks "is it narrow" uses `hostWidth()` in JS and `@container coach (...)` in CSS, never the window width (the box is 300 to 820px on any screen). The round launcher shows on every width and hides only while the pop-up is docked open (>= 1280px).

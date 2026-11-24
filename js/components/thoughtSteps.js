@@ -248,7 +248,9 @@ export function traceStep(trace, st) {
 }
 
 // Summaries can mention the instructions; those lines are never shown.
-const HIDE_RE = /\b(system prompt|system message|the system|instructions?|the rules?|tools?|function call|app context|context block|dossier|runtime|the brief|stocksaathi_|json|the user|the student|lookup record)\b|<\/?\w+>|\b[a-z]+(?:_[a-z]+)+\b|\[\[/i;
+// ("marker" and "calls ... in parallel" were added 24 Nov 2026: "the last line
+// being the ask marker" showed in the breakdown sheet.)
+const HIDE_RE = /\b(system prompt|system message|the system|instructions?|the rules?|tools?|function call|app context|context block|dossier|runtime|the brief|stocksaathi_|json|the user|the student|lookup record|markers?|in parallel|calls? (?:are|is|can))\b|<\/?\w+>|\b[a-z]+(?:_[a-z]+)+\b|\[\[/i;
 // The model's thinking summary streams in pieces. Each finished sentence
 // becomes one thought line (GR-1's narration lines, the owner's "thinking
 // breakdown"); lines that talk about the setup are dropped.

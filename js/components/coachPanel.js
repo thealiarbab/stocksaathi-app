@@ -266,7 +266,14 @@ export function mountCoachPanel() {
     if (wasDrawerLastTick && window.innerWidth < 768) { closingByNav = true; closeDrawer(); }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && wasDrawerLastTick && !document.querySelector(".modal-overlay")) closeDrawer();
+    if (e.key !== "Escape" || !wasDrawerLastTick) return;
+    // Esc closes the thing on top first: a sheet, a menu, the chat list, or a
+    // reply that is still being written. Only then the pop-up itself.
+    if (document.querySelector(".modal-overlay, .term-pop-overlay, .cc-modal-wrap, .ts-sheet, .cc-head-menu, .cc-item-menu")) return;
+    if (root.querySelector(".cc.is-drawer-open")) return;
+    const stop = root.querySelector("#chat-stop");
+    if (stop && !stop.hidden && stop.offsetParent) return;
+    closeDrawer();
   });
   let touchX = null, touchY = null;
   root.addEventListener("touchstart", (e) => {
@@ -307,8 +314,14 @@ export function mountCoachPanel() {
     // unconditionally, which popped the mobile keyboard every time the
     // user tapped a nav tab — even when the coach panel wasn't visible.
     const isOpenNow = shouldDock || shouldOpen;
-    if (isOpenNow && !wasOpenLastTick) {
-      root.querySelector("#coach-input")?.focus();
+    // Closed, the pop-up sits off-screen with its buttons still in the page:
+    // the Tab key walked into controls nobody could see. inert takes them out.
+    root.inert = !isOpenNow;
+    if (isOpenNow && !wasOpenLastTick && window.innerWidth >= 1024) {
+      // The box to type in (it was still looking for the old panel's
+      // #coach-input, so reopening the pop-up left the cursor on the page).
+      // Desktop only: on a phone this would pop the keyboard.
+      setTimeout(() => root.querySelector("#chat-input")?.focus(), 60);
     }
     wasOpenLastTick = isOpenNow;
 

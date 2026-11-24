@@ -189,9 +189,30 @@ function replyFor(text) {
 // The element the chat is drawn into: <main> on /chat, or the coach pop-up's
 // box, which shows this same view (coachPanel.js).
 let _host = null;
+// True while the chat is drawn inside the coach pop-up. There it is a guest on
+// someone else's page: it must not take keys, focus or scrolling from the page
+// behind it (24 Nov 2026: Page Down stopped scrolling every page once the
+// pop-up had been opened, and any letter jumped into the hidden chat box).
+let _embedded = false;
 function chatHost() {
   return (_host && _host.isConnected) ? _host : document.getElementById("main");
 }
+// "Narrow" is about the box the chat is drawn in, not the window: the pop-up
+// is a 380px box on a wide screen, and it needs the phone layout there.
+function hostWidth() {
+  const w = _host && _host.isConnected ? _host.clientWidth : 0;
+  return w > 0 ? Math.min(w, window.innerWidth) : window.innerWidth;
+}
+// Put the cursor in the box on desktop only (a phone would pop its keyboard).
+// In the pop-up, never pull it out of a field on the page behind.
+function canAutoFocus() {
+  if (window.innerWidth < 1024) return false;
+  if (!_embedded) return true;
+  const a = document.activeElement;
+  if (!a || a === document.body || _host?.contains(a)) return true;
+  return !(a.matches?.("input, textarea, select, [contenteditable]"));
+}
+let _offShort = null;   // the one page-wide shortcut listener, replaced on every draw
 
 // ---- Select and quote (24 Nov 2026) -----------------------------------------
 // Select any text in the chat: a small bar offers "Quote" (a chip above the
@@ -337,6 +358,7 @@ function wireSideGrip(root) {
 export function renderChat(main, opts = {}) {
   _host = main;
   const embedded = !!opts.embedded;
+  _embedded = embedded;
   // A chat link (/chat/<id>) opens that conversation. On a new device the
   // chat may arrive with the cloud sync a moment later, so render() keeps
   // trying until it is there.
@@ -452,7 +474,7 @@ export function renderChat(main, opts = {}) {
 
         <section class="cc-main">
           <header class="cc-head">
-            <button class="cc-chip-btn cc-menu-btn" id="cc-open-side" type="button" aria-controls="cc-side" aria-expanded="${window.innerWidth <= 900 ? drawerOpen : !sidebarHidden}" aria-label="${window.innerWidth <= 900 ? (drawerOpen ? "Close chat list" : "Open chat list") : (sidebarHidden ? "Show chat list" : "Hide chat list")}">
+            <button class="cc-chip-btn cc-menu-btn" id="cc-open-side" type="button" aria-controls="cc-side" aria-expanded="${hostWidth() <= 900 ? drawerOpen : !sidebarHidden}" aria-label="${hostWidth() <= 900 ? (drawerOpen ? "Close chat list" : "Open chat list") : (sidebarHidden ? "Show chat list" : "Hide chat list")}">
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
               Chats
             </button>
@@ -525,7 +547,7 @@ export function renderChat(main, opts = {}) {
     // Desktop: auto-focus so the user can start typing. Mobile: don't —
     // focusing an input pops the soft keyboard, and the user hasn't
     // asked for it yet. They can tap the input themselves to start.
-    if (window.innerWidth >= 1024 && !drawerOpen) input.focus();
+    if (canAutoFocus() && !drawerOpen) input.focus();
 
     // Grows with the text up to ~8 lines, like the big chat apps.
     const fit = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 200) + "px"; input.style.overflowY = input.scrollHeight > 200 ? "auto" : "hidden"; };
@@ -727,6 +749,13 @@ export function renderChat(main, opts = {}) {
           <button type="button" role="menuitem" data-head="archive">${sess.archived ? "Unarchive" : "Archive"} chat</button>
         </div>`);
         const menu = btn.parentElement.querySelector(".cc-head-menu");
+        // The pop-up's top bar clips what hangs below it (only the first item
+        // showed), so there the menu sits on the chat pane, under the bar.
+        if (embedded) {
+          const pane = main.querySelector(".cc-main"), head = btn.closest(".cc-head");
+          if (pane && head) { pane.appendChild(menu); menu.classList.add("is-embedded"); menu.style.top = `${head.offsetHeight + 4}px`; }
+        }
+        menu.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); menu.remove(); btn.focus(); } });
         menu.querySelector("button")?.focus();
         menu.addEventListener("click", (ev) => {
           const a = ev.target.closest("[data-head]")?.dataset.head;
@@ -772,12 +801,22 @@ export function renderChat(main, opts = {}) {
 
       // Shortcuts: Ctrl/Cmd+Shift+O new chat, Shift+Esc focus the box.
       const onShort = (e) => {
+        // In the pop-up, only keys pressed while the cursor is inside it.
+        if (embedded && !main.contains(document.activeElement)) return;
+        const sheetOpen = () => !!document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet");
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); }
         else if (e.shiftKey && e.key === "Escape") { e.preventDefault(); input.focus(); }
         // Esc stops a reply that is being written, unless a menu or sheet is
         // open (Esc closes that first).
-        else if (e.key === "Escape" && m_pending && m_abortController && slash.hidden && !document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet")) { e.preventDefault(); m_abortController.abort(); }
-        else if (document.activeElement === document.body && input.isConnected && !document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet")) {
+        else if (e.key === "Escape" && m_pending && m_abortController && slash.hidden && !sheetOpen()) { e.preventDefault(); m_abortController.abort(); }
+        else if (embedded) {
+          // Page Up and Page Down move the thread; Home and End stay with the text box.
+          if ((e.key === "PageUp" || e.key === "PageDown") && messagesEl.isConnected && !sheetOpen()) {
+            e.preventDefault();
+            messagesEl.scrollTop += (e.key === "PageDown" ? 1 : -1) * messagesEl.clientHeight * 0.85;
+          }
+        }
+        else if (document.activeElement === document.body && input.isConnected && !sheetOpen()) {
           // Nothing is focused: a letter starts a message (as in ChatGPT and
           // Claude), and the paging keys move the thread.
           if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && e.key !== " ") input.focus();
@@ -789,8 +828,13 @@ export function renderChat(main, opts = {}) {
           }
         }
       };
+      // One listener at a time: every draw used to add another and only
+      // leaving the page removed them.
+      _offShort?.();
       document.addEventListener("keydown", onShort);
-      window.addEventListener("ss:navigate", () => document.removeEventListener("keydown", onShort), { once: true });
+      const offShort = () => { document.removeEventListener("keydown", onShort); if (_offShort === offShort) _offShort = null; };
+      _offShort = offShort;
+      window.addEventListener("ss:navigate", offShort, { once: true });
     }
 
     function closeSlash() {
@@ -901,7 +945,9 @@ export function renderChat(main, opts = {}) {
       if (open) main.querySelector("#cc-search")?.focus();
     };
     main.querySelector("#cc-open-side")?.addEventListener("click", (e) => {
-      if (window.innerWidth <= 900) {
+      // By the box's width: in the pop-up the chat list is always a drawer
+      // (on a wide screen this button used to do nothing there).
+      if (hostWidth() <= 900) {
         setDrawer(!drawerOpen);
         return;
       }
@@ -1320,7 +1366,7 @@ function renderBubble(m) {
 // always returns to the bottom. Repaints keep the reader's place.
 function composerHint() {
   // Phones: the long hint wrapped to two lines and was clipped (24 Nov).
-  const narrow = typeof window !== "undefined" && window.innerWidth < 520;
+  const narrow = typeof window !== "undefined" && hostWidth() < 520;
   return isPreview() && !narrow ? "Ask Saathi anything, or type / for tools" : "Ask Saathi anything";
 }
 function langLabel(hinglishOn) {
@@ -1933,7 +1979,7 @@ async function sendAndReply(userText) {
     input.placeholder = "Type your next message…";
     // Don't steal focus during mobile streaming — keeps the virtual
     // keyboard from popping up uninvited. Desktop-only.
-    if (window.innerWidth >= 1024) input.focus();
+    if (canAutoFocus()) input.focus();
   }
   if (sendBtn) {
     sendBtn.outerHTML = `<button class="composer-btn is-stop" id="chat-stop" type="button" title="Stop generating" aria-label="Stop generating">&#9632;</button>`;
@@ -1995,7 +2041,7 @@ async function sendAndReply(userText) {
       inputNow.placeholder = composerHint();
       // Same rationale as above — desktop auto-focus is fine, mobile
       // pops a keyboard the user didn't ask for.
-      if (window.innerWidth >= 1024) inputNow.focus();
+      if (canAutoFocus()) inputNow.focus();
     }
     const stopBtn = el?.querySelector("#chat-stop");
     if (stopBtn) {
