@@ -2443,7 +2443,7 @@ export function isToolCallOnly(raw) {
   const s = String(raw || "").trim();
   if (!s) return false;
   if (stripToolCallScaffolding(s).trim()) return false;
-  return /CALL\s+\w+|\[(?:tool|function)[ _]?call|tool_calls/i.test(s);
+  return /\bCALL\s+\w+|\[(?:tool|function)[ _]?call|tool_calls/i.test(s);
 }
 
 // ---------------------------------------------------------------------------

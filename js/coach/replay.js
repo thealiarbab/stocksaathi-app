@@ -16,7 +16,7 @@
 // =============================================================================
 import { runAgent, looksHinglish, hasFormalHindiRegister } from "./agent.js";
 import { buildDossier } from "./dossier.js";
-import { turnSystem, discoveryNudgeFor, turnLangNote } from "./turnSystem.js";
+import { turnSystem, turnLangNote } from "./turnSystem.js";
 import { withLookupProvenance, normalizeLookupProvenance } from "./lookupProvenance.js";
 import { rememberTable, extractChartMarker, cardRecord, CHART_TOOL_NOTE } from "../features/chatCards.js";
 
@@ -62,7 +62,10 @@ export const REPLAY_CASES = [
     id: "pe-and-chart",
     title: "Highest P/E large company, show its chart",
     from: "24 Nov: the keyword chart attach drew a chart of the word \"NSE\".",
-    turns: [{ say: "which large company on the whole NSE has the highest pe? show its chart", expect: { tools: ["screen_stocks", "read_chart"], maxLookups: 4, marker: "chart", never: [LEAKS] } }],
+    // The check is the right chart under the answer (never one of "NSE").
+    // It used to demand read_chart too; the prompt only asks for the marker,
+    // and the model, correctly, does not describe chart numbers it has not read.
+    turns: [{ say: "which large company on the whole NSE has the highest pe? show its chart", expect: { tools: ["screen_stocks"], maxLookups: 4, marker: "chart", never: [LEAKS, /\[\[\s*chart\s+NSE[\s\]]/i] } }],
   },
   {
     id: "bank-list",
@@ -190,11 +193,9 @@ function judge(expect = {}, { raw, text, card, tools }) {
 
 /**
  * Run the set. `lean` picks the brief; `only` (ids) limits the cases.
- * `nudge: false` leaves out the per-turn discovery instruction, to measure
- * whether the prompt and the lookups hold without it.
  * onCase(result, index, total) fires after each case. Returns all results.
  */
-export async function runReplay({ lean = false, only = null, onCase = null, signal = null, nudge = true } = {}) {
+export async function runReplay({ lean = false, only = null, onCase = null, signal = null } = {}) {
   const dossier = await buildDossier();
   const cases = REPLAY_CASES.filter((c) => !only || only.includes(c.id));
   const results = [];
@@ -208,8 +209,7 @@ export async function runReplay({ lean = false, only = null, onCase = null, sign
       history.push({ role: "user", text: turn.say });
       const system = turnSystem({
         lean, userText: turn.say, dossier, chartNote: CHART_TOOL_NOTE,
-        turnLang: turnLangNote(!!turn.hinglish),
-        discoveryNudge: nudge ? discoveryNudgeFor(turn.say) : "",
+        turnLang: turnLangNote(!!turn.hinglish), hinglish: !!turn.hinglish,
       });
       const messages = history.map((m) => ({
         role: m.role,

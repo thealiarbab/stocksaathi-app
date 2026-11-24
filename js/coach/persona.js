@@ -474,7 +474,7 @@ function nextOpenIsTomorrow(nextOpenAt) {
   } catch { return false; }
 }
 
-export function runtimeFacts(status, latestQuestion = "") {
+export function runtimeFacts(status, latestQuestion = "", { hinglish: hinglishOverride = null } = {}) {
   const lines = [];
   if (status) {
     const openness = status.state === "open"
@@ -512,8 +512,11 @@ export function runtimeFacts(status, latestQuestion = "") {
   // Settings → Hinglish mode. Until 2026-09-30 this switch was saved but never
   // reached the model, while the site advertised it; every system prompt
   // includes runtimeFacts(), so this is the one place it has to be wired.
+  // The replay test set passes the switch in, so a Hinglish case gets the same
+  // prompt a student with the switch on gets; everyone else reads the setting.
   let hinglish = false;
-  try { hinglish = !!getState()?.settings?.hinglish; } catch {}
+  if (hinglishOverride != null) hinglish = !!hinglishOverride;
+  else { try { hinglish = !!getState()?.settings?.hinglish; } catch {} }
   if (hinglish) {
     lines.push("LANGUAGE: the user has switched on Hinglish mode in Settings. Reply in casual, light Hinglish: mix everyday Roman Hindi with natural English words and phrases, the way Indian teens actually text. Keep finance terms like P/E, SIP, NAV, price, profit, company, stock and market in English. Do not write formal or Sanskritised Hindi such as 'tulna', 'ummeed', 'nirnay', 'nivesh', 'laabh', 'saalana', 'vartamaan', 'keemat' or 'moolya'; use natural code-mixed phrasing such as 'compare karo', 'expectation', 'decision', 'investing', 'profit', 'yearly', 'current' and 'price'. Avoid translating every English word into Hindi. Do not use Devanagari unless the user writes in it. If the user writes in pure English, still reply in light Hinglish.");
   } else {

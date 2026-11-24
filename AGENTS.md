@@ -226,12 +226,25 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
   `js/coach/turnSystem.js`, before any reply checker. Run it before and after
   any change to the prompt, the tools or the facts. `useLeanBrief()` in
   `js/features/preview.js` decides who gets the short brief; on 24 Nov the
-  long rulebook passed 12 of 12 and the short brief 11 of 12, so it stays
-  owner-only.
+  long rulebook passed 20 of 20 and the short brief 17 of 20, so it stays
+  owner-only. A case with `hinglish: true` on its turn runs with the Hinglish
+  switch on (passed into `runtimeFacts` and `turnLangNote`).
+- **Reply checkers removed on /chat (24 Nov):** the per-turn "discovery"
+  instruction (a keyword gate) and the reruns for an offer to look something
+  up, a promise to fetch and a list without prices are gone; the list cases
+  passed twice on the replay set without them. Still there: the Hinglish
+  rerun in `finishReply` (remove it once both Hinglish replay cases pass on
+  the first answer), `scrubAdvice`, and the checks on the no-lookups
+  fallback path and in the pop-up (`coachPanel.js`). Do not add one back: add
+  the failing chat to the replay set and fix what the model is given.
 - **Repaints change only what differs.** `js/components/morph.js`
   (`morphHtml`) replaces `innerHTML =` for the chat message list and the chat
   sidebar, and a background sync refreshes those in place instead of
-  rebuilding the page. Use it wherever a list repaints on a timer or a sync
+  rebuilding the page. The portfolio and stock pages use it for the whole
+  page (`morphHtml(main, html, { syncInputs: true })`): there, every listener
+  a draw attaches goes through a local `on(el, type, fn)` tied to an
+  AbortController that the next draw aborts, so a kept node never holds two
+  copies. A new per-draw listener on those pages must use `on()`. Use it wherever a list repaints on a timer or a sync
   and its listeners are delegated; a card with the same `data-card` that has
   been drawn is kept as it is.
 - **Rankings are a table card, never typed rows.** Screener and movers

@@ -9,10 +9,10 @@ import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
 import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
-import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
+import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { morphHtml } from "../components/morph.js";
-import { turnSystem, discoveryNudgeFor, turnLangNote } from "../coach/turnSystem.js";
+import { turnSystem, turnLangNote } from "../coach/turnSystem.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
 import { getNews } from "../data/news.js";
 import {
@@ -2155,16 +2155,6 @@ async function sendAndReply(userText) {
     //
     // Found by reading the browser console during adversarial testing, not by
     // any test: it fails silently by construction.
-    // Discovery queries get the price instruction UP FRONT rather than via the
-    // escalation below. persona.js already demands "names AND numbers in one
-    // reply" for a sector question, and the model still returns a bare list
-    // often enough that the detector fires. Letting the retry fix it costs a
-    // whole second agent loop: measured 6 LLM hops, 40 quote requests and 30s
-    // wall clock, against ~half that when the instruction rides the first call.
-    //
-    // The escalation stays as the safety net. This just stops it being the
-    // normal path.
-    const discoveryNudge = discoveryNudgeFor(userText);
     // News-shaped question: the app fetches the headlines itself (C5). The
     // model answered "latest news on oil and Iran" from memory on 6 Oct
     // with the news tool right there.
@@ -2173,7 +2163,7 @@ async function sendAndReply(userText) {
     // add-ons (a duplicate tool section, a "1-3 sentences" tone rule that
     // contradicts the brief, keyword nudges and prefetched news).
     const system = turnSystem({
-      lean: useLeanBrief(), userText, dossier, chartNote, turnLang, newsBlock, discoveryNudge,
+      lean: useLeanBrief(), userText, dossier, chartNote, turnLang, newsBlock,
     });
     try {
       replyText = await runAgent({
@@ -2212,49 +2202,15 @@ async function sendAndReply(userText) {
     // Write into the OWNER session's messages directly so a mid-stream
     // session switch doesn't land the reply in the wrong chat.
     let cleanedReply = stripScaffolding(replyText);
-    // The user already asked. If the model came back offering to look it up
-    // rather than looking it up, run the turn again with an explicit
-    // instruction, instead of spending the user's turn on a yes/no.
-    // Two distinct failures, one remedy. The offer detector catches a short,
-    // figure-free dodge. The priceless-list detector catches the shape it
-    // structurally cannot see: a long list of instruments with no numbers,
-    // which is what "fetch a list of 20 top bank stocks" actually returned in
-    // production. See looksLikePricelessList in coach/agent.js.
-    // A check that reruns the AI puts the bubble back into the thinking row
-    // instead of leaving a draft on screen that then changes under the reader.
-    const recheck = () => {
-      trace.answerAt = 0;
-      traceStep(trace, { action: "figure_check" });
-      if (live) { live.status = true; live.text = ""; paintLive(); }
-    };
-    const pricelessList = looksLikePricelessList(cleanedReply, userText);
-    if (looksLikeLookupOffer(cleanedReply) || looksLikeFetchPromise(cleanedReply) || pricelessList) {
-      recheck();
-      try {
-        // Bounded — see the note on the streaming escalation below. A retry
-        // that outlives the user's patience is worse than the reply we're
-        // trying to improve.
-        const nudge = pricelessList
-          ? `
-
-# THIS TURN
-Your previous answer listed instruments but gave NO prices. That is not an acceptable answer to a discovery question. Call get_stock_price for each symbol you name — in parallel, in one turn — and reply with the names AND their current prices together. Do not ask which ones the user wants first.`
-          : `
-
-# THIS TURN
-You already offered to look this up and the user already asked. Do NOT ask again. Call the tools you need, in parallel if it takes several, and answer with the real numbers now.`;
-        const retry = await withDeadline(runAgent({
-          apiKey: state.settings.llmApiKey || null,
-          system: system + nudge,
-          messages, profile: "fast",
-          onStep: collectLookupStep,
-        }), 12_000);
-        const cleanRetry = stripScaffolding(retry);
-        const retryStillBad = looksLikeLookupOffer(cleanRetry) || looksLikeFetchPromise(cleanRetry)
-          || looksLikePricelessList(cleanRetry, userText);
-        if (cleanRetry && cleanRetry.trim() && !retryStillBad) cleanedReply = cleanRetry;
-      } catch (e) { console.warn("[chat] lookup-offer retry failed:", e?.message || e); }
-    }
+    // No rerun here any more (24 Nov 2026). Three checks used to read the
+    // reply (an offer to look something up, a promise to fetch, a list with
+    // no prices) and run the whole turn again with a scolding note. On the
+    // replay set the first answer passes every one of those cases without
+    // them, because the screener now returns prices with its rows and the
+    // lookups say how to show their result. A rerun doubled the wait and made
+    // a finished draft change under the reader. If one of those failures
+    // comes back, add the chat to coach/replay.js and fix what the model is
+    // given.
     cleanedReply = await finishReply(cleanedReply, userText, system, messages, collectLookupStep);
     let finalText = (cleanedReply && cleanedReply.trim()) ? cleanedReply : (errorText || "Saathi couldn't answer that. Try rephrasing or asking again.");
     const ex = extractChartMarker(finalText);
