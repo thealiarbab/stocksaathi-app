@@ -250,7 +250,7 @@ export function mountNav() {
                 </div>
                 <div class="dropdown-divider"></div>
                 <a class="dropdown-item" href="/report-card">📋 Report card</a>
-                ${state.user.isAdmin ? `<a class="dropdown-item" href="/report-card#achievements">🏅 Achievements</a>` : ""}
+                ${state.user.isAdmin ? `<a class="dropdown-item" href="/report-card#achievements"><svg class="nav-pin" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px;margin-right:2px"><circle cx="8" cy="8.6" r="6.6" fill="#8A6110"/><circle cx="8" cy="7.6" r="6.6" fill="#E8B62E"/><circle cx="8" cy="7.6" r="4.9" fill="#1FD1A1"/><path d="M5.2 7.8 7.2 9.8 10.9 5.6" fill="none" stroke="#FFF4DC" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Achievements</a>` : ""}
                 <a class="dropdown-item" href="/settings">⚙️ Settings</a>
                 <button class="dropdown-item" type="button" data-theme-item>${resolvedTheme(state.settings) === "dark" ? "☀️ Light mode" : "🌙 Dark mode"}</button>
                 <div class="dropdown-divider"></div>
@@ -442,7 +442,7 @@ function renderDrawer(state, allLinks, active, pfValue, ms) {
       <div class="drawer-divider"></div>
       <div class="drawer-section">${escapeHtml(state.user.displayName || state.user.username || "")}</div>
       ${state.user.isAdmin ? `<a href="/report-card#achievements" class="drawer-link" data-close-on-click>
-        <span>🏅 Achievements</span>
+        <span><svg class="nav-pin" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style="vertical-align:-3px;margin-right:2px"><circle cx="8" cy="8.6" r="6.6" fill="#8A6110"/><circle cx="8" cy="7.6" r="6.6" fill="#E8B62E"/><circle cx="8" cy="7.6" r="4.9" fill="#1FD1A1"/><path d="M5.2 7.8 7.2 9.8 10.9 5.6" fill="none" stroke="#FFF4DC" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Achievements</span>
         <span class="muted">›</span>
       </a>` : ""}
       <a href="/settings" class="drawer-link" data-close-on-click>
