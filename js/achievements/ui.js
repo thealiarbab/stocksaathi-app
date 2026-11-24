@@ -388,6 +388,7 @@ export async function openAchievements({ focus = null } = {}) {
   track(focus || "list", { action: "opened", from: focus ? "toast" : "list" });
 
   let picked = null;            // the family whose story is open
+  let storyOf = () => "";       // set by draw(): the story for a family key
   let pickedFromFocus = !!focus;
   const draw = (raw) => {
     const hi = lang;
@@ -505,6 +506,8 @@ export async function openAchievements({ focus = null } = {}) {
         </div>`;
     };
 
+    storyOf = (key) => { const f = all.find((x) => x.key === key); return f ? story(f) : ""; };
+
     // ---- the board: one grid per group, earned in colour, the rest as prints
     const groups = [...CATEGORIES.map((c) => ({ key: c.key, name: hi ? c.hi : c.en })), { key: "limited", name: T("Limited editions", "Limited editions") }];
     const slot = (f) => {
@@ -521,7 +524,7 @@ export async function openAchievements({ focus = null } = {}) {
           ${medal(d, { size: "lg", locked: !f.best })}
           <span class="ach-slot-name">${esc(c.name)}</span>
           ${meta ? `<span class="ach-slot-meta">${esc(meta)}</span>` : ""}
-        </button></li>${on ? `<li class="ach-detail-li">${story(f)}</li>` : ""}`;
+        </button></li>${on ? `<li class="ach-detail-li is-open"><div class="ach-detail-clip">${story(f)}</div></li>` : ""}`;
     };
     const board = groups.map((g) => {
       const list = inCat.filter((f) => f.cat === g.key);
@@ -537,7 +540,11 @@ export async function openAchievements({ focus = null } = {}) {
 
     const hasLimited = all.some((f) => f.cat === "limited");
     const section = (title, body, note = "") => body ? `<section class="ach-sec"><div class="ach-sec-head"><h3>${title}</h3></div>${note}${body}</section>` : "";
-    overlay.innerHTML = `
+    // Only the first draw builds the sheet. Later draws swap its contents, so
+    // the sheet never replays its entrance and nothing flashes.
+    const old = overlay.querySelector(".ach-sheet[aria-labelledby]");
+    const keepTop = old?.querySelector(".ach-body")?.scrollTop || 0;
+    const html = `
       <div class="modal ach-sheet" role="dialog" aria-modal="true" aria-labelledby="ach-title" tabindex="-1">
         <header class="ach-head">
           <div class="ach-head-row">
@@ -566,6 +573,12 @@ export async function openAchievements({ focus = null } = {}) {
             "Har achievement tumhare apne trades aur seekhne se aata hai. Zyada trade karne se koi achievement nahi milta.")}</p>
         </div>
       </div>`;
+    if (old) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      old.replaceChildren(...tmp.firstElementChild.childNodes);
+      const body = old.querySelector(".ach-body"); if (body) body.scrollTop = keepTop;
+    } else overlay.innerHTML = html;
     overlay.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
       lang = b.dataset.lang === "hi"; draw(_data);
       overlay.querySelector(`[data-lang="${lang ? "hi" : "en"}"]`)?.focus();
@@ -574,19 +587,45 @@ export async function openAchievements({ focus = null } = {}) {
       cat = b.dataset.cat; draw(_data);
       overlay.querySelector(`[data-cat="${cat}"]`)?.focus();
     }));
-    overlay.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => {
-      picked = picked === b.dataset.pick ? null : b.dataset.pick;
-      const keep = overlay.querySelector(".ach-body")?.scrollTop || 0;
-      draw(_data);
-      const body = overlay.querySelector(".ach-body"); if (body) body.scrollTop = keep;
-      const again = overlay.querySelector(`[data-pick="${b.dataset.pick}"]`);
-      again?.focus({ preventScroll: true });
-      if (picked) overlay.querySelector(".ach-detail-li")?.scrollIntoView({ block: "nearest" });
-    }));
+    // A tap on a pin opens its story in place: nothing else is redrawn. The
+    // story slides open (one grid-row transition, no layout loop) and the one
+    // that was open slides shut.
+    overlay.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => toggleStory(b)));
     // A button that leads somewhere closes the sheet; the router follows the link.
     overlay.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", () => { track("next", { action: "go", to: a.getAttribute("href") }); setTimeout(close, 0); }));
     overlay.querySelector(".ach-close").addEventListener("click", close);
   };
+
+  function wireStory(li) {
+    li.querySelectorAll("[data-go]").forEach((a) => a.addEventListener("click", () => { track("next", { action: "go", to: a.getAttribute("href") }); setTimeout(close, 0); }));
+  }
+  function shut(li) {
+    if (!li) return;
+    li.previousElementSibling?.querySelector(".ach-slot")?.classList.remove("is-picked");
+    li.previousElementSibling?.querySelector(".ach-slot")?.setAttribute("aria-expanded", "false");
+    if (reduced()) { li.remove(); return; }
+    li.classList.remove("is-open");
+    li.addEventListener("transitionend", () => li.remove(), { once: true });
+    setTimeout(() => li.remove(), 320);
+  }
+  function toggleStory(btn) {
+    const key = btn.dataset.pick;
+    const open = overlay.querySelector(".ach-detail-li");
+    const same = picked === key;
+    shut(open);
+    picked = same ? null : key;
+    if (same) return;
+    const li = document.createElement("li");
+    li.className = "ach-detail-li";
+    li.innerHTML = `<div class="ach-detail-clip">${storyOf(key)}</div>`;
+    btn.parentElement.after(li);
+    btn.classList.add("is-picked");
+    btn.setAttribute("aria-expanded", "true");
+    wireStory(li);
+    if (reduced()) li.classList.add("is-open");
+    else requestAnimationFrame(() => requestAnimationFrame(() => li.classList.add("is-open")));
+    setTimeout(() => li.scrollIntoView({ block: "nearest", behavior: reduced() ? "auto" : "smooth" }), reduced() ? 0 : 240);
+  }
 
   const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
   function close() {
@@ -811,7 +850,10 @@ const CSS = `
 /* The board. The story opens under the tapped pin's row; dense packing lets
    the pins after it fill the rest of that row. */
 .ach-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); grid-auto-flow: dense; gap: 2px; }
-.ach-detail-li { grid-column: 1 / -1; }
+.ach-detail-li { grid-column: 1 / -1; display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 240ms var(--ease), opacity 200ms var(--ease); }
+.ach-detail-li.is-open { grid-template-rows: 1fr; opacity: 1; }
+.ach-detail-clip { min-height: 0; overflow: hidden; }
+.ach-slot { transition: background-color 160ms var(--ease), border-color 160ms var(--ease); }
 .ach-slot { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: var(--sp-2) 2px; border: 1px solid transparent; border-radius: var(--r-sm); background: none; font: inherit; color: inherit; text-align: center; cursor: pointer; }
 .ach-slot:hover { background: var(--bg-soft); }
 .ach-slot.is-picked { border-color: var(--border); background: var(--bg-soft); }
@@ -864,6 +906,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .ach-toast { transition: opacity 120ms linear; transform: none; }
+  .ach-detail-li, .ach-slot { transition: none; }
   .ach-toast.is-in .ach-toast-medal .ach-pin, .ach-toast-summary.is-in .ach-stack .ach-pin { animation: none; }
 }
 `;
