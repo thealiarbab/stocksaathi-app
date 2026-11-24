@@ -13,6 +13,7 @@ import { getQuote, getQuoteBatch, getFundamentals } from "../data/marketData.js"
 import { listPendingOrders, listAllOrders } from "../features/limitOrders.js";
 import { getNews } from "../data/news.js";
 import { getState, getPortfolioValue, getReturnSummary, getRealPricePaise } from "../state.js";
+import { computeTradeStats } from "../data/tradeStats.js";
 import { SYSTEM_PROMPT, NO_TOOLS_NOTE } from "./persona.js";
 import { normalizeLookupProvenance } from "./lookupProvenance.js";
 
@@ -195,7 +196,7 @@ const TOOLS = [
     function: {
       name: "get_limit_orders",
       description:
-        "The user's limit orders and AMOs — pending, filled and cancelled. Use for 'my orders', 'pending orders', 'did my order execute', 'why hasn't my order filled', 'cancel', 'AMO'. get_user_portfolio does NOT contain orders; an unfilled order is not a holding yet.",
+        "The user's limit orders and AMOs — pending, filled and cancelled. Use for 'my orders', 'pending orders', 'did my order execute', 'why hasn't my order filled', 'cancel', 'AMO', and with status 'all' for 'my order history' or a chart of their orders. get_user_portfolio does NOT contain orders; an unfilled order is not a holding yet.",
       parameters: {
         type: "object",
         properties: {
@@ -211,18 +212,18 @@ const TOOLS = [
     function: {
       name: "screen_stocks",
       description:
-        "Screen the WHOLE market (about 3,800 NSE/BSE companies; ETFs and funds are left out) and rank by a fundamental: P/E, P/B, market cap, ROE, dividend yield, debt-to-equity or EPS, optionally within a sector. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'lowest debt', 'stocks with P/E under 15'. IMPORTANT: 'top N stocks sorted by X' means the N LARGEST companies ranked by X: set top_by_size to N (and limit to N). With no size filter, only companies worth ₹1,000 crore or more are ranked (min_market_cap_cr 0 includes the smallest); say which size filter applied. Every row already carries the last price (price_inr) and that session's move (change_pct), so never call get_stock_price for rows this returned. Returns up to 50 rows in one call.",
+        "Screen the WHOLE market (about 3,800 NSE/BSE companies; ETFs and funds are left out) and rank by a fundamental: P/E, P/B, market cap, ROE, dividend yield, debt-to-equity, EPS or yearly profit (sort net_profit, in ₹ crore, for 'most profitable companies', 'top stocks by profit', 'biggest earners'), optionally within a sector. Use for 'highest P/E stock', 'cheapest bank by P/E', 'largest IT companies', 'lowest debt', 'stocks with P/E under 15'. IMPORTANT: 'top N stocks sorted by X' means the N LARGEST companies ranked by X: set top_by_size to N (and limit to N). With no size filter, only companies worth ₹1,000 crore or more are ranked (min_market_cap_cr 0 includes the smallest); say which size filter applied. Every row already carries the last price (price_inr) and that session's move (change_pct), so never call get_stock_price for rows this returned. Returns up to 50 rows in one call.",
       parameters: {
         type: "object",
         properties: {
-          sort: { type: "string", description: "pe | pb | market_cap | roe | dividend_yield | debt_to_equity | eps" },
+          sort: { type: "string", description: "pe | pb | market_cap | roe | dividend_yield | debt_to_equity | eps | net_profit (yearly profit after tax in ₹ crore, an estimate from market value and P/E)" },
           direction: { type: "string", description: "desc (highest first, default) or asc (lowest first)." },
           sector: { type: "string", description: "Optional: bank, IT, pharma, FMCG, auto, finance, energy, power, metal, realty, telecom, or another sector/industry word." },
           top_by_size: { type: "number", description: "Only consider the N largest companies by market cap (1-500), e.g. 50 for 'top 50 stocks'." },
           min_market_cap_cr: { type: "number", description: "Optional minimum market cap in ₹ crore, e.g. 10000." },
           min_pe: { type: "number" },
           max_pe: { type: "number" },
-          limit: { type: "number", description: "Rows to return, 1-50 (default 15)." },
+          limit: { type: "number", description: "Rows to return, 1-100 (default 15). 'Top 100 by profit' is sort net_profit with limit 100 and no top_by_size." },
         },
       },
     },
@@ -669,9 +670,39 @@ async function execGetUserPortfolio() {
  * Three other users asked variants of the same question. Giving the model a
  * real answer is the fix; telling it not to lie is only half of one.
  */
+// The chat can draw the student's trades as a list and as bar charts
+// (chatCards.js rememberActivity). Every trade goes over, named, with the
+// profit each sell booked (the app's own average-cost figure).
+const TRADES_HINT = "The app can show these to the student. [[trades]] is the list itself (dates, names, prices and the profit each sell booked). [[bars trades by month]], [[bars trades by stock]] and [[bars profit by stock]] are bar charts. Put a marker on its own line and write two or three sentences about what stands out; do not retype the rows. If they ask for a chart, a graph or bars of their trades, use a bars marker.";
+const ORDERS_HINT = "The app can show these to the student. [[orders]] is the list itself (dates, names, prices and what happened to each order). [[bars orders by month]] and [[bars orders by status]] are bar charts. Put a marker on its own line and write two or three sentences about what stands out; do not retype the rows. If they ask for a chart, a graph or bars of their orders, use a bars marker.";
+async function loadFundNames(symbols) {
+  if (!symbols.some((x) => String(x).startsWith("MF_"))) return;
+  try { await (await import("../data/universeLoader.js")).ensureMfUniverseLoaded(); } catch {}
+}
+const isFundSym = (sym, inst) => String(sym).startsWith("MF_") || inst?.kind === "MF";
+async function shareTradesWithCards(state) {
+  try {
+    const tx = (Array.isArray(state.transactions) ? state.transactions : [])
+      .filter((t) => t && t.symbol && t.qty > 0 && t.qty <= 1e7 && t.pricePaise > 0 && Number(t.ts) > 0);
+    if (!tx.length) return;
+    await loadFundNames(tx.map((t) => t.symbol));
+    const pl = new Map(computeTradeStats(tx).sells.map((x) => [x.id, x.plPaise]));
+    const rows = tx.map((t) => {
+      const inst = getInstrument(t.symbol);
+      return {
+        ts: t.ts, symbol: t.symbol, name: inst?.name || t.symbol, fund: isFundSym(t.symbol, inst), side: t.side, qty: t.qty,
+        price: t.pricePaise / 100, value: (Number.isFinite(+t.valuePaise) ? +t.valuePaise : t.qty * t.pricePaise) / 100,
+        pl: pl.has(t.id) ? pl.get(t.id) / 100 : null,
+      };
+    });
+    (await import("../features/chatCards.js")).rememberActivity("trades", rows);
+  } catch {}
+}
+
 async function execGetTradeHistory(input) {
   const state = getState();
   if (!state.isAuthed) return { ok: false, error: "User not logged in." };
+  await loadFundNames((state.transactions || []).map((t) => t?.symbol));
   const limit = Math.min(Math.max(1, Number(input?.limit) || 20), 50);
   const wantSym = input?.symbol ? resolveSymbolFuzzy(String(input.symbol)) : null;
 
@@ -724,11 +755,13 @@ async function execGetTradeHistory(input) {
     };
   });
 
+  await shareTradesWithCards(state);
   return {
     ok: true,
     trades,
     count: trades.length,
     total_trades_ever: all.length,
+    how_to_show: TRADES_HINT,
     note: "realised_pl_inr is set only on SELLs that closed part of a position; null means the trade opened or added to one. `flags` carries any behavioural pattern the app recorded at trade time (e.g. panic_sell). Report only what is here.",
   };
 }
@@ -816,11 +849,24 @@ async function execGetLimitOrders(args = {}) {
       note: `No ${status === "all" ? "" : status + " "}orders found. The lookup SUCCEEDED and the list is genuinely empty — say so plainly.`,
     };
   }
+  // Funds by name (the reply said "3.7415 units of MF_100119"), and every row
+  // goes to the chat's order list and bar charts.
+  await loadFundNames(filtered.map((r) => r.symbol));
+  const orderName = (sym) => { const inst = getInstrument(sym); return inst?.name || sym; };
+  try {
+    (await import("../features/chatCards.js")).rememberActivity("orders", filtered.map((r) => ({
+      ts: Date.parse(r.created_at), symbol: r.symbol, name: orderName(r.symbol), fund: isFundSym(r.symbol, getInstrument(r.symbol)),
+      side: r.side, qty: r.qty, limit: r.limit_price_paise != null ? r.limit_price_paise / 100 : null,
+      status: r.status, filled: r.filled_price_paise != null ? r.filled_price_paise / 100 : null,
+    })));
+  } catch {}
   return {
     ok: true,
     count: filtered.length,
+    how_to_show: ORDERS_HINT,
     orders: filtered.slice(0, 25).map((r) => ({
       symbol: r.symbol,
+      name: orderName(r.symbol),
       side: r.side,
       qty: r.qty,
       limit_price_inr: r.limit_price_paise != null ? r.limit_price_paise / 100 : null,
@@ -841,8 +887,10 @@ async function execScreenStocks(args = {}) {
     const client = await sb();
     if (!client) return { ok: false, error: "Screener unavailable right now." };
     const num = (v) => (v != null && Number.isFinite(+v) ? +v : null);
-    const { data, error } = await client.rpc("coach_screen_stocks_v2", {
-      p_sort: String(args.sort || "market_cap").toLowerCase(),
+    // "profit" and its cousins all mean the yearly-profit ranking.
+    const sort = String(args.sort || "market_cap").toLowerCase().replace(/^(profit|net profit|netprofit|pat|earnings|net_income)$/, "net_profit");
+    const { data, error } = await client.rpc("coach_screen_stocks_v3", {
+      p_sort: sort,
       p_dir: String(args.direction || "desc").toLowerCase(),
       p_sector: args.sector ? String(args.sector) : null,
       p_min_market_cap_cr: num(args.min_market_cap_cr),
@@ -901,23 +949,30 @@ async function execGetProfitAndLoss() {
   const tx = (Array.isArray(state.transactions) ? state.transactions : []).slice().sort((a, b) => a.ts - b.ts);
   const rs = (paise) => (paise / 100).toFixed(2);
   const YEAR = 365 * 864e5;
-  // First in, first out: each sell is matched to the oldest shares still held,
-  // which also gives how long those shares were held.
+  // The profit of each sell is the app's own figure: against the average
+  // price paid for those shares, as on the Portfolio page, in the trade list
+  // and in get_user_portfolio. This lookup used to match first in, first out
+  // and came out a few rupees different (₹3,875.74 here, ₹3,872.92 everywhere
+  // else, 24 Nov 2026), so Saathi had to correct itself one reply later.
+  // First in, first out now only decides how long the sold shares were held.
+  const plById = new Map(computeTradeStats(tx).sells.map((x) => [x.id, x.plPaise]));
   const lots = {}, bySym = {};
   let shortTerm = 0, longTerm = 0, wins = 0, losses = 0, best = null, worst = null;
   for (const t of tx) {
     if (!t || !t.symbol || !(t.qty > 0)) continue;
     const q = lots[t.symbol] || (lots[t.symbol] = []);
     if (t.side === "BUY") { q.push({ qty: t.qty, px: t.pricePaise, ts: t.ts }); continue; }
-    let left = t.qty, pl = 0, matched = 0;
+    let left = t.qty, matched = 0, longQty = 0;
     while (left > 1e-9 && q.length) {
       const lot = q[0], take = Math.min(left, lot.qty);
-      const part = (t.pricePaise - lot.px) * take;
-      if (t.ts - lot.ts >= YEAR) longTerm += part; else shortTerm += part;
-      pl += part; matched += take; lot.qty -= take; left -= take;
+      if (t.ts - lot.ts >= YEAR) longQty += take;
+      matched += take; lot.qty -= take; left -= take;
       if (lot.qty <= 1e-9) q.shift();
     }
     if (!matched) continue;
+    const pl = plById.get(t.id) || 0;
+    const longPart = pl * (longQty / matched);
+    longTerm += longPart; shortTerm += pl - longPart;
     bySym[t.symbol] = (bySym[t.symbol] || 0) + pl;
     if (pl >= 0) wins++; else losses++;
     const row = { symbol: t.symbol, pl };
@@ -928,6 +983,7 @@ async function execGetProfitAndLoss() {
   const pf = await execGetUserPortfolio();
   // The same holdings feed the [[holdings]] card, whichever lookup read them.
   try { (await import("../features/chatCards.js")).rememberHoldings(pf); } catch {}
+  await shareTradesWithCards(state);
   const clean = (pf.holdings || []).filter((h) => Number.isFinite(h.qty) && h.qty <= 1e7 && h.avg_cost_inr > 0);
   const unreal = clean.reduce((a, h) => a + (h.current_price_inr - h.avg_cost_inr) * h.qty, 0);
   const closed = wins + losses;
@@ -945,7 +1001,7 @@ async function execGetProfitAndLoss() {
     best_closed_trade: best ? { symbol: best.symbol, profit_inr: rs(best.pl) } : null,
     worst_closed_trade: worst && worst !== best ? { symbol: worst.symbol, profit_inr: rs(worst.pl) } : null,
     booked_by_stock: Object.entries(bySym).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 8).map(([symbol, pl]) => ({ symbol, profit_inr: rs(pl) })),
-    note: "Virtual money. Booked profit is from sells, matched first in, first out. Paper profit is on holdings at the latest prices and changes every day. For real shares in India, gains on shares sold within a year are short-term and after a year long-term, and they are taxed at different rates; say that the rates change with each Budget rather than quoting one from memory.",
+    note: "Virtual money. Booked profit is from sells, each measured against the average price paid for those shares (the same figure the Portfolio page shows). Paper profit is on holdings at the latest prices and changes every day. For real shares in India, gains on shares sold within a year are short-term and after a year long-term, and they are taxed at different rates; say that the rates change with each Budget rather than quoting one from memory.",
   };
   if (pf.data_warning) out.data_warning = pf.data_warning;
   // Holdings with broken data are kept out of the paper profit above. Say so,
@@ -1390,7 +1446,10 @@ function capToolResult(result, max) {
     if (!Array.isArray(result?.[key])) continue;
     const copy = { ...result, [key]: result[key].slice() };
     while (copy[key].length > 1 && JSON.stringify(copy).length > max - 80) copy[key].pop();
-    copy.truncated = `Showing the first ${copy[key].length} of ${result[key].length} rows.`;
+    // A table card holds every row even when the model is shown fewer.
+    copy.truncated = result.how_to_show && key === "results"
+      ? `You are shown the first ${copy[key].length} of ${result[key].length} rows to keep this short. The [[table]] card the app draws holds all ${result[key].length}, so tell the student the table has ${result[key].length} rows.`
+      : `Showing the first ${copy[key].length} of ${result[key].length} rows.`;
     return rupees2dp(JSON.stringify(copy));
   }
   return text.slice(0, max);

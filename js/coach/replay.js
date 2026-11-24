@@ -179,6 +179,21 @@ export const REPLAY_CASES = [
     turns: [{ say: "if my trades were real how much would i have paid in charges and tax?", expect: { tools: ["estimate_charges_and_tax"], maxLookups: 2, must: [/STT/], never: [LEAKS] } }],
   },
   {
+    id: "top-profit",
+    title: "Top 100 stocks by profit",
+    from: "Owner chat c_mwuy70dr9f7r, 24 Nov 22:38 IST: \"the app doesn't have a total-profit figure\", an EPS list of 50 with a wrong row on top and one company twice.",
+    turns: [{ say: "show me top 100 stocks by profit", expect: { tools: ["screen_stocks"], maxLookups: 2, marker: "table", never: [/doesn.t have a (total.)?profit|closest measure|can.t rank by profit/i, LEAKS] } }],
+  },
+  {
+    id: "orders-bars",
+    title: "Order history, then as a bar graph",
+    from: "Same chat: the order history came as a paragraph with fund codes, and \"show it as a bar graph\" got \"the app can't draw bar graphs\".",
+    turns: [
+      { say: "show my order history", expect: { tools: ["get_limit_orders"], maxLookups: 2, markers: ["activity"], never: [/MF_\d+/, LEAKS] } },
+      { say: "i mean as a bar graph or anything dude", expect: { maxLookups: 2, markers: ["bars"], never: [/can.?t (draw|chart|plot)|no chart|nothing to plot/i, LEAKS] } },
+    ],
+  },
+  {
     id: "follow-ups",
     title: "Ends with questions to tap next",
     from: "GR-1 ends an answer with a follow-up question; Saathi offers two or three as buttons. Seen 24 Nov 2026: four live replies in a row offered none.",

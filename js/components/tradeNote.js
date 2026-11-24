@@ -199,8 +199,12 @@ function askSaathi(term, name, hi) {
   setSetting("coachPanelOpen", true);
   let tries = 0;
   const fill = () => {
-    const input = document.querySelector("#coach-input");
-    if (!input || input.disabled) { if (tries++ < 20) setTimeout(fill, 50); return; }
+    // The pop-up is the chat view now: its box is #chat-input inside
+    // #coach-embed. This still looked for the old panel's #coach-input, so
+    // the question was never typed in (24 Nov 2026). The pop-up loads on
+    // first use, hence the longer wait.
+    const input = document.querySelector("#coach-embed #chat-input");
+    if (!input || input.disabled) { if (tries++ < 80) setTimeout(fill, 50); return; }
     input.value = text;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();

@@ -290,6 +290,8 @@ export function cardHtml(card) {
   if (card.type === "portfolio") return portfolioHtml(card);
   if (card.type === "holdings") return holdingsHtml(card);
   if (card.type === "journey") return journeyHtml(card);
+  if (card.type === "bars") return barsHtml(card);
+  if (card.type === "activity") return activityHtml(card);
   if (card.type === "about") return aboutHtml();
   if (card.type === "table") return tableHtml(card);
   return `<div class="ss-card ss-card-chart" data-card="${data}"><div class="ss-card-loading">${L("Loading chart…", "Chart load ho raha hai…")}</div></div>`;
@@ -627,6 +629,8 @@ You can show the user an interactive price chart under your reply. When a chart 
 [[compare SYMBOL SYMBOL RANGE]]  for two, e.g. [[compare INFY TCS 1y]]
 [[holdings]]  for the student's own holdings as a card: money put in, value now, profit, each holding's share, a total and the split by sector. It needs this turn's numbers, so call get_user_portfolio (or get_profit_and_loss, which reads the same holdings) first. Use it when they ask to see their portfolio or holdings, or how their money is split.
 [[journey]]  for a chart of how the student's whole account value (cash plus holdings) has moved since they started. Use it when they ask how they have done over time; get_profit_and_loss gives you the numbers to talk about. The card can also draw a dashed line: the same buys and sells made in the Nifty 50 instead. Do not describe that line's numbers unless get_profit_and_loss gave you the Nifty comparison.
+[[bars NAME]]  a bar chart the app builds from this turn's account lookup. After get_trade_history or get_profit_and_loss: [[bars trades by month]], [[bars trades by stock]], [[bars profit by stock]]. After get_limit_orders: [[bars orders by month]], [[bars orders by status]]. After get_user_portfolio: [[bars holdings]]. [[bars]] alone turns the ranking table from screen_stocks, get_market_movers or compare_stocks into bars. So when the student asks for a chart, a graph or bars of their orders, trades, profit or a ranking, make the lookup and write the marker. Never say the app cannot draw a bar chart.
+[[orders]] and [[trades]]  the student's orders (after get_limit_orders with status all) or trades (after get_trade_history) as a list with dates, names, prices and what happened. Use one whenever they ask to see their order history or their trades, and write two or three sentences about it instead of retyping rows.
 RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a chart marker for crypto or a mutual fund. You may use up to three card markers in one reply, each on its own line, when each adds something the others do not (for example the holdings card and the journey chart).
 
 # QUESTIONS TO TAP NEXT
@@ -752,6 +756,172 @@ function journeyHtml(c) {
   </div>`;
 }
 
+// ---- Bar charts and lists of orders and trades ---------------------------------
+// Owner chat c_mwuy70dr9f7r (24 Nov 2026): "show my order history" came back as
+// a paragraph with fund codes in it, and "show it as a bar graph" as "the app
+// can't draw bar graphs". The account lookups now hand their rows over here
+// (rememberActivity) and the app builds the chart or the list, so no number in
+// them is typed by the model.
+//   [[bars NAME]]   a bar chart, NAME one of the series remembered this turn
+//   [[bars]]        the latest ranking table as bars, else the latest series
+//   [[orders]]  [[trades]]   the rows themselves as a list
+const BARS_RE = /\[\[\s*bars(?:\s+([a-z][a-z ]{1,38}?))?\s*\]\]/gi;
+const LIST_RE = /\[\[\s*(orders|trades)\s*\]\]/gi;
+const _series = new Map();   // name -> { card, at }
+const _lists = new Map();    // "orders" | "trades" -> { card, at }
+let _lastSeriesName = null;
+
+const monthKey = (ts) => { const d = new Date(ts); return d.getFullYear() * 100 + d.getMonth(); };
+const monthLabel = (key) => new Date(Math.floor(key / 100), key % 100, 1).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+const shortName = (r) => (r.fund ? fundName(r.name) : trimName(r.name || r.symbol)) || String(r.symbol);
+function putSeries(name, card) {
+  if (!card || !Array.isArray(card.rows) || !card.rows.length) return;
+  _series.set(name, { card: { type: "bars", at: Date.now(), name, ...card }, at: Date.now() });
+  _lastSeriesName = name;
+}
+function byMonth(rows, pick) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = monthKey(r.ts);
+    const cur = m.get(k) || [0, 0];
+    const which = pick(r);
+    if (which === 0 || which === 1) cur[which]++;
+    m.set(k, cur);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0]).slice(-12).map(([k, v]) => ({ k: monthLabel(k), v: v[0], v2: v[1] }));
+}
+
+/**
+ * Called by the account lookups (agent.js) with every row they read.
+ * kind "trades": [{ ts, symbol, name, fund, side, qty, price, value, pl|null }]   (rupees)
+ * kind "orders": [{ ts, symbol, name, fund, side, qty, limit, status, filled|null }]
+ */
+export function rememberActivity(kind, rows) {
+  try {
+    const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.symbol && Number(r.ts) > 0).sort((a, b) => b.ts - a.ts);
+    if (!list.length) return;
+    if (kind === "trades") {
+      _lists.set("trades", { at: Date.now(), card: { type: "activity", kind: "trades", at: Date.now(), n: list.length, rows: list.slice(0, 60).map((r) => ({
+        t: r.ts, d: r.side === "SELL" ? "S" : "B", s: String(r.symbol), n: shortName(r).slice(0, 40), f: r.fund ? 1 : 0,
+        q: +r.qty, p: fin(r.price), v: fin(r.value), pl: fin(r.pl) })) } });
+      putSeries("trades by month", { title: L("Your trades, month by month", "Aapke trades, mahine ke hisaab se"), unit: "count",
+        legend: [L("Buys", "Buy"), L("Sells", "Sell")], rows: byMonth(list, (r) => (r.side === "SELL" ? 1 : 0)) });
+      const per = new Map();
+      for (const r of list) { const c = per.get(r.symbol) || { k: shortName(r).slice(0, 36), v: 0, v2: 0, pl: 0, sold: 0 }; if (r.side === "SELL") { c.v2++; if (r.pl != null) { c.pl += +r.pl; c.sold++; } } else c.v++; per.set(r.symbol, c); }
+      const stocks = [...per.values()];
+      putSeries("trades by stock", { title: L("Which ones you traded most", "Sabse zyada kisme trade kiya"), unit: "count",
+        legend: [L("Buys", "Buy"), L("Sells", "Sell")], rows: stocks.slice().sort((a, b) => (b.v + b.v2) - (a.v + a.v2)).slice(0, 12).map((c) => ({ k: c.k, v: c.v, v2: c.v2 })) });
+      putSeries("profit by stock", { title: L("Booked profit, stock by stock", "Booked profit, stock ke hisaab se"), unit: "inr",
+        sub: L("From your sells, against the average price you paid. Virtual money.", "Aapke sells se, average kharid price ke mukable. Virtual paisa."),
+        rows: stocks.filter((c) => c.sold > 0).sort((a, b) => b.pl - a.pl).slice(0, 14).map((c) => ({ k: c.k, v: +c.pl.toFixed(2) })) });
+      _lastSeriesName = "trades by month";
+    } else if (kind === "orders") {
+      const done = (r) => /fill/i.test(String(r.status));
+      _lists.set("orders", { at: Date.now(), card: { type: "activity", kind: "orders", at: Date.now(), n: list.length, rows: list.slice(0, 60).map((r) => ({
+        t: r.ts, d: r.side === "SELL" ? "S" : "B", s: String(r.symbol), n: shortName(r).slice(0, 40), f: r.fund ? 1 : 0,
+        q: +r.qty, p: fin(r.filled != null ? r.filled : r.limit), st: String(r.status || "").toLowerCase().slice(0, 14) })) } });
+      putSeries("orders by month", { title: L("Your orders, month by month", "Aapke orders, mahine ke hisaab se"), unit: "count",
+        legend: [L("Filled", "Filled"), L("Cancelled or waiting", "Cancel ya pending")], rows: byMonth(list, (r) => (done(r) ? 0 : 1)) });
+      const st = new Map();
+      for (const r of list) { const k = String(r.status || "other").toLowerCase(); st.set(k, (st.get(k) || 0) + 1); }
+      putSeries("orders by status", { title: L("Your orders by what happened to them", "Aapke orders ka kya hua"), unit: "count",
+        rows: [...st.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ k: k[0].toUpperCase() + k.slice(1), v })) });
+      _lastSeriesName = "orders by month";
+    }
+  } catch {}
+}
+
+function seriesFor(name) {
+  const fresh = (x) => x && Date.now() - x.at < TABLE_KEEP_MS;
+  const want = String(name || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (want) {
+    if (fresh(_series.get(want))) return _series.get(want).card;
+    const words = want.split(" ").filter((w) => w !== "by" && w !== "my" && w !== "the");
+    for (const [k, v] of _series) if (fresh(v) && words.every((w) => k.includes(w.replace(/s$/, "")))) return v.card;
+  }
+  // No name (or one that matched nothing): the latest ranking table as bars,
+  // unless an account series is newer.
+  const ser = fresh(_series.get(_lastSeriesName)) ? _series.get(_lastSeriesName) : null;
+  const tab = _lastTable && Date.now() - _lastTable.at < TABLE_KEEP_MS ? _lastTable : null;
+  if (tab && (!ser || tab.at > ser.at)) {
+    const c = tab.card, m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
+    const rows = c.rows.slice(0, 12).map((r) => ({ k: r.n.slice(0, 36), v: m ? r.v : r.c })).filter((r) => r.v != null);
+    if (rows.length >= 2) return { type: "bars", at: Date.now(), name: "table", title: tableTitle(c), unit: m ? `m:${c.by}` : "pct",
+      sub: c.rows.length > rows.length ? L(`The first ${rows.length} of ${c.rows.length}.`, `${c.rows.length} mein se pehle ${rows.length}.`) : "", rows };
+  }
+  return ser ? ser.card : null;
+}
+
+function barValue(unit, v) {
+  if (v == null) return "";
+  if (unit === "count") return String(Math.round(v));
+  if (unit === "rs") return `₹${num2(v)}`;
+  if (unit === "inr") return `${v > 0 ? "+" : v < 0 ? "−" : ""}₹${num2(Math.abs(v))}`;
+  if (unit === "pct") return `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)}%`;
+  if (unit.startsWith("m:")) return TABLE_METRICS[unit.slice(2)]?.fmt(v) ?? num2(v);
+  return num2(v);
+}
+
+function barsHtml(c) {
+  const rows = (Array.isArray(c.rows) ? c.rows : []).filter((r) => r && r.k != null && Number.isFinite(+r.v));
+  if (!rows.length) return "";
+  const age = Date.now() - (c.at || 0), fresh = age >= 0 && age < 1500;
+  const two = Array.isArray(c.legend) && c.legend.length === 2;
+  const signed = !two && rows.some((r) => r.v < 0);
+  const max = Math.max(1e-9, ...rows.map((r) => Math.max(Math.abs(r.v), two ? Math.abs(r.v2 || 0) : 0)));
+  const w = (v) => `${Math.max(v ? 1.5 : 0, (Math.abs(v) / max) * 100).toFixed(1)}%`;
+  const unit = String(c.unit || "num");
+  const row = (r, k) => {
+    const track = signed
+      ? `<span class="ss-br-track is-signed"><span>${r.v < 0 ? `<i class="neg" style="--w:${w(r.v)}"></i>` : ""}</span><span>${r.v > 0 ? `<i class="pos" style="--w:${w(r.v)}"></i>` : ""}</span></span>`
+      : `<span class="ss-br-track"><i class="a" style="--w:${w(r.v)}"></i>${two ? `<i class="b" style="--w:${w(r.v2 || 0)}"></i>` : ""}</span>`;
+    const val = two ? `<b>${barValue(unit, r.v)}</b><i>${barValue(unit, r.v2 || 0)}</i>`
+      : `<b class="${signed ? (r.v > 0 ? "up" : r.v < 0 ? "down" : "") : ""}">${barValue(unit, r.v)}</b>`;
+    return `<div class="ss-br-row" role="listitem" style="--i:${Math.min(k, 12)}"><span class="ss-br-k">${esc(r.k)}</span>${track}<span class="ss-br-v">${val}</span></div>`;
+  };
+  return `<div class="ss-card ss-card-bars${two ? " is-two" : ""}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}">
+    <div class="ss-tb-head has-copy">${FOLD_BTN}${COPY_BTN}<div class="ss-card-title">${esc(c.title || "")}</div>${c.sub ? `<p class="ss-tb-sub">${esc(c.sub)}</p>` : ""}</div>
+    ${two ? `<p class="ss-br-legend"><span><i class="a"></i>${esc(c.legend[0])}</span><span><i class="b"></i>${esc(c.legend[1])}</span></p>` : ""}
+    <div class="ss-br" role="list" aria-label="${esc(c.title || "")}">${rows.map(row).join("")}</div>
+  </div>`;
+}
+
+function activityHtml(c) {
+  const rows = Array.isArray(c.rows) ? c.rows : [];
+  if (!rows.length) return "";
+  const orders = c.kind === "orders";
+  const day = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const qty = (q) => (Number.isInteger(q) ? String(q) : String(+q.toFixed(4)));
+  const stLabel = (st) => (/fill/.test(st) ? L("Filled", "Filled") : /cancel/.test(st) ? L("Cancelled", "Cancel hua") : /pend|open|queue/.test(st) ? L("Waiting", "Pending") : /expire/.test(st) ? L("Expired", "Expire hua") : st ? st[0].toUpperCase() + st.slice(1) : "");
+  const row = (r) => {
+    const side = `<em class="${r.d === "S" ? "sell" : "buy"}">${r.d === "S" ? L("Sell", "Sell") : L("Buy", "Buy")}</em>`;
+    const right = orders
+      ? `<b class="${/fill/.test(r.st || "") ? "" : "dim"}">${esc(stLabel(r.st || ""))}</b><i>${r.p != null ? `₹${num2(r.p)}` : ""}</i>`
+      : `<b>${r.v != null ? `₹${num2(r.v)}` : ""}</b><i class="${r.pl > 0 ? "up" : r.pl < 0 ? "down" : ""}">${r.pl != null ? `${r.pl > 0 ? "+" : r.pl < 0 ? "−" : ""}₹${num2(Math.abs(r.pl))}` : ""}</i>`;
+    return `<a class="ss-ac-row" role="row" href="/stocks/${encodeURIComponent(r.s)}">
+      <span class="ss-ac-d" role="cell">${esc(day(r.t))}</span>
+      <span class="ss-ac-co" role="cell"><b>${esc(r.n)}</b><i>${side} ${esc(qty(r.q))}${!orders && r.p != null ? ` × ₹${num2(r.p)}` : ""}${r.f ? ` <span>${L("units", "units")}</span>` : ""}</i></span>
+      <span class="ss-ac-v" role="cell">${right}</span>
+    </a>`;
+  };
+  const first = rows.length > TABLE_FIRST + 2 ? rows.slice(0, TABLE_FIRST) : rows;
+  const rest = rows.slice(first.length);
+  const total = c.n || rows.length;
+  const count = (re) => rows.filter((r) => re.test(r.st || "")).length;
+  const title = orders ? L(`Your ${total} orders`, `Aapke ${total} orders`) : L(`Your ${total} trades`, `Aapke ${total} trades`);
+  const sub = orders
+    ? L(`${count(/fill/)} filled, ${count(/cancel/)} cancelled, ${count(/pend|open|queue/)} waiting. Newest first.`, `${count(/fill/)} filled, ${count(/cancel/)} cancel, ${count(/pend|open|queue/)} pending. Naye pehle.`)
+    : L("Newest first. The second line on a sell is the profit it booked. Virtual money.", "Naye pehle. Sell ki doosri line uska booked profit hai. Virtual paisa.");
+  return `<div class="ss-card ss-card-act" data-card="${esc(JSON.stringify(c))}">
+    <div class="ss-tb-head has-copy">${FOLD_BTN}${COPY_BTN}<div class="ss-card-title">${esc(title)}</div><p class="ss-tb-sub">${esc(sub)}${total > rows.length ? ` ${L(`Showing the latest ${rows.length}.`, `Pichhle ${rows.length} dikh rahe hain.`)}` : ""}</p></div>
+    <div class="ss-ac" role="table" aria-label="${esc(title)}">
+      <div class="ss-ac-row ss-ac-cols" role="row"><span role="columnheader">${L("Date", "Date")}</span><span role="columnheader">${orders ? L("Order", "Order") : L("Trade", "Trade")}</span><span class="ss-ac-v" role="columnheader">${orders ? L("What happened", "Kya hua") : L("Value", "Value")}</span></div>
+      ${first.map(row).join("")}
+      ${rest.length ? `<details class="ss-hd-more"><summary>${esc(L(`Show the other ${rest.length}`, `Baaki ${rest.length} dikhao`))}</summary>${rest.map(row).join("")}</details>` : ""}
+    </div>
+  </div>`;
+}
+
 // [[ask: one | two | three]]: questions the student can tap to ask next.
 const NEXT_RE = /\[\[\s*ask\s*:\s*([^\]]{3,260})\]\]/gi;
 export function extractNext(text) {
@@ -772,6 +942,8 @@ const TABLE_METRICS = {
   dividend_yield: { label: "Div. yield", title: "dividend yield", fmt: (v) => `${num2(v)}%` },
   debt_to_equity: { label: "Debt/equity", title: "debt to equity", fmt: num2 },
   eps: { label: "EPS", fmt: (v) => `₹${num2(v)}` },
+  // Yearly profit in ₹ crore: market value / P/E (screener v3; no profit column is stored).
+  net_profit: { label: "Yearly profit", title: "yearly profit", fmt: capText },
   volume: { label: "Shares", fmt: volText },
   buyers: { label: "Buyers", fmt: (v) => String(Math.round(v)) },
 };
@@ -785,7 +957,7 @@ function tableCardFrom(tool, f) {
     return {
       type: "table", kind: "screen", at: Date.now(), by, dir: f.direction === "asc" ? "asc" : "desc",
       top: fin(f.top_by_size), sector: f.sector_filter ? String(f.sector_filter).slice(0, 24) : null,
-      rows: rows.slice(0, 50).map((r) => ({
+      rows: rows.slice(0, 100).map((r) => ({
         s: String(r.symbol || ""), n: trimName(r.name || r.symbol).slice(0, 40),
         v: fin(by === "pe" ? r.pe : by === "market_cap" ? r.market_cap_cr : r.value),
         p: fin(r.price_inr), c: fin(r.change_pct),
@@ -851,6 +1023,19 @@ export function cardAsText(c) {
     out.push(one("All together", "", cur, inv));
     return out.join("\n");
   }
+  if (c?.type === "bars") {
+    const two = Array.isArray(c.legend) && c.legend.length === 2;
+    const out = [line(two ? ["", c.legend[0], c.legend[1]] : ["", c.title || "Value"])];
+    for (const r of rows) out.push(line(two ? [r.k, r.v, r.v2 || 0] : [r.k, r.v]));
+    return out.join("\n");
+  }
+  if (c?.type === "activity") {
+    const day = (t) => new Date(t).toISOString().slice(0, 10);
+    const orders = c.kind === "orders";
+    const out = [line(orders ? ["Date", "Side", "Name", "Symbol", "Qty", "Price (Rs)", "Status"] : ["Date", "Side", "Name", "Symbol", "Qty", "Price (Rs)", "Value (Rs)", "Booked profit (Rs)"])];
+    for (const r of rows) out.push(line(orders ? [day(r.t), r.d === "S" ? "SELL" : "BUY", r.n, r.s, r.q, r.p, r.st] : [day(r.t), r.d === "S" ? "SELL" : "BUY", r.n, r.s, r.q, r.p, r.v, r.pl]));
+    return out.join("\n");
+  }
   if (c?.type === "table") {
     const m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
     const head = ["#", "Company", "Symbol"].concat(m ? [m.label] : [], c.kind === "popular" ? [] : ["Day move %", "Price (Rs)"]);
@@ -871,7 +1056,7 @@ function holdingsCardFrom(f) {
     inv: fin(sum.invested_inr), cur: fin(sum.value_now_inr), cash: fin(f.cash_inr),
     left: Math.max(0, all.length - rows.length),
     split: (Array.isArray(sum.split_by_sector_pct) ? sum.split_by_sector_pct : []).slice(0, 12)
-      .map((x) => ({ k: String(x.sector || "Other").slice(0, 28), p: fin(x.pct) || 0 })),
+      .map((x) => ({ k: String(x.sector || "Other").slice(0, 36), p: fin(x.pct) || 0 })),
     rows: rows.slice().sort((a, b) => b.value_inr - a.value_inr).slice(0, 40).map((h) => ({
       s: String(h.symbol), n: (h.kind === "MF" ? fundName(h.name) || String(h.symbol) : trimName(h.name || h.symbol)).slice(0, 40),
       f: h.kind === "MF" ? 1 : 0, i: +h.invested_inr, c: +h.value_inr, w: fin(h.share_of_holdings_pct),
@@ -947,7 +1132,13 @@ function holdingsHtml(c) {
 export function rememberHoldings(pf) {
   try {
     const hold = pf && pf.ok !== false ? holdingsCardFrom(pf) : null;
-    if (hold) _lastHoldings = { card: hold, at: Date.now() };
+    if (hold) {
+      _lastHoldings = { card: hold, at: Date.now() };
+      const keep = _lastSeriesName;
+      putSeries("holdings", { title: L("What each holding is worth", "Har holding ki value"), unit: "rs",
+        rows: hold.rows.slice().sort((a, b) => b.c - a.c).slice(0, 14).map((r) => ({ k: r.n.slice(0, 36), v: r.c })) });
+      if (keep) _lastSeriesName = keep;
+    }
   } catch {}
 }
 
@@ -956,8 +1147,7 @@ export function rememberTable(lookups) {
   for (const l of lookups || []) {
     if (l?.status !== "returned" || !l.facts) continue;
     if (l.tool === "get_user_portfolio") {
-      const hold = holdingsCardFrom(l.facts);
-      if (hold) _lastHoldings = { card: hold, at: Date.now() };
+      rememberHoldings(l.facts);
       continue;
     }
     const card = tableCardFrom(l.tool, l.facts);
@@ -1019,6 +1209,8 @@ function tableHtml(c) {
     ? L("Under each P/E is the typical P/E of its sector. Day move and price are from the last session.", "Har P/E ke neeche uske sector ka typical P/E hai.")
     : c.kind === "movers"
     ? L("From NSE's end-of-day file for that session.", "NSE ki us din ki end-of-day file se.")
+    : c.by === "net_profit"
+    ? L("Profit over the last twelve months, an estimate worked out as market value divided by P/E. Loss-making companies are not listed.", "Pichhle 12 mahine ka profit, andaza: market value ko P/E se divide karke. Loss wali companies list mein nahi hain.")
     : `${c.dir === "asc" ? L("Lowest first.", "Sabse kam pehle.") : L("Highest first.", "Sabse zyada pehle.")} ${L("Day move and price are from the last session.", "Day move aur price pichhle session ke hain.")}`;
   const allLabel = L(`Show all ${n}`, `Saare ${n} dikhao`);
   const th = (key, label, cls = "") => `<button type="button" class="ss-tb-th ${cls}" role="columnheader" aria-sort="none" data-tb-sort="${key}">${esc(label)}</button>`;
@@ -1077,19 +1269,26 @@ export function cardRecord(card) {
     const rows = card.rows.map((r) => `${r.s} put in ₹${r.i} now ₹${r.c}${r.w != null ? ` share ${r.w}%` : ""}`);
     return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "the student's holdings", total_put_in: card.inv, total_now: card.cur, cash: card.cash, rows })}</stocksaathi_lookup_provenance>`;
   }
+  if (card?.type === "bars" && Array.isArray(card.rows)) {
+    const rows = card.rows.slice(0, 14).map((r) => `${r.k}: ${r.v}${r.v2 != null ? ` / ${r.v2}` : ""}`);
+    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: `bar chart: ${card.title}`, ...(card.legend ? { bars: card.legend.join(" / ") } : {}), rows })}</stocksaathi_lookup_provenance>`;
+  }
+  if (card?.type === "activity" && Array.isArray(card.rows)) {
+    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: `list of the student's ${card.n || card.rows.length} ${card.kind}`, rows_shown: card.rows.length })}</stocksaathi_lookup_provenance>`;
+  }
   if (card?.type === "journey" && Array.isArray(card.pts) && card.pts.length) {
     const a = card.pts[0], b = card.pts[card.pts.length - 1];
     return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "account value over time", first: `₹${a[1]}`, latest: `₹${b[1]}`, ...(Number.isFinite(b[2]) ? { dashed_line_same_buys_and_sells_in_nifty_50_latest: `₹${b[2]}` } : {}), points: card.pts.length })}</stocksaathi_lookup_provenance>`;
   }
   if (card?.type !== "table" || !Array.isArray(card.rows)) return "";
   const m = card.kind === "movers" && card.by !== "volume" ? null : TABLE_METRICS[card.by];
-  const rows = card.rows.map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.v2 != null ? (card.kind === "popular" ? ` sellers ${r.v2}` : ` sector ${r.v2}`) : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
+  const rows = card.rows.slice(0, 60).map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.v2 != null ? (card.kind === "popular" ? ` sellers ${r.v2}` : ` sector ${r.v2}`) : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
   return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_table: tableTitle(card), rows })}</stocksaathi_lookup_provenance>`;
 }
 
 /** Text as shown while it streams: markers (and a half-typed one) hidden. */
 export function hideChartMarkers(text) {
-  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(HOLDINGS_RE, "").replace(JOURNEY_RE, "").replace(NEXT_RE, "").replace(/\[\[[^\]]{0,270}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(HOLDINGS_RE, "").replace(JOURNEY_RE, "").replace(BARS_RE, "").replace(LIST_RE, "").replace(NEXT_RE, "").replace(/\[\[[^\]]{0,270}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 /**
@@ -1125,6 +1324,11 @@ export function extractChartMarker(text) {
   if (i >= 0 && _lastHoldings && Date.now() - _lastHoldings.at < TABLE_KEEP_MS) found.push({ i, card: _lastHoldings.card });
   i = at(JOURNEY_RE);
   if (i >= 0) { const j = journeyCard(); if (j) found.push({ i, card: j }); }
+  for (const m of src.matchAll(BARS_RE)) { const b = seriesFor(m[1]); if (b) found.push({ i: m.index, card: { ...b, at: Date.now() } }); }
+  for (const m of src.matchAll(LIST_RE)) {
+    const l = _lists.get(m[1].toLowerCase());
+    if (l && Date.now() - l.at < TABLE_KEEP_MS) found.push({ i: m.index, card: { ...l.card, at: Date.now() } });
+  }
   const cards = [];
   for (const f of found.sort((p, q) => p.i - q.i)) {
     const key = JSON.stringify({ ...f.card, at: 0 });
