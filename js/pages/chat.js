@@ -9,7 +9,7 @@ import { getInstrument, STOCKS } from "../data/universe.js";
 import { SYSTEM_PROMPT, SYSTEM_PROMPT_LEAN, matchTemplate, isOffTopic, offTopicRedirect, STARTER_QUESTIONS, runtimeFacts, NO_TOOLS_NOTE } from "../coach/persona.js";
 import { marketStatus } from "../data/prices.js";
 import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
-import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
+import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, scrubAdvice, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
 import { morphHtml } from "../components/morph.js";
 import { turnSystem, turnLangNote } from "../coach/turnSystem.js";
@@ -53,25 +53,13 @@ import { logEvent } from "../features/telemetry.js";
 // the reply came back in English (C28), ask once more, bounded. Then remove
 // any sentence that picks a stock, praises or judges the user's trade,
 // nudges the next trade or times the market (C19-C21, scrubAdvice).
-async function finishReply(text, userText, system, messages, onStep) {
-  let out = text;
-  const hi = !!getState().settings.hinglish;
-  if (hi && (!looksHinglish(out) || hasFormalHindiRegister(out))) {
-    try {
-      const again = await withDeadline(runAgent({
-        apiKey: getState().settings.llmApiKey || null,
-        system: `${system}
-
-# THIS TURN
-Your last draft did not follow the requested Hinglish style. Rewrite it in casual Hinglish: mix everyday Roman Hindi with natural English words, keep finance terms in English, and avoid formal Hindi such as 'tulna', 'ummeed', 'nirnay', 'nivesh', 'laabh', 'saalana', 'keemat' and 'moolya'.`,
-        messages, profile: "fast",
-        onStep,
-      }), 12_000);
-      const clean = stripScaffolding(again);
-      if (clean && clean.trim() && looksHinglish(clean) && !hasFormalHindiRegister(clean)) out = clean.trim();
-    } catch (e) { console.warn("[chat] language retry failed:", e?.message || e); }
-  }
-  return scrubAdvice(out, userText, hi).text;
+// Last step before a reply is shown: the advice scrub. It used to rerun the
+// turn when a Hinglish reply did not look casual enough; with the switch on,
+// the first answer passed the replay set's Hinglish cases 8 times out of 8
+// (24 Nov 2026), so that rerun is gone. Callers still pass their old extra
+// arguments; they are ignored.
+async function finishReply(text, userText) {
+  return scrubAdvice(text, userText, !!getState().settings.hinglish).text;
 }
 
 // One short line per tool round, shown while the data loads.

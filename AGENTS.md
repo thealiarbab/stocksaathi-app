@@ -232,11 +232,16 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
 - **Reply checkers removed on /chat (24 Nov):** the per-turn "discovery"
   instruction (a keyword gate) and the reruns for an offer to look something
   up, a promise to fetch and a list without prices are gone; the list cases
-  passed twice on the replay set without them. Still there: the Hinglish
-  rerun in `finishReply` (remove it once both Hinglish replay cases pass on
-  the first answer), `scrubAdvice`, and the checks on the no-lookups
-  fallback path and in the pop-up (`coachPanel.js`). Do not add one back: add
-  the failing chat to the replay set and fix what the model is given.
+  passed twice on the replay set without them. The Hinglish rerun in
+  `finishReply` went the same day (8 of 8 first answers in casual Hinglish
+  with the switch on). Still there: `scrubAdvice`, and the checks on the
+  no-lookups fallback path and in the pop-up (`coachPanel.js`). Do not add
+  one back: add the failing chat to the replay set and fix what the model is
+  given.
+- **Rupee fields reach the model with two decimals.** `capToolResult` in
+  `agent.js` pads every numeric `*_inr` value in a lookup result
+  (`1351` -> `1351.00`), because JSON drops trailing zeros and the reply then
+  dropped the paise. Name a new rupee field `something_inr`.
 - **Repaints change only what differs.** `js/components/morph.js`
   (`morphHtml`) replaces `innerHTML =` for the chat message list and the chat
   sidebar, and a background sync refreshes those in place instead of

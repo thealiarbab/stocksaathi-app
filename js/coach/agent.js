@@ -1124,15 +1124,25 @@ async function execReadChart(args = {}) {
   };
 }
 
+// Rupee amounts reach the model with both paise digits ("price_inr":1351.00).
+// JSON drops trailing zeros, so a whole-rupee price arrived as 1351 and the
+// reply said "₹1,351" (seen on the Hinglish replay, 24 Nov). Prices are never
+// rounded on this site, so the lookup text itself now carries the paise.
+// Crore totals (market_cap_crore_inr) are left as they are.
+function rupees2dp(json) {
+  return json.replace(/"([a-z0-9_]*_inr)":(-?\d+)(?:\.(\d))?(?=[,}\]])/g, (m, key, whole, tenth) =>
+    key.includes("crore") ? m : `"${key}":${whole}.${tenth != null ? `${tenth}0` : "00"}`);
+}
+
 function capToolResult(result, max) {
-  let text = JSON.stringify(result);
+  let text = rupees2dp(JSON.stringify(result));
   if (text.length <= max) return text;
   for (const key of ["results", "holdings", "trades", "items", "orders"]) {
     if (!Array.isArray(result?.[key])) continue;
     const copy = { ...result, [key]: result[key].slice() };
     while (copy[key].length > 1 && JSON.stringify(copy).length > max - 80) copy[key].pop();
     copy.truncated = `Showing the first ${copy[key].length} of ${result[key].length} rows.`;
-    return JSON.stringify(copy);
+    return rupees2dp(JSON.stringify(copy));
   }
   return text.slice(0, max);
 }
