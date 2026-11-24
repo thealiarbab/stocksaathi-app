@@ -197,7 +197,12 @@ function onRoute() {
 
 // ---------------------------------------------------------------------------
 // Clicks: what was clicked, where on the page, and repeated angry clicks.
-const ACTIONABLE = "a,button,[role=button],[role=tab],[role=menuitem],[role=option],input,select,textarea,label,summary,[data-track],[onclick],[tabindex]";
+// tabindex="-1" is left out: <main> and the dialogs carry it only so focus can
+// be moved to them. Counting it made every tap on plain content look like a
+// press on one button named after the whole page's text, so the top "rage
+// click" on /portfolio read as the page header (found 25 Nov 2026). Those taps
+// are now named after what was touched and marked dead.
+const ACTIONABLE = "a,button,[role=button],[role=tab],[role=menuitem],[role=option],input,select,textarea,label,summary,[data-track],[onclick],[tabindex]:not([tabindex='-1'])";
 function labelOf(el) {
   if (!el) return "";
   const d = el.getAttribute?.("data-track") || el.getAttribute?.("aria-label") || el.getAttribute?.("title");
@@ -254,7 +259,7 @@ function onClick(e) {
   lastClicks.push({ t: now, x: e.clientX, y: e.clientY });
   while (lastClicks.length && now - lastClicks[0].t > 1000) lastClicks.shift();
   const near = lastClicks.filter((c) => Math.abs(c.x - e.clientX) < 30 && Math.abs(c.y - e.clientY) < 30);
-  if (near.length === 3) ev("rage_click", label, { x: Math.round(e.clientX), y: Math.round(e.clientY), vw: innerWidth, py: Math.round(e.clientY + scrollY), ph: h, dev: DEV });
+  if (near.length === 3) ev("rage_click", label, { x: Math.round(e.clientX), y: Math.round(e.clientY), vw: innerWidth, py: Math.round(e.clientY + scrollY), ph: h, dev: DEV, tag: props.tag, in: props.in, dead: props.dead });
 }
 const MAP_PAGES = /^\/(stocks(\/[^/]+)?|portfolio|register|onboarding|chat|crash-replay|login)?\/?$/;
 const STEPPER = /^(Increase|Decrease)$/;
