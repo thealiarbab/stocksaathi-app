@@ -1,0 +1,27 @@
+-- Applied to production on 24 Nov 2026 as migrations 2026_11_24h and
+-- 2026_11_24i (the definitions live in the database; read them with
+-- pg_get_functiondef). All three are SQL, STABLE, SECURITY DEFINER with
+-- search_path = public, and EXECUTE is granted to anon and authenticated.
+--
+-- public.coach_mf_lookup(p_query text, p_limit int default 5) -> jsonb
+--   Coach tool get_mutual_fund. Every word of the query must appear in the
+--   scheme name or the fund house (mf_master, active schemes with a NAV).
+--   Direct + Growth plans first, then the shortest name. Returns name, fund
+--   house, category, plan, option, nav_inr, nav_date, risk, benchmark.
+--   Returns over 1 / 3 / 5 years are worked out in the browser from
+--   /api/mf-history for the first match.
+--
+-- public.coach_fundamentals_batch(p_symbols text[]) -> jsonb
+--   Coach tool compare_stocks. Up to 25 symbols in one call from
+--   fundamentals_cache: P/E, sector_median_pe (median P/E of companies in the
+--   same sector worth Rs 1,000 crore or more, when the sector has at least
+--   five), P/B, roe_pct, dividend_yield_pct, debt_to_equity (ratio), eps_inr,
+--   market_cap_cr, price_inr and change_pct (quote_cache, else the latest NSE
+--   end-of-day close). Also lists the symbols it did not find.
+--
+-- public.coach_platform_popular(p_days int default 1, p_limit int default 10) -> jsonb
+--   Coach tool get_popular_on_stocksaathi. For the last p_days trading dates
+--   (IST) with any trade: per symbol, how many different students bought and
+--   sold it and the order counts. Counts only, and only symbols at least
+--   three different students traded. No user ids leave the function.
+select 1;

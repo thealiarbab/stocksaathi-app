@@ -49,6 +49,12 @@ const SUB = {
   get_market_news: ["Scanning today's headlines", "Headlines retrieved"],
   search_stocks: ["Searching NSE and BSE", "Matches found"],
   read_chart: ["Loading daily closes", "Daily closes from the exchange"],
+  get_index: ["Loading index levels", "Index closes from the exchange"],
+  compare_stocks: ["Loading fundamentals for the group", "From the fundamentals store"],
+  get_profit_and_loss: ["Adding up your trades", "From your trades and holdings"],
+  get_popular_on_stocksaathi: ["Counting what students traded", "Practice trades on StockSaathi"],
+  get_corporate_actions: ["Loading dividends and splits", "Five years of dividends and splits"],
+  get_mutual_fund: ["Searching AMFI's fund list", "NAV from AMFI"],
   screen_stocks: ["Ranking about 3,800 companies", "Ranked from the fundamentals store"],
   get_market_movers: ["Reading NSE's end-of-day file", "From NSE's end-of-day file"],
   check: ["Matching every number to a lookup", "Numbers checked"],
@@ -83,6 +89,19 @@ function toolLabel(name, a, done) {
       const where = a.sector ? ` in ${a.sector}` : a.top_by_size ? ` among the ${a.top_by_size} largest` : " across the market";
       return T(`Screening for the ${dir} ${by}${where}`, `Screened the ${dir} ${by}${where}`);
     }
+    case "compare_stocks": {
+      const n = Array.isArray(a.symbols) ? a.symbols.length : 0;
+      return T(`Comparing ${n || "the"} companies`, `Compared ${n || "the"} companies`);
+    }
+    case "get_profit_and_loss": return T("Working out your profit and loss", "Worked out your profit and loss");
+    case "get_popular_on_stocksaathi": return T("Checking what students are buying", "Checked what students are buying");
+    case "get_index": {
+      const names = (Array.isArray(a.indices) ? a.indices : [a.indices || a.index]).filter(Boolean).map(String);
+      const what = names.length === 1 ? names[0] : names.length ? `${names.length} indices` : "the index";
+      return T(`Checking ${what}`, `Checked ${what}`);
+    }
+    case "get_corporate_actions": return T(`Looking up ${sym || "the company"}'s dividends and splits`, `Looked up ${sym || "the company"}'s dividends and splits`);
+    case "get_mutual_fund": return T(`Looking up the fund${a.query ? ` "${String(a.query).slice(0, 28)}"` : ""}`, `Looked up the fund${a.query ? ` "${String(a.query).slice(0, 28)}"` : ""}`);
     case "get_market_movers": {
       const k = String(a.kind || "gainers").toLowerCase();
       const what = k === "losers" ? "top losers" : k === "volume" ? "most traded stocks" : "top gainers";
@@ -133,6 +152,33 @@ function receipt(name, facts) {
       if (!top) return null;
       const n = facts.results.length;
       return { text: `${n} compan${n === 1 ? "y" : "ies"}`, extra: `${top.symbol} first` };
+    }
+    case "compare_stocks": {
+      const n = Array.isArray(facts.results) ? facts.results.length : 0;
+      return n ? { text: `${n} compan${n === 1 ? "y" : "ies"}`, extra: facts.results[0]?.symbol ? `${facts.results[0].symbol} first` : "" } : null;
+    }
+    case "get_profit_and_loss": {
+      const v = Number(facts.booked_profit_inr);
+      return Number.isFinite(v) ? { text: `${v < 0 ? "−" : "+"}${inr(Math.abs(v))} booked`, dir: v > 0 ? "up" : v < 0 ? "down" : "" } : null;
+    }
+    case "get_popular_on_stocksaathi": {
+      const top = Array.isArray(facts.results) ? facts.results[0] : null;
+      return top ? { text: top.symbol, extra: `${top.buyers} buyers` } : null;
+    }
+    case "get_index": {
+      const top = Array.isArray(facts.results) ? facts.results.find((r) => !r.error) : null;
+      if (!top) return null;
+      const v = Number(top.change_pct);
+      return { text: `${top.name} ${Number(top.level).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, extra: Number.isFinite(v) ? `${v > 0 ? "+" : ""}${v.toFixed(2)}%` : "", dir: v > 0 ? "up" : v < 0 ? "down" : "" };
+    }
+    case "get_corporate_actions": {
+      const d = Array.isArray(facts.dividends) ? facts.dividends.length : 0;
+      const sp = Array.isArray(facts.splits_or_bonuses) ? facts.splits_or_bonuses.length : 0;
+      return { text: `${d} dividend${d === 1 ? "" : "s"}`, extra: sp ? `${sp} split${sp === 1 ? "" : "s"}` : "" };
+    }
+    case "get_mutual_fund": {
+      const top = Array.isArray(facts.results) ? facts.results[0] : null;
+      return top && Number.isFinite(Number(top.nav_inr)) ? { text: `NAV ${inr(Number(top.nav_inr))}`, extra: top.nav_date ? String(top.nav_date) : "" } : null;
     }
     case "get_market_movers": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;

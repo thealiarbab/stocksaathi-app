@@ -51,13 +51,26 @@ DEFAULT_INTERVAL = "1d"
 _INTRADAY = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h"}
 
 
-def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
+def _events(result):
+    """Dividends and splits/bonuses from a chart result (only when asked for)."""
+    ev = result.get("events") or {}
+    divs = [{"t": int(d.get("date") or 0) * 1000, "amount": d.get("amount")}
+            for d in (ev.get("dividends") or {}).values() if d.get("amount")]
+    splits = [{"t": int(s.get("date") or 0) * 1000, "numerator": s.get("numerator"),
+               "denominator": s.get("denominator"), "ratio": s.get("splitRatio")}
+              for s in (ev.get("splits") or {}).values()]
+    return {"dividends": sorted(divs, key=lambda d: d["t"]),
+            "splits": sorted(splits, key=lambda s: s["t"])}
+
+
+def fetch_yahoo(symbol, range_, interval, period1=None, period2=None, events=False):
     """Yahoo /v8 chart fetch. Either pass `range_` (preset) OR `period1`+
     `period2` (custom epoch-second range). Custom range takes precedence
     when both are provided."""
     # BSE-only listings 404 on ".NS" — try NSE first, then ".BO". See the
     # same fallback in quote.py / quotes.py / live-quote.py.
-    tickers = [symbol] if "." in symbol else [f"{symbol}.NS", f"{symbol}.BO"]
+    # An index ("^NSEI", "^BSESN") is its own ticker: no exchange suffix.
+    tickers = [symbol] if ("." in symbol or symbol.startswith("^")) else [f"{symbol}.NS", f"{symbol}.BO"]
     # "Yahoo answered: no such symbol / no candles" is not an outage. Count
     # the real failures (timeout, connection, 429, 5xx) apart so a symbol
     # Yahoo does not carry gets a 404, and only a real failure gets 502.
@@ -67,6 +80,8 @@ def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
             url = f"{base}/{url_quote(ticker, safe='.')}?interval={interval}&period1={int(period1)}&period2={int(period2)}"
         else:
             url = f"{base}/{url_quote(ticker, safe='.')}?interval={interval}&range={range_}"
+        if events:
+            url += "&events=div%2Csplits"
         try:
             req = urllib.request.Request(url, headers={
                 "User-Agent": UA,
@@ -114,6 +129,7 @@ def fetch_yahoo(symbol, range_, interval, period1=None, period2=None):
         if not ohlc:
             continue
         return {
+            **({"events": _events(result)} if events else {}),
             "ohlc": ohlc,
             # The ticker this loop actually succeeded on. The caller used to
             # re-derive it as symbol + ".NS", which is wrong for every BSE and
@@ -194,7 +210,8 @@ class handler(BaseHTTPRequestHandler):
                 self._json(400, {"ok": False, "error": "interval_incompatible_with_range"})
                 return
 
-        data = fetch_yahoo(symbol, range_, interval, period1=period1, period2=period2)
+        want_events = (q.get("events") or [""])[0].strip() == "1"
+        data = fetch_yahoo(symbol, range_, interval, period1=period1, period2=period2, events=want_events)
         if "error" in data:
             code = 404 if data["error"] == "no_data" else 502
             self._json(code, {"ok": False, "error": data["error"]})
@@ -208,6 +225,7 @@ class handler(BaseHTTPRequestHandler):
             "range": range_ if not custom_range else f"{from_str}_{to_str}",
             "interval": interval,
             "ohlc": data["ohlc"],
+            **({"events": data.get("events")} if want_events else {}),
             "currency": data.get("currency", "INR"),
             "exchange": data.get("exchange"),
             "ts_ms": int(time.time() * 1000),

@@ -581,7 +581,7 @@ export function renderPortfolio(main) {
     const pfBounds = pfForY.length ? pfYBounds(pfForY) : { min: 0, max: 1 };
     const pfZoomed = pfChart.zoom.scale > 1;
 
-    main.innerHTML = `
+    const html = `
       <div class="portfolio-hero">
         <div>
           <div class="dim text-xs uppercase" style="margin-bottom: 6px;">
@@ -748,6 +748,12 @@ export function renderPortfolio(main) {
         </div>
       </div>
     `;
+    // Same page as the last draw (a price tick with no change, a state
+    // notice about something not shown here): leave the DOM alone. Redrawing
+    // it every 15 s made the page flicker and dropped hover and scroll.
+    if (main.firstElementChild && main.firstElementChild.__drawnHtml === html) return;
+    main.innerHTML = html;
+    if (main.firstElementChild) main.firstElementChild.__drawnHtml = html;
 
     // Chart: crosshair + tooltip, and the range selector. Both have to be
     // re-wired on every render because render() replaces main.innerHTML

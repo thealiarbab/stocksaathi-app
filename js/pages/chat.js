@@ -11,6 +11,7 @@ import { marketStatus } from "../data/prices.js";
 import { createTrace, traceStep, traceReasoning, liveTraceHtml, paintLiveTrace, foldedTraceHtml, openTraceSheet, freezeTrace } from "../components/thoughtSteps.js";
 import { runAgent, streamChat, needsLiveData, logChatTurn, stripToolCallScaffolding, isToolCallOnly, looksLikeLookupOffer, looksLikeFetchPromise, looksLikePricelessList, isDiscoveryQuery, scrubAdvice, looksHinglish, hasFormalHindiRegister, prefetchNewsBlock, unsourcedFigures, figureSources, dropFigureSentences } from "../coach/agent.js";
 import { buildDossier } from "../coach/dossier.js";
+import { morphHtml } from "../components/morph.js";
 import { turnSystem, discoveryNudgeFor } from "../coach/turnSystem.js";
 import { normalizeLookupProvenance, withLookupProvenance } from "../coach/lookupProvenance.js";
 import { getNews } from "../data/news.js";
@@ -159,8 +160,8 @@ window.addEventListener("ss:coach-sync", () => {
     chatLog = getActiveSession(sessionsData).messages;
     const repaint = () => {
       if (!document.getElementById("chat-messages")) return;
-      const main = chatHost();
-      if (main) renderChat(main);
+      // The mounted page refreshes itself in place (syncHandler in renderChat).
+      document.dispatchEvent(new CustomEvent("ss:chat-sessions-sync"));
     };
     if (isPreview()) {
       // DB hydration rebuilds chats as flat logs. Wait for the richer cloud
@@ -383,12 +384,30 @@ export function renderChat(main, opts = {}) {
     window.addEventListener("ss:navigate", () => setTimeout(leaveChat, 0));
     window.addEventListener("popstate", () => setTimeout(leaveChat, 0));
   }
+  let renderedActiveId = null;   // set by render(); the sync handler compares it
   render();
 
   // Cross-tab sync: when the storage event handler (see module scope) pulls
   // in fresh sessionsData from another tab, it fires this custom event so
   // the currently-mounted chat page re-renders with the updated state.
-  const syncHandler = () => { if (document.getElementById("chat-messages")) render(); };
+  // Same chat still open: refresh the messages and the chat list in place.
+  // A full render() here rebuilt the whole page on every background sync,
+  // which is what made /chat blink (24 Nov).
+  const syncHandler = () => {
+    if (!document.getElementById("chat-messages")) return;
+    const act = getActiveSession(sessionsData);
+    if (act && act.id === renderedActiveId && !wantId && act.messages?.length) {
+      if (m_pending) return;
+      chatLog = act.messages;
+      rerender();
+      const list = main.querySelector("#cc-list");
+      if (list) morphHtml(list, renderChatList());
+      const h = main.querySelector(".cc-title");
+      if (h) { const t = chatLog.length ? (act.title || "Saathi") : "Saathi"; if (h.textContent !== t) h.textContent = t; }
+      return;
+    }
+    render();
+  };
   document.addEventListener("ss:chat-sessions-sync", syncHandler);
   window.addEventListener("ss:navigate", () => {
     document.removeEventListener("ss:chat-sessions-sync", syncHandler);
@@ -402,6 +421,7 @@ export function renderChat(main, opts = {}) {
       end: oldInput.selectionEnd,
     } : null);
     updateDraft = null;
+    renderedActiveId = getActiveSession(sessionsData)?.id || null;
     const state = getState();
     if (wantId && sessionsData.sessions?.some((x) => x.id === wantId)) {
       sessionsData.activeId = wantId;
@@ -1230,7 +1250,9 @@ function renderBubble(m) {
         <button type="button" class="cc-act" data-copy aria-label="Copy message">${I.copy}</button>
         <button type="button" class="cc-act" data-edit="${i}" aria-label="Edit message">${I.edit}<span>Edit</span></button>
       </div>` : "";
-    return `<div class="cc-row cc-row-user"${streamAttr} data-i="${i}"><div class="cc-user-col">${m.chart ? chartCard(m.chart) : ""}${m.quote ? `<div class="cc-quoted" title="You quoted this"><span class="cc-quoted-bar" aria-hidden="true"></span><span class="cc-quoted-t">${escapeHtml(m.quote)}</span></div>` : ""}<div class="cc-bubble cc-user"><span class="msg-body">${escapeHtml(m.text)}</span></div>${acts}</div></div>`;
+    const sentAge = _justSent && _justSent.message === m ? Date.now() - _justSent.at : -1;
+    const rise = sentAge >= 0 && sentAge < 500 ? ` is-new" style="--el:${sentAge}ms` : "";
+    return `<div class="cc-row cc-row-user${rise}"${streamAttr} data-i="${i}"><div class="cc-user-col">${m.chart ? chartCard(m.chart) : ""}${m.quote ? `<div class="cc-quoted" title="You quoted this"><span class="cc-quoted-bar" aria-hidden="true"></span><span class="cc-quoted-t">${escapeHtml(m.quote)}</span></div>` : ""}<div class="cc-bubble cc-user"><span class="msg-body">${escapeHtml(m.text)}</span></div>${acts}</div></div>`;
   }
   const done = !(m.streaming || m.status || !m.text);
   const actions = !done ? "" : preview && i >= 0 ? `
@@ -1293,7 +1315,11 @@ function stickBottom(el, force = false) {
 }
 function paintList(el, html) {
   const top = el.scrollTop;
-  el.innerHTML = html;
+  // Change only what differs (components/morph.js): a repaint used to throw
+  // every bubble away, which replayed card animations and re-fetched charts.
+  // The empty state wires its buttons one by one, so it is still replaced.
+  if (el.querySelector(":scope > .cc-row") && html.includes('class="cc-row')) morphHtml(el, html);
+  else el.innerHTML = html;
   if (el._follow !== false) el.scrollTop = el.scrollHeight;
   else el.scrollTop = top;
   afterPaint(el);
@@ -1814,10 +1840,12 @@ function renderTyping() {
   return `<div class="cc-row cc-row-bot"><div class="cc-bubble cc-bot cc-typing" aria-label="Saathi is typing"><i></i><i></i><i></i></div></div>`;
 }
 
+let _justSent = null;
 function pushUser(text, quote = null) {
   const sess = getActiveSession(sessionsData);
   if (sess) delete sess.fromLog;   // this device is writing it now
   const message = { role: "user", text, ts: nextTs(chatLog), ...(quote ? { quote } : {}) };
+  _justSent = { message, at: Date.now() };   // its bubble rises in once (renderMessage)
   chatLog.push(message);
   saveChat();
   return message;

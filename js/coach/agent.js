@@ -232,7 +232,7 @@ const TOOLS = [
     function: {
       name: "read_chart",
       description:
-        "Read a stock's daily price chart: first and latest close, change over the period, the high and low with their dates, 20-day and 50-day averages, up days, the biggest one-day move and recent volume. Use for 'read / explain / check the chart of X', 'how has X moved', 'is X in an uptrend'. To also SHOW the chart under your reply, add the [[chart SYMBOL RANGE]] marker.",
+        "Read a stock's daily price chart: first and latest close, change over the period, the high and low with their dates, 20-day, 50-day and 200-day averages, up days, the biggest one-day move, recent volume, and the common indicators (RSI 14, MACD, the 52-week range). Use for 'read / explain / check the chart of X', 'how has X moved', 'is X in an uptrend', 'what is the RSI of X', 'is X overbought'. To also SHOW the chart under your reply, add the [[chart SYMBOL RANGE]] marker.",
       parameters: {
         type: "object",
         properties: {
@@ -240,6 +240,84 @@ const TOOLS = [
           range: { type: "string", description: "1m | 3m (default) | 6m | 1y | 5y" },
         },
         required: ["symbol"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_index",
+      description:
+        "Level of an Indian market index from the exchange's daily data: last close, the change in the last session, the change over one month and one year, and the 52-week high and low. Use for 'where is Nifty', 'how did Sensex do', 'how is the market', 'Bank Nifty today', 'India VIX'. Pass several names to compare. Known: Nifty 50, Sensex, Bank Nifty, Nifty Next 50, Nifty 100, Nifty 500, Nifty Midcap 50, Nifty IT, Auto, Pharma, FMCG, Metal, Realty, Energy, PSU Bank, India VIX.",
+      parameters: {
+        type: "object",
+        properties: {
+          indices: { type: "array", items: { type: "string" }, description: "One to six index names, e.g. [\"Nifty 50\", \"Sensex\"]." },
+        },
+        required: ["indices"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_corporate_actions",
+      description:
+        "A company's dividends and stock splits or bonus issues over the last five years, with dates. Use for 'when did X last pay a dividend', 'how much dividend does X pay', 'did X split', 'bonus history of X'.",
+      parameters: {
+        type: "object",
+        properties: { symbol: { type: "string", description: "NSE ticker or company name." } },
+        required: ["symbol"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_mutual_fund",
+      description:
+        "Look up an Indian mutual fund scheme by name: fund house, category, plan, latest NAV and its date, risk level and benchmark, plus the returns over one, three and five years for the best match. Use for any question about a specific fund ('Parag Parikh Flexi Cap', 'SBI Small Cap NAV', 'how has the UTI Nifty 50 index fund done').",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "Fund name words, e.g. 'parag parikh flexi cap'." } },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "compare_stocks",
+      description:
+        "Fundamentals for up to 25 companies in ONE call: P/E next to the typical (median) P/E of its sector, P/B, ROE, dividend yield, debt-to-equity, EPS, market cap, price and day move. Use whenever the question is about SEVERAL named stocks or about the student's holdings as a group ('rank my holdings by P/E', 'compare TCS, Infosys and Wipro', 'which of my stocks is most expensive'): for holdings, call get_user_portfolio first, then this with those symbols. Never call get_fundamentals or get_stock_price once per stock for a list.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbols: { type: "array", items: { type: "string" }, description: "1 to 25 NSE tickers or company names." },
+          sort: { type: "string", description: "Rank the rows by: pe (default) | pb | roe | dividend_yield | debt_to_equity | eps | market_cap." },
+        },
+        required: ["symbols"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_profit_and_loss",
+      description:
+        "The student's practice results: profit or loss already booked on sells (with the split between shares held under and over a year), paper profit or loss on what they still hold, total return on the money put in, win rate, the best and worst closed trades, and how the portfolio's value has moved over time (start, high, low, last week, last month). Use for 'how am I doing', 'my P&L', 'how much have I made or lost', 'my returns', 'my net worth over time', 'tax on my gains'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_popular_on_stocksaathi",
+      description:
+        "What students on StockSaathi bought and sold most in the last trading session (or the last few): how many different students traded each stock. Use for 'what is everyone buying', 'most bought stocks', 'what are other students trading', 'trending on StockSaathi'.",
+      parameters: {
+        type: "object",
+        properties: { days: { type: "number", description: "How many recent trading sessions to cover, 1 (default) to 7." } },
       },
     },
   },
@@ -722,21 +800,278 @@ async function execMarketMovers(args = {}) {
   } catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 
+// ---- Several companies at once (GR-1: "Examining Stock Details and Fundamentals") --
+async function execCompareStocks(args = {}) {
+  const asked = (Array.isArray(args.symbols) ? args.symbols : [args.symbols]).filter(Boolean).map(String).slice(0, 25);
+  const symbols = [...new Set(asked.map((x) => resolveSymbolFuzzy(x) || x.toUpperCase().trim()))];
+  if (!symbols.length) return { ok: false, error: "No symbols given." };
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Comparison unavailable right now." };
+    const { data, error } = await client.rpc("coach_fundamentals_batch", { p_symbols: symbols });
+    if (error || !data) return { ok: false, error: "Comparison lookup failed." };
+    const key = { pe: "pe", pb: "pb", roe: "roe_pct", dividend_yield: "dividend_yield_pct", debt_to_equity: "debt_to_equity", eps: "eps_inr", market_cap: "market_cap_cr" };
+    const by = key[String(args.sort || "pe").toLowerCase()] ? String(args.sort || "pe").toLowerCase() : "pe";
+    const results = (data.results || []).slice().sort((x, y) => (y[key[by]] ?? -Infinity) - (x[key[by]] ?? -Infinity));
+    return withTableHint({ ...data, sorted_by: by, direction: "desc", results });
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
+// ---- The student's results (GR-1: "Pulling Up Your Profit and Loss", net worth, tax) --
+async function execGetProfitAndLoss() {
+  const state = getState();
+  if (!state.isAuthed) return { ok: false, error: "User not logged in." };
+  const tx = (Array.isArray(state.transactions) ? state.transactions : []).slice().sort((a, b) => a.ts - b.ts);
+  const rs = (paise) => (paise / 100).toFixed(2);
+  const YEAR = 365 * 864e5;
+  // First in, first out: each sell is matched to the oldest shares still held,
+  // which also gives how long those shares were held.
+  const lots = {}, bySym = {};
+  let shortTerm = 0, longTerm = 0, wins = 0, losses = 0, best = null, worst = null;
+  for (const t of tx) {
+    if (!t || !t.symbol || !(t.qty > 0)) continue;
+    const q = lots[t.symbol] || (lots[t.symbol] = []);
+    if (t.side === "BUY") { q.push({ qty: t.qty, px: t.pricePaise, ts: t.ts }); continue; }
+    let left = t.qty, pl = 0, matched = 0;
+    while (left > 1e-9 && q.length) {
+      const lot = q[0], take = Math.min(left, lot.qty);
+      const part = (t.pricePaise - lot.px) * take;
+      if (t.ts - lot.ts >= YEAR) longTerm += part; else shortTerm += part;
+      pl += part; matched += take; lot.qty -= take; left -= take;
+      if (lot.qty <= 1e-9) q.shift();
+    }
+    if (!matched) continue;
+    bySym[t.symbol] = (bySym[t.symbol] || 0) + pl;
+    if (pl >= 0) wins++; else losses++;
+    const row = { symbol: t.symbol, pl };
+    if (!best || pl > best.pl) best = row;
+    if (!worst || pl < worst.pl) worst = row;
+  }
+  const realised = shortTerm + longTerm;
+  const pf = await execGetUserPortfolio();
+  const clean = (pf.holdings || []).filter((h) => Number.isFinite(h.qty) && h.qty <= 1e7 && h.avg_cost_inr > 0);
+  const unreal = clean.reduce((a, h) => a + (h.current_price_inr - h.avg_cost_inr) * h.qty, 0);
+  const closed = wins + losses;
+  const out = {
+    ok: true,
+    booked_profit_inr: rs(realised),
+    booked_on_shares_held_under_1_year_inr: rs(shortTerm),
+    booked_on_shares_held_over_1_year_inr: rs(longTerm),
+    paper_profit_on_holdings_inr: unreal.toFixed(2),
+    total_return_pct: pf.return_pct,
+    portfolio_value_inr: Number(pf.total_value_inr).toFixed(2),
+    cash_inr: Number(pf.cash_inr).toFixed(2),
+    trades: tx.length, sells_closed: closed,
+    win_rate_pct: closed ? +(wins / closed * 100).toFixed(1) : null,
+    best_closed_trade: best ? { symbol: best.symbol, profit_inr: rs(best.pl) } : null,
+    worst_closed_trade: worst && worst !== best ? { symbol: worst.symbol, profit_inr: rs(worst.pl) } : null,
+    booked_by_stock: Object.entries(bySym).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 8).map(([symbol, pl]) => ({ symbol, profit_inr: rs(pl) })),
+    note: "Virtual money. Booked profit is from sells, matched first in, first out. Paper profit is on holdings at the latest prices and changes every day. For real shares in India, gains on shares sold within a year are short-term and after a year long-term, and they are taxed at different rates; say that the rates change with each Budget rather than quoting one from memory.",
+  };
+  if (pf.data_warning) out.data_warning = pf.data_warning;
+  // How the whole portfolio's value moved (one point a trading day).
+  const hist = (Array.isArray(state.portfolioHistory) ? state.portfolioHistory : [])
+    .map((p) => ({ t: Number(p.ts), v: Number(p.valuePaise) })).filter((p) => p.t > 0 && p.v > 0 && p.v < 1e13).sort((a, b) => a.t - b.t);
+  if (hist.length >= 2) {
+    const last = hist[hist.length - 1];
+    const hi = hist.reduce((a, b) => (b.v > a.v ? b : a)), lo = hist.reduce((a, b) => (b.v < a.v ? b : a));
+    const ago = (days) => { const t = last.t - days * 864e5; const p = hist.find((x) => x.t >= t); return p && p !== last ? +((last.v / p.v - 1) * 100).toFixed(2) : null; };
+    out.value_over_time = {
+      since: dayLabel(hist[0].t), first_inr: rs(hist[0].v), latest_inr: rs(last.v), latest_on: dayLabel(last.t),
+      highest_inr: rs(hi.v), highest_on: dayLabel(hi.t), lowest_inr: rs(lo.v), lowest_on: dayLabel(lo.t),
+      change_7_days_pct: ago(7), change_30_days_pct: ago(30),
+    };
+  }
+  return out;
+}
+
+// ---- What other students traded (GR-1: "most-bought stocks on the platform") --
+async function execGetPopular(args = {}) {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Unavailable right now." };
+    const { data, error } = await client.rpc("coach_platform_popular", { p_days: Number.isFinite(+args.days) && args.days != null ? +args.days : 1, p_limit: 10 });
+    if (error || !data) return { ok: false, error: "Lookup failed." };
+    return withTableHint(data);
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
+// ---- Chart indicators (from daily closes; no extra request) -----------------
+function rsi14(closes) {
+  const n = 14;
+  if (closes.length <= n) return null;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = closes[i] - closes[i - 1]; if (d >= 0) g += d; else l -= d; }
+  g /= n; l /= n;
+  for (let i = n + 1; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    g = (g * (n - 1) + Math.max(d, 0)) / n;
+    l = (l * (n - 1) + Math.max(-d, 0)) / n;
+  }
+  return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+}
+function emaSeries(vals, n) {
+  if (vals.length < n) return [];
+  const k = 2 / (n + 1);
+  let e = vals.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  const out = [e];
+  for (let i = n; i < vals.length; i++) { e = vals[i] * k + e * (1 - k); out.push(e); }
+  return out;
+}
+function chartIndicators(all, inr) {
+  const closes = all.map((b) => b.c);
+  if (closes.length < 30) return {};
+  const out = {};
+  const r = rsi14(closes);
+  if (r != null) out.rsi14 = +r.toFixed(1);
+  const e12 = emaSeries(closes, 12), e26 = emaSeries(closes, 26);
+  if (e26.length >= 9) {
+    const line = e26.map((v, i) => e12[i + 14] - v);       // e12 starts 14 sessions earlier
+    const signal = emaSeries(line, 9);
+    const m = line[line.length - 1], sg = signal[signal.length - 1];
+    out.macd = { line_inr: (m / 100).toFixed(2), signal_inr: (sg / 100).toFixed(2), above_signal: m >= sg };
+  }
+  if (closes.length >= 200) {
+    const a200 = closes.slice(-200).reduce((a, b) => a + b, 0) / 200;
+    out.avg200_inr = inr(a200); out.above_avg200 = closes[closes.length - 1] >= a200;
+  }
+  const yr = all.slice(-252);
+  out.week52_high_inr = inr(Math.max(...yr.map((b) => b.h)));
+  out.week52_low_inr = inr(Math.min(...yr.map((b) => b.l)));
+  return out;
+}
+
+// ---- Index levels -------------------------------------------------------------
+// Matched in order: "psu bank" before "bank", a named sector before plain Nifty.
+const INDEX_MAP = [
+  [/sensex|bse\s?30/, "^BSESN", "S&P BSE Sensex"],
+  [/vix/, "^INDIAVIX", "India VIX"],
+  [/psu\s?bank/, "^CNXPSUBANK", "Nifty PSU Bank"],
+  [/bank/, "^NSEBANK", "Nifty Bank"],
+  [/next\s?50|junior/, "^NSMIDCP", "Nifty Next 50"],
+  [/mid\s?cap/, "^NSEMDCP50", "Nifty Midcap 50"],
+  [/\b500\b/, "^CRSLDX", "Nifty 500"],
+  [/\b100\b/, "^CNX100", "Nifty 100"],
+  [/\bit\b|tech/, "^CNXIT", "Nifty IT"],
+  [/auto/, "^CNXAUTO", "Nifty Auto"],
+  [/pharma/, "^CNXPHARMA", "Nifty Pharma"],
+  [/fmcg/, "^CNXFMCG", "Nifty FMCG"],
+  [/metal/, "^CNXMETAL", "Nifty Metal"],
+  [/realty|real estate/, "^CNXREALTY", "Nifty Realty"],
+  [/energy/, "^CNXENERGY", "Nifty Energy"],
+  [/nifty|nse|market/, "^NSEI", "Nifty 50"],
+];
+const dayLabel = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+
+async function oneIndex(name) {
+  const hit = INDEX_MAP.find(([re]) => re.test(String(name || "").toLowerCase()));
+  if (!hit) return { name: String(name || ""), error: "Unknown index." };
+  try {
+    const res = await fetch(`/api/history?symbol=${encodeURIComponent(hit[1])}&range=1y&interval=1d`);
+    const j = await res.json();
+    const bars = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
+    if (bars.length < 3) return { name: hit[2], error: "No data right now." };
+    const last = bars[bars.length - 1], prev = bars[bars.length - 2];
+    const lvl = (p) => (p / 100).toFixed(2);
+    const pct = (a, b) => +((a - b) / b * 100).toFixed(2);
+    const back = (days) => { const t = last.t - days * 864e5; return bars.find((b) => b.t >= t) || bars[0]; };
+    return {
+      name: hit[2], level: lvl(last.c), as_of: dayLabel(last.t),
+      previous_close: lvl(prev.c), change_points: lvl(last.c - prev.c), change_pct: pct(last.c, prev.c),
+      change_1m_pct: pct(last.c, back(30).c), change_1y_pct: pct(last.c, bars[0].c),
+      high_52w: lvl(Math.max(...bars.map((b) => b.h))), low_52w: lvl(Math.min(...bars.map((b) => b.l))),
+    };
+  } catch { return { name: hit[2], error: "No data right now." }; }
+}
+async function execGetIndex(args = {}) {
+  const names = (Array.isArray(args.indices) ? args.indices : [args.indices || args.index || "Nifty 50"]).filter(Boolean).slice(0, 6);
+  const results = await Promise.all(names.map(oneIndex));
+  if (!results.some((r) => !r.error)) return { ok: false, error: "Index data could not be loaded right now." };
+  return {
+    ok: true, results,
+    note: "Levels are index points, not rupees. Each figure is the close of the session named in as_of (the latest bar can be the session in progress during market hours).",
+  };
+}
+
+// ---- Dividends, splits and bonus issues --------------------------------------
+async function execGetCorporateActions(args = {}) {
+  const raw = String(args.symbol || "").trim();
+  const sym = resolveSymbolFuzzy(raw);
+  if (!sym) return { ok: false, error: `No NSE/BSE stock matches "${raw}". Use search_stocks to find the symbol.` };
+  try {
+    const res = await fetch(`/api/history?symbol=${encodeURIComponent(sym)}&range=5y&interval=1mo&events=1`);
+    const j = await res.json();
+    if (!j?.ok) return { ok: false, error: `No corporate action data for ${sym} right now.` };
+    const ev = j.events || {};
+    const divs = (ev.dividends || []).slice().sort((a, b) => b.t - a.t);
+    const yearAgo = Date.now() - 365 * 864e5;
+    return {
+      ok: true, symbol: sym, period: "last 5 years",
+      dividends: divs.slice(0, 12).map((d) => ({ on: dayLabel(d.t), per_share_inr: Number(d.amount).toFixed(2) })),
+      dividends_last_12_months_inr: divs.filter((d) => d.t >= yearAgo).reduce((a, d) => a + Number(d.amount || 0), 0).toFixed(2),
+      splits_or_bonuses: (ev.splits || []).slice().sort((a, b) => b.t - a.t).map((s) => ({ on: dayLabel(s.t), ratio: s.ratio || `${s.numerator}:${s.denominator}` })),
+      note: "Dividend amounts are per share and adjusted for later splits. A ratio like 2:1 means each share became two (a split or a bonus issue; the data does not say which). An empty list means none in the period.",
+    };
+  } catch { return { ok: false, error: "Corporate action data could not be loaded right now." }; }
+}
+
+// ---- Mutual fund details -------------------------------------------------------
+async function execGetMutualFund(args = {}) {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Fund lookup unavailable right now." };
+    const { data, error } = await client.rpc("coach_mf_lookup", { p_query: String(args.query || args.name || ""), p_limit: 5 });
+    if (error || !data) return { ok: false, error: "Fund lookup failed." };
+    const top = data.results?.[0];
+    if (!top) return { ok: false, error: `No mutual fund matches "${args.query || ""}". Try the fund house and scheme name.` };
+    // Returns for the best match, from its NAV history.
+    try {
+      const res = await fetch(`/api/mf-history?code=${encodeURIComponent(top.amfi_code)}&tf=5Y`);
+      const j = await res.json();
+      const navs = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
+      if (navs.length > 20) {
+        const last = navs[navs.length - 1];
+        const at = (years) => {
+          const t = last.t - years * 365.25 * 864e5;
+          if (navs[0].t > t + 20 * 864e5) return null;          // history does not go back that far
+          return navs.find((b) => b.t >= t) || null;
+        };
+        const ret = {};
+        const y1 = at(1), y3 = at(3), y5 = at(5);
+        if (y1) ret.one_year_pct = +((last.c / y1.c - 1) * 100).toFixed(2);
+        if (y3) ret.three_year_pct_per_year = +((Math.pow(last.c / y3.c, 1 / 3) - 1) * 100).toFixed(2);
+        if (y5) ret.five_year_pct_per_year = +((Math.pow(last.c / y5.c, 1 / 5) - 1) * 100).toFixed(2);
+        top.returns = ret;
+      }
+    } catch { /* details without returns are still an answer */ }
+    return { ...data, returns_note: "Returns are for the first result only, from its NAV history; three- and five-year figures are per year (annualised). Past returns do not predict future ones." };
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
 // Chart reading as a lookup (24 Nov 2026). It used to be attached by a
 // keyword match on the student's text ("chart" + anything that looked like
 // a symbol), which charted the word "NSE" and switched the turn to the
 // no-lookups prompt.
 async function execReadChart(args = {}) {
   const raw = String(args.symbol || "").trim();
-  const sym = resolveSymbolFuzzy(raw);
+  // An index name ("Nifty", "Sensex", "Bank Nifty") reads that index.
+  const idx = /nifty|sensex|vix|\bindex\b/i.test(raw) ? INDEX_MAP.find(([re]) => re.test(raw.toLowerCase())) : null;
+  const sym = idx ? idx[2] : resolveSymbolFuzzy(raw);
   if (!sym) return { ok: false, error: `No NSE/BSE stock matches "${raw}". Use search_stocks to find the symbol.` };
+  const fetchSym = idx ? idx[1] : sym;
   const r0 = String(args.range || "3m").toLowerCase().replace(/\s/g, "");
   const range = /^1m/.test(r0) ? "1mo" : /^6m/.test(r0) ? "6mo" : /^1y|^12m/.test(r0) ? "1y" : /^5y/.test(r0) ? "5y" : "3mo";
-  let bars = [];
+  // One year of daily closes whatever the range, so the 200-day average, RSI
+  // and MACD have enough history; the range only decides which part the
+  // period figures describe.
+  let all = [], bars = [];
   try {
-    const res = await fetch(`/api/history?symbol=${encodeURIComponent(sym)}&range=${range}&interval=1d`);
+    const res = await fetch(`/api/history?symbol=${encodeURIComponent(fetchSym)}&range=${range === "5y" ? "5y" : "1y"}&interval=1d`);
     const j = await res.json();
-    bars = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
+    all = (j.ohlc || []).filter((b) => b && b.c > 0 && b.t);
+    const days = { "1mo": 31, "3mo": 92, "6mo": 183, "1y": 366 }[range];
+    const from = days && all.length ? all[all.length - 1].t - days * 864e5 : 0;
+    bars = all.filter((b) => b.t >= from);
   } catch { return { ok: false, error: "Chart data could not be loaded right now." }; }
   if (bars.length < 15) return { ok: false, error: `Not enough price history for ${sym}.` };
   // Rupee figures as text with two decimals: a number drops "301.00" to 301,
@@ -769,7 +1104,9 @@ async function execReadChart(args = {}) {
     up_days: ups, down_or_flat_days: bars.length - 1 - ups,
     biggest_day_move_pct: +big.d.toFixed(2), biggest_day_on: day(big.t),
     recent_volume_vs_average: +(vol(bars.slice(-5)) / Math.max(1, vol(bars.slice(0, -5)))).toFixed(1),
-    how_to_use: "Daily closes from the exchange. Describe the shape (rise, fall, sideways, dip and recovery), where the high and low came, and what being above or below the averages means, in plain words. Add [[chart " + sym + " " + (range === "1mo" ? "1m" : range === "3mo" ? "3m" : range === "6mo" ? "6m" : range) + "]] on its own line to show it.",
+    ...chartIndicators(all, inr),
+    ...(idx ? { is_index: true, units: "index points, not rupees (ignore the _inr in the field names); the app cannot draw a chart card for an index, so do not add a chart marker" } : {}),
+    how_to_use: "Daily closes from the exchange. Describe the shape (rise, fall, sideways, dip and recovery), where the high and low came, and what being above or below the averages means, in plain words. RSI above 70 is usually called overbought and below 30 oversold; indicators describe what the price has already done, they do not predict. Add [[chart " + sym + " " + (range === "1mo" ? "1m" : range === "3mo" ? "3m" : range === "6mo" ? "6m" : range) + "]] on its own line to show it.",
   };
 }
 
@@ -787,6 +1124,12 @@ function capToolResult(result, max) {
 }
 
 const EXECUTORS = {
+  compare_stocks: execCompareStocks,
+  get_profit_and_loss: execGetProfitAndLoss,
+  get_popular_on_stocksaathi: execGetPopular,
+  get_index: execGetIndex,
+  get_corporate_actions: execGetCorporateActions,
+  get_mutual_fund: execGetMutualFund,
   read_chart: execReadChart,
   screen_stocks: execScreenStocks,
   get_market_movers: execMarketMovers,

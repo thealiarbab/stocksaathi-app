@@ -207,6 +207,33 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
   ONE lookup; sector words mapped by `_coach_sector_pattern`),
   `get_market_movers` (RPC `coach_market_movers`, NSE end-of-day file) and
   `read_chart`.
+- **More lookups (24 Nov, matched against the GR-1 recon screenshots):**
+  `get_index` (Yahoo index symbols through `/api/history`, which now accepts
+  `^NSEI`-style tickers), `read_chart` also returns RSI 14, MACD, the 200-day
+  average and the 52-week range and reads an index by name,
+  `get_corporate_actions` (`/api/history?...&events=1`), `get_mutual_fund`
+  (RPC `coach_mf_lookup` + `/api/mf-history`), `compare_stocks` (RPC
+  `coach_fundamentals_batch`: up to 25 companies in one call with each
+  sector's median P/E), `get_profit_and_loss` (from state: booked and paper
+  profit, first in first out, value over time) and
+  `get_popular_on_stocksaathi` (RPC `coach_platform_popular`, counts only).
+  Not built, no data source: FII/DII flows, option chains, the IPO pipeline.
+  A new lookup needs: the definition and executor in `agent.js`, a label,
+  source line and receipt in `thoughtSteps.js`, a mention in BOTH prompts
+  (`persona.js` lean brief, `turnSystem.js` tool section) and a replay case.
+- **Replay test set** (`js/coach/replay.js`, card in admin > Coach): real
+  failures replayed against the live model with the exact system prompt from
+  `js/coach/turnSystem.js`, before any reply checker. Run it before and after
+  any change to the prompt, the tools or the facts. `useLeanBrief()` in
+  `js/features/preview.js` decides who gets the short brief; on 24 Nov the
+  long rulebook passed 12 of 12 and the short brief 11 of 12, so it stays
+  owner-only.
+- **Repaints change only what differs.** `js/components/morph.js`
+  (`morphHtml`) replaces `innerHTML =` for the chat message list and the chat
+  sidebar, and a background sync refreshes those in place instead of
+  rebuilding the page. Use it wherever a list repaints on a timer or a sync
+  and its listeners are delegated; a card with the same `data-card` that has
+  been drawn is kept as it is.
 - **Rankings are a table card, never typed rows.** Screener and movers
   results carry `how_to_show`; the model writes `[[table]]` and
   `js/features/chatCards.js` draws the rows it fetched (`rememberTable` ->

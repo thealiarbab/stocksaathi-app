@@ -365,6 +365,7 @@ function pathOf(vals, x, y) {
   return d;
 }
 
+const _drawnCharts = new Set();
 async function drawChart(el) {
   let card;
   try { card = JSON.parse(el.dataset.card); } catch { return; }
@@ -402,6 +403,11 @@ async function drawChart(el) {
   const tog = (k, label) => `<button type="button" data-ch-toggle="${k}" aria-pressed="${show[k]}">${label}</button>`;
 
   el.classList.toggle("is-down", !up);
+  // The line draws in from the left the first time this chart (or a new
+  // range) appears; a re-render of the chat does not replay it.
+  const drawKey = `${el.closest("[data-i]")?.dataset.i || ""}|${el.dataset.card}|${range}`;
+  el.classList.toggle("is-drawing", !_drawnCharts.has(drawKey));
+  _drawnCharts.add(drawKey);
   el.innerHTML = `
     <div class="ss-ch-head">${head}</div>
     ${card.note ? `<p class="ss-ch-note">${L("Daily closes only, so 1 month is the shortest view.", "Sirf daily closing price, isliye 1 mahina sabse chhota view hai.")}</p>` : ""}
@@ -523,6 +529,7 @@ const TABLE_METRICS = {
   debt_to_equity: { label: "Debt/equity", title: "debt to equity", fmt: num2 },
   eps: { label: "EPS", fmt: (v) => `₹${num2(v)}` },
   volume: { label: "Shares", fmt: volText },
+  buyers: { label: "Buyers", fmt: (v) => String(Math.round(v)) },
 };
 const trimName = (n) => String(n || "").replace(/\s+(limited|ltd\.?)$/i, "").trim();
 
@@ -532,7 +539,7 @@ function tableCardFrom(tool, f) {
   if (tool === "screen_stocks") {
     const by = TABLE_METRICS[f.sorted_by] && f.sorted_by !== "volume" ? f.sorted_by : "market_cap";
     return {
-      type: "table", kind: "screen", by, dir: f.direction === "asc" ? "asc" : "desc",
+      type: "table", kind: "screen", at: Date.now(), by, dir: f.direction === "asc" ? "asc" : "desc",
       top: fin(f.top_by_size), sector: f.sector_filter ? String(f.sector_filter).slice(0, 24) : null,
       rows: rows.slice(0, 50).map((r) => ({
         s: String(r.symbol || ""), n: trimName(r.name || r.symbol).slice(0, 40),
@@ -541,10 +548,31 @@ function tableCardFrom(tool, f) {
       })).filter((r) => r.s),
     };
   }
+  if (tool === "compare_stocks") {
+    const col = { pe: "pe", pb: "pb", roe: "roe_pct", dividend_yield: "dividend_yield_pct", debt_to_equity: "debt_to_equity", eps: "eps_inr", market_cap: "market_cap_cr" };
+    const by = col[f.sorted_by] ? f.sorted_by : "pe";
+    return {
+      type: "table", kind: "compare", at: Date.now(), by, dir: "desc",
+      rows: rows.slice(0, 25).map((r) => ({
+        s: String(r.symbol || ""), n: trimName(r.name || r.symbol).slice(0, 40),
+        v: fin(r[col[by]]), v2: by === "pe" ? fin(r.sector_median_pe) : null,
+        p: fin(r.price_inr), c: fin(r.change_pct),
+      })).filter((r) => r.s),
+    };
+  }
+  if (tool === "get_popular_on_stocksaathi") {
+    return {
+      type: "table", kind: "popular", at: Date.now(), by: "buyers", from: f.from || null, to: f.to || null,
+      rows: rows.slice(0, 20).map((r) => {
+        const inst = getInstrument(String(r.symbol || ""));
+        return { s: String(r.symbol || ""), n: trimName(inst && !inst._stub && inst.name ? inst.name : r.symbol).slice(0, 40), v: fin(r.buyers), v2: fin(r.sellers), p: null, c: null };
+      }).filter((r) => r.s),
+    };
+  }
   if (tool === "get_market_movers") {
     const by = ["losers", "volume"].includes(f.kind) ? f.kind : "gainers";
     return {
-      type: "table", kind: "movers", by, session: f.session ? String(f.session).slice(0, 10) : null,
+      type: "table", kind: "movers", at: Date.now(), by, session: f.session ? String(f.session).slice(0, 10) : null,
       rows: rows.slice(0, 25).map((r) => {
         const inst = getInstrument(String(r.symbol || ""));
         return {
@@ -567,6 +595,12 @@ export function rememberTable(lookups) {
 }
 
 function tableTitle(c) {
+  if (c.kind === "popular") {
+    const d = c.to ? new Date(`${c.to}T00:00:00`) : null;
+    const when = d && !isNaN(d) ? `, ${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : "";
+    return `${L("Most bought on StockSaathi", "StockSaathi par sabse zyada kharide gaye")}${c.from && c.from !== c.to ? "" : when}`;
+  }
+  if (c.kind === "compare") return `${c.rows.length} ${L("companies by", "companies,")} ${TABLE_METRICS[c.by]?.title || TABLE_METRICS[c.by]?.label || "P/E"}`;
   if (c.kind === "movers") {
     const what = c.by === "losers" ? L("Biggest fallers", "Sabse zyada gire") : c.by === "volume" ? L("Most traded", "Sabse zyada trade hue") : L("Biggest gainers", "Sabse zyada badhe");
     const d = c.session ? new Date(`${c.session}T00:00:00`) : null;
@@ -588,31 +622,40 @@ function tableRowsHtml(c, key = "rank", dir = "asc", open = false) {
     const d = typeof x === "string" ? x.localeCompare(y) : x - y;
     return (dir === "asc" ? d : -d) || a.i - b.i;
   });
-  const row = (r) => `<a class="ss-tb-row" role="row" href="/stocks/${encodeURIComponent(r.s)}">
+  const row = (r, k) => `<a class="ss-tb-row" role="row" data-s="${esc(r.s)}" style="--i:${Math.min(k, 9)}" href="/stocks/${encodeURIComponent(r.s)}">
       <span class="ss-tb-rank" role="cell">${r.i}</span>
       <span class="ss-tb-co" role="cell"><b>${esc(r.n)}</b><i>${esc(r.s)}</i></span>
-      ${m ? `<span class="ss-tb-num" role="cell">${r.v == null ? "—" : esc(m.fmt(r.v))}</span>` : ""}
-      <span class="ss-tb-px" role="cell"><b class="${r.c > 0 ? "up" : r.c < 0 ? "down" : ""}">${r.c == null ? "—" : `${r.c > 0 ? "+" : r.c < 0 ? "−" : ""}${Math.abs(r.c).toFixed(2)}%`}</b><i>${r.p == null ? "" : `₹${num2(r.p)}`}</i></span>
+      ${m ? `<span class="ss-tb-num" role="cell">${r.v == null ? "—" : esc(m.fmt(r.v))}${r.v2 != null ? `<i>${esc(c.kind === "popular" ? `${Math.round(r.v2)} ${L("sold", "beche")}` : `${L("sector", "sector")} ${m.fmt(r.v2)}`)}</i>` : ""}</span>` : ""}
+      ${c.kind === "popular" ? "" : `<span class="ss-tb-px" role="cell"><b class="${r.c > 0 ? "up" : r.c < 0 ? "down" : ""}">${r.c == null ? "—" : `${r.c > 0 ? "+" : r.c < 0 ? "−" : ""}${Math.abs(r.c).toFixed(2)}%`}</b><i>${r.p == null ? "" : `₹${num2(r.p)}`}</i></span>`}
     </a>`;
   const first = rows.length > TABLE_FIRST + 2 ? rows.slice(0, TABLE_FIRST) : rows;
   const rest = rows.slice(first.length);
-  return `<div class="ss-tb-body">${first.map(row).join("")}</div>${rest.length
-    ? `<div class="ss-tb-more"${open ? "" : " inert"}><div>${rest.map(row).join("")}</div></div>` : ""}`;
+  return `<div class="ss-tb-body">${first.map((r, k) => row(r, k)).join("")}</div>${rest.length
+    ? `<div class="ss-tb-more"${open ? "" : " inert"}><div>${rest.map((r) => row(r, 0)).join("")}</div></div>` : ""}`;
 }
 
 function tableHtml(c) {
   if (!Array.isArray(c.rows) || !c.rows.length) return "";
   const m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
   const n = c.rows.length;
-  const sub = c.kind === "movers"
+  // Rows cascade in once, when the table first appears. --el is how long ago
+  // that was, so a re-render of the chat carries on instead of starting over.
+  const age = Date.now() - (c.at || 0);
+  const fresh = age >= 0 && age < 1200;
+  const sub = c.kind === "popular"
+    ? L("How many students bought each one, with virtual money. Popular is not the same as good.", "Kitne students ne virtual paise se kharida. Popular hona achha hona nahi hai.")
+    : c.kind === "compare" && c.by === "pe"
+    ? L("Under each P/E is the typical P/E of its sector. Day move and price are from the last session.", "Har P/E ke neeche uske sector ka typical P/E hai.")
+    : c.kind === "movers"
     ? L("From NSE's end-of-day file for that session.", "NSE ki us din ki end-of-day file se.")
     : `${c.dir === "asc" ? L("Lowest first.", "Sabse kam pehle.") : L("Highest first.", "Sabse zyada pehle.")} ${L("Day move and price are from the last session.", "Day move aur price pichhle session ke hain.")}`;
   const allLabel = L(`Show all ${n}`, `Saare ${n} dikhao`);
   const th = (key, label, cls = "") => `<button type="button" class="ss-tb-th ${cls}" role="columnheader" aria-sort="none" data-tb-sort="${key}">${esc(label)}</button>`;
-  return `<div class="ss-card ss-card-table${m ? "" : " no-metric"}" data-card="${esc(JSON.stringify(c))}" data-sort="rank" data-dir="asc"${m && /^(pe|pb|roe|dividend_yield|debt_to_equity)$/.test(c.by) ? ' style="--tb-m:62px"' : ""}>
+  const vars = `${m && /^(pe|pb|roe|dividend_yield|debt_to_equity)$/.test(c.by) ? "--tb-m:62px;" : ""}${fresh ? `--el:${age}ms;` : ""}`;
+  return `<div class="ss-card ss-card-table${m ? "" : " no-metric"}${c.kind === "popular" ? " no-move" : ""}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}" data-sort="rank" data-dir="asc"${vars ? ` style="${vars}"` : ""}>
     <div class="ss-tb-head"><div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
     <div class="ss-tb" role="table" aria-label="${esc(tableTitle(c))}">
-      <div class="ss-tb-row ss-tb-cols" role="row">${th("rank", "#", "ss-tb-rank")}${th("name", L("Company", "Company"), "ss-tb-co")}${m ? th("metric", m.label, "ss-tb-num") : ""}${th("move", L("Day move", "Day move"), "ss-tb-px")}</div>
+      <div class="ss-tb-row ss-tb-cols" role="row">${th("rank", "#", "ss-tb-rank")}${th("name", L("Company", "Company"), "ss-tb-co")}${m ? th("metric", m.label, "ss-tb-num") : ""}${c.kind === "popular" ? "" : th("move", L("Day move", "Day move"), "ss-tb-px")}</div>
       <div class="ss-tb-rows">${tableRowsHtml(c)}</div>
     </div>
     ${n > TABLE_FIRST + 2 ? `<div class="ss-card-actions"><button type="button" class="ss-card-btn ss-tb-all" data-tb-all aria-expanded="false" data-tb-label="${esc(allLabel)}">${esc(allLabel)}</button></div>` : ""}
@@ -634,7 +677,22 @@ function tableClick(el, all, sort) {
   const key = sort.dataset.tbSort;
   const dir = el.dataset.sort === key ? (el.dataset.dir === "asc" ? "desc" : "asc") : (key === "name" || key === "rank" ? "asc" : "desc");
   el.dataset.sort = key; el.dataset.dir = dir;
+  el.classList.remove("is-fresh");
+  const calm = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const before = new Map();
+  if (!calm) el.querySelectorAll("a.ss-tb-row").forEach((r) => { const b = r.getBoundingClientRect(); if (b.height) before.set(r.dataset.s, b.top); });
   el.querySelector(".ss-tb-rows").innerHTML = tableRowsHtml(card, key, dir, el.classList.contains("is-open"));
+  if (!calm && typeof Element.prototype.animate === "function") {
+    el.querySelectorAll("a.ss-tb-row").forEach((r) => {
+      const b = r.getBoundingClientRect();
+      if (!b.height) return;
+      const was = before.get(r.dataset.s);
+      const frames = was == null
+        ? [{ opacity: 0 }, { opacity: 1 }]
+        : Math.abs(was - b.top) > 1 ? [{ transform: `translateY(${Math.max(-260, Math.min(260, was - b.top))}px)` }, { transform: "none" }] : null;
+      if (frames) r.animate(frames, { duration: 300, easing: "cubic-bezier(.2,.7,.2,1)" });
+    });
+  }
   el.querySelectorAll("[data-tb-sort]").forEach((b) => b.setAttribute("aria-sort", b === sort ? (dir === "asc" ? "ascending" : "descending") : "none"));
 }
 
@@ -646,7 +704,7 @@ function tableClick(el, all, sort) {
 export function cardRecord(card) {
   if (card?.type !== "table" || !Array.isArray(card.rows)) return "";
   const m = card.kind === "movers" && card.by !== "volume" ? null : TABLE_METRICS[card.by];
-  const rows = card.rows.map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
+  const rows = card.rows.map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.v2 != null ? (card.kind === "popular" ? ` sellers ${r.v2}` : ` sector ${r.v2}`) : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
   return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_table: tableTitle(card), rows })}</stocksaathi_lookup_provenance>`;
 }
 

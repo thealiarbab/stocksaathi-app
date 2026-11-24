@@ -1255,3 +1255,26 @@ a.ss-tb-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2p
 .md-table tbody tr + tr td { border-top: 1px solid var(--border); }
 .md-table td:first-child { font-weight: 600; color: var(--text-strong); }
 .md-table .num { text-align: right; white-space: nowrap; }
+
+/* ---- Motion that answers an action (24 Nov) --------------------------------
+   Each runs once. --el is the time since the thing appeared, so a re-render
+   of the chat continues the motion instead of replaying it. */
+@keyframes ssRowIn { from { opacity: 0; transform: translateY(6px); } }
+.ss-card-table.is-fresh .ss-tb-body .ss-tb-row { animation: ssRowIn 340ms cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--i, 0) * 36ms + 60ms - var(--el, 0ms)); }
+@keyframes ssChartIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.ss-card-chart.is-drawing .ss-ch-plot svg { animation: ssChartIn 720ms cubic-bezier(.3,.6,.2,1) both; }
+@keyframes ccRise { from { opacity: 0; transform: translateY(12px) scale(.97); } }
+.cc-row-user.is-new .cc-user-col { transform-origin: 100% 100%; animation: ccRise 240ms cubic-bezier(.2,.8,.2,1) backwards; animation-delay: calc(0ms - var(--el, 0ms)); }
+.cc-act.is-done svg { animation: tsPop 360ms cubic-bezier(.3,1.6,.5,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .ss-card-table.is-fresh .ss-tb-body .ss-tb-row, .ss-card-chart.is-drawing .ss-ch-plot svg, .cc-row-user.is-new .cc-user-col, .cc-act.is-done svg { animation: none; }
+}
+
+/* Table card: a second, quieter figure under the ranked one (sector P/E,
+   sellers), and the two-column layout for "most bought on StockSaathi". */
+.ss-tb-num { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.ss-tb-num i { font-style: normal; font-size: 11px; font-weight: 400; color: var(--text-dim); white-space: nowrap; }
+.ss-card-table.no-move { --tb-cols: 20px minmax(0, 1fr) 84px; }
+@media (max-width: 340px) { .ss-card-table.no-move { --tb-cols: minmax(0, 1fr) 80px; } }
+
+.ss-card-table .ss-tb-th { white-space: nowrap; }

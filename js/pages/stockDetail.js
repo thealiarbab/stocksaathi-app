@@ -1009,7 +1009,7 @@ function render(inst, symbol) {
     }
   }
 
-  main.innerHTML = `
+  const html = `
     <div style="margin-bottom: var(--sp-5);">
       <div class="flex items-center gap-2">
         <a href="/stocks" class="btn btn-ghost btn-sm">← Markets</a>
@@ -1294,6 +1294,13 @@ function render(inst, symbol) {
       </aside>
     </div>
   `;
+  // Same page as the last draw for this stock: leave the DOM alone (see
+  // portfolio.js). A redraw on every quote poll made the page flicker.
+  // The stamp sits on the first node this draw created, so another page (or
+  // another stock) having replaced the content always redraws.
+  if (main.firstElementChild && main.firstElementChild.__drawnHtml === html) return;
+  main.innerHTML = html;
+  if (main.firstElementChild) main.firstElementChild.__drawnHtml = html;
 
   // Paint the cached Saathi take if we already generated one this mount
   const whyBody = main.querySelector("#stock-why-body");

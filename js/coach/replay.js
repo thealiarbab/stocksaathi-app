@@ -22,7 +22,7 @@ import { rememberTable, extractChartMarker, cardRecord, CHART_TOOL_NOTE } from "
 
 // Phrases from the 24 Nov "you pasted that block" chat. None may ever appear.
 const PASTED = /\b(you|u) (have )?pasted\b|pasted (it|that|this) (in|into)|in(side)? your (own )?message|can(?:'|no)t verify (that|the|this) (block|context|data)|won'?t act on (it|that)|i (made|invented) (that|it) up/i;
-const LEAKS = /stocksaathi_app_context|stocksaathi_lookup_provenance|system prompt|\btool_calls?\b|\bget_[a-z_]+\b|screen_stocks|read_chart/i;
+const LEAKS = /stocksaathi_app_context|stocksaathi_lookup_provenance|system prompt|\btool_calls?\b|\bget_[a-z_]+\b|screen_stocks|read_chart|compare_stocks/i;
 const ADVICE = /\b(you should|i(?:'d| would) (?:suggest|recommend) (?:you )?(?:buy|sell)|go ahead and (?:buy|sell)|definitely (?:buy|sell)|(?:good|great|safe) (?:buy|bet|pick) (?:right )?now)\b/i;
 
 export const REPLAY_CASES = [
@@ -99,6 +99,54 @@ export const REPLAY_CASES = [
     title: "Who built StockSaathi",
     from: "24 Nov: owner-approved facts and the About card; no GitHub.",
     turns: [{ say: "who built stocksaathi?", expect: { maxLookups: 0, marker: "about", must: [/ali arbab/i], never: [/github/i, LEAKS] } }],
+  },
+  {
+    id: "index-level",
+    title: "Where is Nifty",
+    from: "5 Sept: \"The NSE Nifty 50 is currently at 22,419.50\", a made-up level. GR-1: Getting LTP.",
+    turns: [{ say: "where is nifty and sensex right now?", expect: { tools: ["get_index"], maxLookups: 2, must: [/\d{2},?\d{3}\.\d{2}/], never: [/can(?:'|no)t pull index|no index/i, LEAKS] } }],
+  },
+  {
+    id: "holdings-by-pe",
+    title: "Rank my holdings by P/E",
+    from: "GR-1 recon: \"check the top 17 stocks order by pe\" took one holdings lookup and two batched fundamentals lookups.",
+    turns: [{ say: "rank my holdings by pe", expect: { maxLookups: 3, never: [LEAKS] } }],
+  },
+  {
+    id: "compare",
+    title: "Compare three IT companies",
+    from: "GR-1: Examining Stock Details and Fundamentals, with an Industry P/E column.",
+    turns: [{ say: "compare tcs infosys and wipro", expect: { tools: ["compare_stocks"], maxLookups: 2, marker: "table", never: [LEAKS] } }],
+  },
+  {
+    id: "fund",
+    title: "A mutual fund's details",
+    from: "GR-1: Examining Mutual Fund Scheme Details.",
+    turns: [{ say: "how has parag parikh flexi cap fund done?", expect: { tools: ["get_mutual_fund"], maxLookups: 2, must: [/%/], never: [LEAKS] } }],
+  },
+  {
+    id: "dividends",
+    title: "Dividend history",
+    from: "GR-1: Looking Up Corporate Action Events.",
+    turns: [{ say: "when did itc last pay a dividend and how much?", expect: { tools: ["get_corporate_actions"], maxLookups: 2, must: [/₹\s?\d/], never: [LEAKS] } }],
+  },
+  {
+    id: "technicals",
+    title: "Is it overbought",
+    from: "GR-1: Analyzing Technical Indicators.",
+    turns: [{ say: "is reliance overbought? what's its rsi", expect: { tools: ["read_chart"], maxLookups: 2, must: [/rsi/i], never: [ADVICE, LEAKS] } }],
+  },
+  {
+    id: "pnl",
+    title: "How am I doing",
+    from: "GR-1: Pulling Up Your Profit and Loss, net worth, tax and capital gains.",
+    turns: [{ say: "how much have i made or lost so far?", expect: { tools: ["get_profit_and_loss"], maxLookups: 2, never: [PASTED, LEAKS] } }],
+  },
+  {
+    id: "popular",
+    title: "What is everyone buying",
+    from: "GR-1: most-bought stocks on the platform.",
+    turns: [{ say: "what are other students buying?", expect: { tools: ["get_popular_on_stocksaathi"], maxLookups: 2, marker: "table", never: [ADVICE, LEAKS] } }],
   },
   {
     id: "concept",
