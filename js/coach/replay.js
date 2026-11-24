@@ -179,10 +179,16 @@ export const REPLAY_CASES = [
     turns: [{ say: "if my trades were real how much would i have paid in charges and tax?", expect: { tools: ["estimate_charges_and_tax"], maxLookups: 2, must: [/STT/], never: [LEAKS] } }],
   },
   {
+    id: "follow-ups",
+    title: "Ends with questions to tap next",
+    from: "GR-1 ends an answer with a follow-up question; Saathi offers two or three as buttons. Seen 24 Nov 2026: four live replies in a row offered none.",
+    turns: [{ say: "what is a P/E ratio? keep it short", expect: { maxLookups: 1, next: true, never: [LEAKS, /want me to/i] } }],
+  },
+  {
     id: "two-cards",
     title: "Holdings and the journey in one answer",
     from: "GR-1 answers a portfolio question with a table and charts together.",
-    turns: [{ say: "give me the full picture of my portfolio: what i hold and how the account has moved over time", expect: { tools: ["get_user_portfolio"], maxLookups: 3, markers: ["holdings", "journey"], never: [PASTED, LEAKS] } }],
+    turns: [{ say: "give me the full picture of my portfolio: what i hold and how the account has moved over time", expect: { maxLookups: 3, markers: ["holdings", "journey"], never: [PASTED, LEAKS] } }],
   },
   {
     id: "journey-card",
@@ -212,7 +218,7 @@ export const REPLAY_CASES = [
 
 const words = (t) => (String(t || "").trim().match(/\S+/g) || []).length;
 
-function judge(expect = {}, { raw, text, card, cards, tools }) {
+function judge(expect = {}, { raw, text, card, cards, tools, next }) {
   const out = [];
   const add = (name, ok, detail = "") => out.push({ name, ok: !!ok, detail });
   add("answered", !!text && text.length > 1);
@@ -228,6 +234,7 @@ function judge(expect = {}, { raw, text, card, cards, tools }) {
   if (expect.marker === "table") add("shows a table", shown.includes("table") || /\n\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}/.test(raw));
   else if (expect.marker) add(`shows the ${expect.marker} card`, shown.includes(expect.marker));
   for (const mk of expect.markers || []) add(`shows the ${mk} card`, shown.includes(mk));
+  if (expect.next) add("offers follow-up buttons", Array.isArray(next) && next.length >= 2, `${(next || []).length} offered`);
   if (expect.hinglish) add("replies in casual Hinglish", looksHinglish(text) && !hasFormalHindiRegister(text));
   if (expect.maxWords != null) add(`at most ${expect.maxWords} words`, words(text) <= expect.maxWords, `${words(text)} words`);
   return out;
@@ -272,7 +279,7 @@ export async function runReplay({ lean = false, only = null, onCase = null, sign
       const ms = Math.round(performance.now() - t0);
       const ex = extractChartMarker(raw);
       const text = ex.text || raw;
-      const checks = error ? [{ name: "answered", ok: false, detail: error }] : judge(turn.expect, { raw, text, card: ex.card, cards: ex.cards, tools });
+      const checks = error ? [{ name: "answered", ok: false, detail: error }] : judge(turn.expect, { raw, text, card: ex.card, cards: ex.cards, tools, next: ex.next });
       const ok = checks.every((k) => k.ok);
       history.push({ role: "assistant", text, prov, card: ex.card });
       res.turns.push({ say: turn.say, reply: text, card: ex.card?.type || null, tools, ms, checks, ok });

@@ -235,7 +235,7 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
   `[[about]]`, `[[holdings]]` (the student's holdings with a total and the
   sector split; needs `get_user_portfolio` in the same turn) and
   `[[ask: one | two]]` (up to three follow-up questions shown as buttons
-  under the newest reply; `m.next`) and `[[journey]]` (the account's value over time, from `state.portfolioHistory`). Up to three cards per reply: `m.card` is the first and `m.cards` the rest (the pop-up shows them all too, plus the follow-up buttons; share pages show the first only). The long cards fold down to their title (`data-card-fold`).
+  under the newest reply; `m.next`) and `[[journey]]` (the account's value over time, from `state.portfolioHistory`, with a dashed line for the same buys and sells made in the Nifty 50; `warmJourney()` fetches the closes ahead of time). Up to three cards per reply: `m.card` is the first and `m.cards` the rest (the pop-up shows them all too, plus the follow-up buttons; share pages show the first only). The long cards fold down to their title (`data-card-fold`).
 - **Chat page layout:** the thread scrolls across the whole pane and the text
   column is centred inside it with padding (never put `max-width` on
   `#chat-messages` again: that put the scrollbar mid-page and killed the

@@ -1423,3 +1423,46 @@ body.chat-app .cc-main.is-scrolled .cc-head { box-shadow: 0 1px 0 var(--border);
 .ss-card.is-folded .ss-fold svg { transform: rotate(180deg); }
 .ss-card.is-folded > :not(.ss-tb-head), .ss-card.is-folded .ss-tb-sub { display: none; }
 @media (prefers-reduced-motion: reduce) { .ss-fold svg { transition: none; } }
+
+
+/* Journey card: the dashed "same trades in the Nifty 50" line and its key. */
+.ss-jr-route { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ss-jr-legend { margin: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--text-xs); color: var(--text-dim); }
+.ss-jr-legend > span { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.ss-jr-legend .ss-jr-sw { align-self: center; }
+.ss-jr-legend b { white-space: nowrap; }
+.ss-jr-legend b { font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.ss-jr-sw { flex: none; width: 18px; height: 0; border-top: 2px solid var(--positive); }
+.ss-card-journey.is-down .ss-jr-sw { border-top-color: var(--negative); }
+.ss-card-journey .ss-jr-sw.is-route { border-top: 2px dashed var(--text-dim); }
+.ss-card-journey.is-fresh .ss-jr-route, .ss-card-journey.is-fresh .ss-jr-legend { animation: ssFadeIn 420ms var(--ease) 700ms backwards; }
+@media (prefers-reduced-motion: reduce) { .ss-card-journey.is-fresh .ss-jr-route, .ss-card-journey.is-fresh .ss-jr-legend { animation: none; } }
+
+
+/* Card copy button (chatCards.js COPY_BTN) beside the fold button. */
+.ss-tb-head.has-copy { padding-right: 68px; }
+.ss-fold.ss-copy { right: 28px; }
+.ss-copy svg { grid-area: 1 / 1; transition: opacity 160ms var(--ease), transform 200ms var(--ease); }
+.ss-copy .ss-copy-b { opacity: 0; transform: scale(.6); color: var(--positive); }
+.ss-copy.is-done .ss-copy-a { opacity: 0; transform: scale(.6); }
+.ss-copy.is-done .ss-copy-b { opacity: 1; transform: none; }
+.ss-card.is-folded .ss-copy { display: none; }
+.ss-card.is-folded .ss-fold.ss-copy svg { transform: none; }
+/* The chevron turns with the button's state, so it moves as the card starts to close. */
+.ss-fold[data-card-fold][aria-expanded="false"] svg { transform: rotate(180deg); }
+
+/* Journey chart read-out: a hairline, a dot on the line and a small label. */
+.ss-jr-wrap { position: relative; touch-action: pan-y; cursor: crosshair; }
+.ss-jr-x { position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: var(--text-dim); opacity: .5; pointer-events: none; }
+.ss-jr-pt { position: absolute; top: -5px; left: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--positive); border: 2px solid var(--surface-elev); pointer-events: none; }
+.ss-card-journey.is-down .ss-jr-pt { background: var(--negative); }
+.ss-jr-tip {
+  position: absolute; top: 2px; left: 0; display: grid; gap: 1px; padding: 6px 10px; border-radius: 8px;
+  background: var(--surface-elev); border: 1px solid var(--border); box-shadow: 0 4px 14px rgb(0 0 0 / .14);
+  font-size: var(--text-xs); line-height: 1.35; white-space: nowrap; pointer-events: none; z-index: 1;
+}
+.ss-jr-tip.is-low { top: auto; bottom: 2px; }
+.ss-jr-tip b { font-weight: 700; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.ss-jr-tip i { font-style: normal; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ss-jr-x[hidden], .ss-jr-pt[hidden], .ss-jr-tip[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .ss-copy svg { transition: none; } }

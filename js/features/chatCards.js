@@ -16,6 +16,7 @@
 import { getHistory, getQuoteBatch } from "../data/marketData.js";
 import { getInstrument, STOCKS } from "../data/universe.js";
 import { getState } from "../state.js";
+import { niftyCloses, cachedNiftyCloses } from "../data/indexCloses.js";
 import { glossaryLookup } from "../data/glossary.js";
 
 export const COMMANDS = [
@@ -464,15 +465,106 @@ async function drawChart(el) {
   svg.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
 }
 
+// Journey chart: moving a finger or the mouse across it reads out that day.
+function journeyScrub(wrap, clientX) {
+  const cardEl = wrap.closest(".ss-card-journey");
+  if (!cardEl) return;
+  if (wrap._src !== cardEl.dataset.card) {
+    try { wrap._pts = JSON.parse(cardEl.dataset.card).pts || []; } catch { wrap._pts = []; }
+    wrap._src = cardEl.dataset.card;
+  }
+  const pts = wrap._pts;
+  if (pts.length < 3) return;
+  const box = wrap.getBoundingClientRect();
+  if (!(box.width > 0)) return;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const t = t0 + Math.min(1, Math.max(0, (clientX - box.left) / box.width)) * (t1 - t0);
+  let p = pts[0];
+  for (const q of pts) if (Math.abs(q[0] - t) < Math.abs(p[0] - t)) p = q;
+  // The same scale journeyHtml drew with (viewBox 600 x 170, 14 above, 10 below).
+  const hasRoute = pts.every((q) => Number.isFinite(q[2]));
+  const vs = pts.flatMap((q) => (hasRoute ? [q[1], q[2]] : [q[1]]));
+  const vMin = Math.min(...vs), vMax = Math.max(...vs);
+  const yf = vMax === vMin ? 0.5 : (14 + (1 - (p[1] - vMin) / (vMax - vMin)) * (170 - 24)) / 170;
+  const px = t1 === t0 ? 0 : ((p[0] - t0) / (t1 - t0)) * box.width;
+  const x = wrap.querySelector(".ss-jr-x"), pt = wrap.querySelector(".ss-jr-pt"), tip = wrap.querySelector(".ss-jr-tip");
+  if (!x || !pt || !tip) return;
+  const day = new Date(p[0]).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  tip.innerHTML = `<b>₹${num2(p[1])}</b><i>${esc(day)}</i>${hasRoute ? `<i>${L("Nifty 50 route", "Nifty 50 raasta")} ₹${num2(p[2])}</i>` : ""}`;
+  x.hidden = pt.hidden = tip.hidden = false;
+  x.style.transform = `translateX(${px.toFixed(1)}px)`;
+  pt.style.transform = `translate(${px.toFixed(1)}px, ${(yf * box.height).toFixed(1)}px)`;
+  // Beside the hairline, on whichever side has the room.
+  const right = px + 12 + tip.offsetWidth <= box.width;
+  tip.style.left = `${(right ? px + 12 : Math.max(0, px - 12 - tip.offsetWidth)).toFixed(1)}px`;
+  // Keep the label off the line: below the chart's middle when the point is high.
+  tip.classList.toggle("is-low", yf < 0.45);
+}
+function journeyScrubEnd(wrap) {
+  wrap.querySelectorAll(".ss-jr-x, .ss-jr-pt, .ss-jr-tip").forEach((el) => { el.hidden = true; });
+}
+
+// A fresh card's total counts from what was put in to what it is worth now.
+function runCounts(root) {
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  root.querySelectorAll(".ss-card.is-fresh [data-count-to]:not([data-counted])").forEach((el) => {
+    el.dataset.counted = "1";
+    const from = Number(el.dataset.countFrom), to = Number(el.dataset.countTo);
+    if (still || !Number.isFinite(from) || !Number.isFinite(to) || from === to || typeof requestAnimationFrame !== "function") return;
+    const t0 = performance.now() + 320, dur = 780;
+    const tick = (now) => {
+      if (!el.isConnected) return;
+      const k = Math.min(1, Math.max(0, (now - t0) / dur)), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = `₹${num2(from + (to - from) * e)}`;
+      if (k < 1) requestAnimationFrame(tick); else el.textContent = `₹${num2(to)}`;
+    };
+    el.textContent = `₹${num2(from)}`;
+    requestAnimationFrame(tick);
+  });
+}
+
+// Fold or unfold a card with its height easing between the two states. The
+// button's aria-expanded is the state; .is-folded (which hides the body) goes
+// on only after a closing card has finished shrinking.
+function foldCard(card, btn) {
+  const still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  try { card._foldAnim?.cancel(); } catch {}
+  const shut = btn.getAttribute("aria-expanded") !== "false";
+  btn.setAttribute("aria-expanded", String(!shut));
+  btn.setAttribute("aria-label", shut ? "Show this card" : "Hide this card");
+  const h0 = card.offsetHeight;
+  card.classList.toggle("is-folded", shut);
+  const h1 = card.offsetHeight;
+  if (still || typeof card.animate !== "function" || h0 === h1) return;
+  if (shut) card.classList.remove("is-folded");
+  card.style.overflow = "hidden";
+  const a = card._foldAnim = card.animate([{ height: `${h0}px` }, { height: `${h1}px` }], { duration: 240, easing: "cubic-bezier(.2, .7, .2, 1)" });
+  a.onfinish = () => {
+    card.style.overflow = "";
+    card._foldAnim = null;
+    if (shut && btn.getAttribute("aria-expanded") === "false") card.classList.add("is-folded");
+  };
+  a.oncancel = () => { card.style.overflow = ""; };
+}
+
 /** Draw every card placeholder inside `root`; wire range buttons and ask buttons. */
 export function hydrateCards(root, { onAsk, onRun, onFill } = {}) {
   if (!root) return;
+  try { warmJourney(); } catch {}
   root.querySelectorAll(".ss-card-chart[data-card]:not([data-drawn])").forEach((el) => {
     el.dataset.drawn = "1";
     drawChart(el);
   });
+  try { runCounts(root); } catch {}
   if (root.dataset.cardsWired) return;
   root.dataset.cardsWired = "1";
+  const scrub = (e) => { const w = e.target.closest?.("[data-jr]"); if (w) journeyScrub(w, e.clientX); };
+  root.addEventListener("pointermove", scrub);
+  root.addEventListener("pointerdown", scrub);
+  root.addEventListener("pointerout", (e) => {
+    const w = e.target.closest?.("[data-jr]");
+    if (w && !(e.relatedTarget && w.contains(e.relatedTarget))) journeyScrubEnd(w);
+  });
   root.addEventListener("click", (e) => {
     const r = e.target.closest("[data-ch-range]");
     const t = e.target.closest("[data-ch-toggle]");
@@ -482,10 +574,20 @@ export function hydrateCards(root, { onAsk, onRun, onFill } = {}) {
     const fold = e.target.closest("[data-card-fold]");
     if (fold) {
       const card = fold.closest(".ss-card");
-      if (card) {
-        const shut = card.classList.toggle("is-folded");
-        fold.setAttribute("aria-expanded", String(!shut));
-        fold.setAttribute("aria-label", shut ? "Show this card" : "Hide this card");
+      if (card) foldCard(card, fold);
+      return;
+    }
+    const copy = e.target.closest("[data-card-copy]");
+    if (copy) {
+      let c = null;
+      try { c = JSON.parse(copy.closest(".ss-card")?.dataset.card || "null"); } catch {}
+      const text = c ? cardAsText(c) : "";
+      if (text && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          copy.classList.add("is-done");
+          copy.setAttribute("aria-label", "Copied");
+          setTimeout(() => { copy.classList.remove("is-done"); copy.setAttribute("aria-label", "Copy this table"); }, 1400);
+        }).catch(() => {});
       }
       return;
     }
@@ -523,9 +625,9 @@ export const CHART_TOOL_NOTE = `
 You can show the user an interactive price chart under your reply. When a chart would help (how a stock moved, a trend, comparing two stocks, "show me"), put ONE marker on its own line at the end of your reply:
 [[chart SYMBOL RANGE]]  for one stock, e.g. [[chart TCS 6m]]
 [[compare SYMBOL SYMBOL RANGE]]  for two, e.g. [[compare INFY TCS 1y]]
-[[holdings]]  for the student's own holdings as a card: money put in, value now, profit, each holding's share, a total and the split by sector. It needs this turn's numbers, so call get_user_portfolio first. Use it when they ask to see their portfolio or holdings, or how their money is split.
-[[journey]]  for a chart of how the student's whole account value (cash plus holdings) has moved since they started. Use it when they ask how they have done over time; get_profit_and_loss gives you the numbers to talk about.
-[[ask: first question | second question]]  optional, on the very last line: two or three short questions the student might want to tap next, written the way they would ask them (under nine words each). The app shows them as buttons under your reply. Leave it out for greetings and small talk.
+[[holdings]]  for the student's own holdings as a card: money put in, value now, profit, each holding's share, a total and the split by sector. It needs this turn's numbers, so call get_user_portfolio (or get_profit_and_loss, which reads the same holdings) first. Use it when they ask to see their portfolio or holdings, or how their money is split.
+[[journey]]  for a chart of how the student's whole account value (cash plus holdings) has moved since they started. Use it when they ask how they have done over time; get_profit_and_loss gives you the numbers to talk about. The card can also draw a dashed line: the same buys and sells made in the Nifty 50 instead. Do not describe that line's numbers unless get_profit_and_loss gave you the Nifty comparison.
+[[ask: first question | second question]]  on the very last line of every reply that answered a question about a stock, a fund, the market, an idea or the student's own account: two or three short questions the student might want to tap next, written the way they would ask them (under nine words each), each one something you can actually answer. The app shows them as buttons under your reply, so do not also write "want me to...?" in the text. Leave the line out only for greetings, small talk, a refusal, or a reply where you asked the student a question.
 RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a chart marker for crypto or a mutual fund. You may use up to three card markers in one reply, each on its own line, when each adds something the others do not (for example the holdings card and the journey chart).`;
 
 const MARKER_RE = /\[\[\s*(chart|compare)\s+([^\]]{1,60})\]\]/gi;
@@ -549,6 +651,47 @@ let _lastHoldings = null;
 // total net worth, with a chart of the journey"). Drawn from the saved daily
 // values in state; no lookup needed.
 const JOURNEY_RE = /\[\[\s*journey\s*\]\]/gi;
+
+// The dashed line on the journey card: the same buys and sells made in the
+// Nifty 50 instead (GR-1 draws "portfolio vs market"). It uses the report
+// card's own benchmark function, so the card and the P&L lookup agree. The
+// card is built in one go with no waiting, so the Nifty closes and that
+// function are fetched ahead of time, the first time a chat is drawn.
+let _benchFn = null, _journeyWarm = false;
+const JR_IST = 5.5 * 3_600_000;
+const jrDate = (ms) => new Date(ms + JR_IST).toISOString().slice(0, 10);
+function journeyTrades() {
+  let tx = [];
+  try { tx = getState().transactions || []; } catch { tx = []; }
+  return tx.filter((t) => t && t.symbol && t.qty > 0 && t.qty <= 1e7 && t.pricePaise > 0 && Number(t.ts) > 0 && (t.side === "BUY" || t.side === "SELL"))
+    .slice().sort((a, b) => a.ts - b.ts);
+}
+export function warmJourney() {
+  if (_journeyWarm) return;
+  const first = journeyTrades().find((t) => t.side === "BUY");
+  if (!first) return;
+  _journeyWarm = true;
+  import("../coach/reportCardCore.js").then((m) => { _benchFn = m.benchmarkPl; }).catch(() => { _journeyWarm = false; });
+  niftyCloses(first.ts).catch(() => {});
+}
+/** For each kept point, what the account would be worth on the Nifty route; null when it cannot be worked out. */
+function niftyRoute(keep) {
+  if (!_benchFn) return null;
+  const tx = journeyTrades();
+  const first = tx.find((t) => t.side === "BUY");
+  const closes = first ? cachedNiftyCloses(first.ts) : null;
+  if (!closes) return null;
+  const gain = (t) => {
+    const d = jrDate(t);
+    const r = _benchFn(tx.filter((x) => x.ts <= t), closes.filter((c) => c[0] <= d));
+    return r ? r.benchPlPaise / 100 : 0;
+  };
+  const g0 = gain(keep[0][0]);
+  const out = keep.map((p) => +(keep[0][1] + gain(p[0]) - g0).toFixed(2));
+  if (out.some((v) => !(v > 0 && v < 1e11)) || !out.some((v) => v !== out[0])) return null;
+  return out;
+}
+
 function journeyCard() {
   let hist = [];
   try { hist = getState().portfolioHistory || []; } catch { hist = []; }
@@ -559,7 +702,9 @@ function journeyCard() {
   const step = Math.ceil(pts.length / 140);
   const hi = pts.reduce((a, b) => (b[1] > a[1] ? b : a)), lo = pts.reduce((a, b) => (b[1] < a[1] ? b : a));
   const keep = pts.filter((p, i) => i % step === 0 || i === pts.length - 1 || p === hi || p === lo);
-  return { type: "journey", at: Date.now(), pts: keep.map((p) => [p[0], +p[1].toFixed(2)]) };
+  let route = null;
+  try { route = niftyRoute(keep); } catch { route = null; }
+  return { type: "journey", at: Date.now(), pts: keep.map((p, i) => (route ? [p[0], +p[1].toFixed(2), route[i]] : [p[0], +p[1].toFixed(2)])) };
 }
 
 function journeyHtml(c) {
@@ -568,12 +713,15 @@ function journeyHtml(c) {
   const age = Date.now() - (c.at || 0), fresh = age >= 0 && age < 1500;
   const W = 600, H = 170, padT = 14, padB = 10;
   const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
-  const vs = pts.map((p) => p[1]);
+  // The Nifty route (third number of each point) shares the scale when present.
+  const hasRoute = pts.every((p) => Number.isFinite(p[2]));
+  const vs = pts.flatMap((p) => (hasRoute ? [p[1], p[2]] : [p[1]]));
   const vMin = Math.min(...vs), vMax = Math.max(...vs), span = vMax - vMin || 1;
   const x = (t) => (t1 === t0 ? 0 : ((t - t0) / (t1 - t0)) * W);
   // A value that never moved draws through the middle, not along the floor.
   const y = (v) => (vMax === vMin ? H / 2 : padT + (1 - (v - vMin) / span) * (H - padT - padB));
   const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join("");
+  const routeLine = hasRoute ? pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(p[2]).toFixed(1)}`).join("") : "";
   const first = pts[0], last = pts[pts.length - 1];
   const hi = pts.reduce((a, b) => (b[1] > a[1] ? b : a)), lo = pts.reduce((a, b) => (b[1] < a[1] ? b : a));
   const d = last[1] - first[1], pct = (d / first[1]) * 100, up = d >= 0;
@@ -584,11 +732,13 @@ function journeyHtml(c) {
   return `<div class="ss-card ss-card-journey ${up ? "is-up" : "is-down"}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}">
     <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(title)}</div>
       <p class="ss-tb-sub">${rs2(last[1])} ${L("now", "abhi")}, <b class="${up ? "up" : "down"}">${up ? "+" : "−"}${Math.abs(pct).toFixed(2)}%</b> ${L("since", "jab se")} ${esc(day(first[0]))}. ${L("Cash and holdings together, one point a day.", "Cash aur holdings milakar, din ka ek point.")}</p></div>
-    <svg class="ss-jr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${title}: ${rs2(first[1])} to ${rs2(last[1])}`)}">
+    <div class="ss-jr-wrap" data-jr><svg class="ss-jr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${title}: ${rs2(first[1])} to ${rs2(last[1])}`)}">
       <path class="ss-jr-area" d="${line}L${W} ${H}L0 ${H}Z"/>
+      ${routeLine ? `<path class="ss-jr-route" d="${routeLine}"/>` : ""}
       <path class="ss-jr-line" pathLength="1" d="${line}"/>
       ${dot(hi, "ss-jr-hi")}${dot(lo, "ss-jr-lo")}${dot(last, "ss-jr-now")}
-    </svg>
+    </svg><i class="ss-jr-x" hidden></i><i class="ss-jr-pt" hidden></i><span class="ss-jr-tip" hidden></span></div>
+    ${hasRoute ? `<p class="ss-jr-legend"><span><i class="ss-jr-sw"></i>${L("Your account", "Aapka account")}</span><span><i class="ss-jr-sw is-route"></i><span>${L("The same buys and sells made in the Nifty 50", "Wahi buy aur sell Nifty 50 mein")}: <b>${rs2(last[2])}</b> ${L("now", "abhi")}</span></span></p>` : ""}
     <dl class="ss-jr-key">
       <div><dt>${L("Started", "Shuruaat")}</dt><dd>${rs2(first[1])}<i>${esc(day(first[0]))}</i></dd></div>
       <div><dt>${L("Highest", "Sabse upar")}</dt><dd>${rs2(hi[1])}<i>${esc(day(hi[0]))}</i></dd></div>
@@ -682,6 +832,31 @@ const FOLD_BTN = `<button type="button" class="ss-fold" data-card-fold aria-expa
 // "HDFC Balanced Advantage Fund - Direct Plan - Growth Option" -> the fund's name.
 const fundName = (n) => String(n || "").replace(/\s*[-(]\s*(direct|regular)\b.*$/i, "").replace(/\s*-\s*growth\b.*$/i, "").trim();
 
+// Copy a table card's rows, tab-separated, so they paste straight into a sheet.
+const COPY_BTN = `<button type="button" class="ss-fold ss-copy" data-card-copy aria-label="Copy this table"><svg class="ss-copy-a" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="ss-copy-b" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+
+/** The rows of a table or holdings card as tab-separated text, with a header line. */
+export function cardAsText(c) {
+  const line = (cells) => cells.map((x) => String(x == null ? "" : x).replace(/[\t\n\r]+/g, " ")).join("\t");
+  const rows = Array.isArray(c?.rows) ? c.rows : [];
+  if (c?.type === "holdings") {
+    const out = [line(["Holding", "Symbol", "Worth now (Rs)", "Put in (Rs)", "Profit (Rs)", "Profit %"])];
+    const one = (n, sym, cur, inv) => line([n, sym, cur.toFixed(2), inv.toFixed(2), (cur - inv).toFixed(2), inv > 0 ? (((cur - inv) / inv) * 100).toFixed(2) : ""]);
+    for (const r of rows) out.push(one(r.n, r.f ? "Mutual fund" : r.s, +r.c, +r.i));
+    const inv = c.inv != null ? +c.inv : rows.reduce((a, r) => a + r.i, 0), cur = c.cur != null ? +c.cur : rows.reduce((a, r) => a + r.c, 0);
+    out.push(one("All together", "", cur, inv));
+    return out.join("\n");
+  }
+  if (c?.type === "table") {
+    const m = c.kind === "movers" && c.by !== "volume" ? null : TABLE_METRICS[c.by];
+    const head = ["#", "Company", "Symbol"].concat(m ? [m.label] : [], c.kind === "popular" ? [] : ["Day move %", "Price (Rs)"]);
+    const out = [line(head)];
+    rows.forEach((r, i) => out.push(line([i + 1, r.n, r.s].concat(m ? [r.v == null ? "" : m.fmt(r.v)] : [], c.kind === "popular" ? [] : [r.c == null ? "" : Number(r.c).toFixed(2), r.p == null ? "" : Number(r.p).toFixed(2)]))));
+    return out.join("\n");
+  }
+  return "";
+}
+
 function holdingsCardFrom(f) {
   const all = Array.isArray(f?.holdings) ? f.holdings : [];
   const rows = all.filter((h) => h && h.symbol && Number.isFinite(+h.invested_inr) && Number.isFinite(+h.value_inr));
@@ -732,7 +907,7 @@ function holdingsHtml(c) {
   const title = rows.length === 1 ? L("Your holding", "Aapki holding") : L(`Your ${rows.length} holdings`, `Aapki ${rows.length} holdings`);
   const sub = `${L("Worth", "Abhi")} ${rs2(cur)} ${L("now, on", "ki value,")} ${rs2(inv)} ${L("put in.", "lagaya tha.")}${c.left ? ` ${L(`${c.left} with broken data left out.`, `${c.left} kharab data wali holdings chhodi gayi.`)}` : ""}`;
   return `<div class="ss-card ss-card-hold${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}"${fresh ? ` style="--el:${age}ms"` : ""}>
-    <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(title)}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
+    <div class="ss-tb-head has-copy">${FOLD_BTN}${COPY_BTN}<div class="ss-card-title">${esc(title)}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
     ${shown.length > 1 ? `<div class="ss-al-wrap"><div class="ss-al" role="img" aria-label="${esc(shown.map((x) => `${x.k} ${x.p}%`).join(", "))}">${shown.map((x, k) => `<span style="--w:${x.p}%;--i:${k}"></span>`).join("")}</div>
     <ul class="ss-al-key">${shown.map((x) => `<li><i aria-hidden="true"></i>${esc(x.k)} <b>${x.p.toFixed(1)}%</b></li>`).join("")}</ul></div>` : ""}
     <div class="ss-hd" role="table" aria-label="${esc(title)}">
@@ -741,11 +916,24 @@ function holdingsHtml(c) {
       ${rest.length ? `<details class="ss-hd-more"><summary>${esc(L(`Show the other ${rest.length}`, `Baaki ${rest.length} dikhao`))}</summary>${rest.map((r) => row(r, 0)).join("")}</details>` : ""}
       <div class="ss-hd-row ss-hd-total" role="row">
         <span class="ss-hd-co" role="cell"><b>${esc(L("All together", "Sab milakar"))}</b>${c.cash != null ? `<i><span>${L("plus", "aur")} ${rs2(c.cash)} ${L("cash", "cash")}</span></i>` : ""}</span>
-        <span class="ss-hd-num" role="cell"><b>${rs2(cur)}</b><i><span class="ss-hd-lbl">${L("put in", "lagaya")} </span>${rs2(inv)}</i></span>
+        <span class="ss-hd-num" role="cell"><b data-count-from="${(+inv).toFixed(2)}" data-count-to="${(+cur).toFixed(2)}">${rs2(cur)}</b><i><span class="ss-hd-lbl">${L("put in", "lagaya")} </span>${rs2(inv)}</i></span>
         <span class="ss-hd-num" role="cell"><b class="${all.cls}">${all.pct}</b><i>${all.amt}</i></span>
       </div>
     </div>
   </div>`;
+}
+
+/**
+ * Keep a portfolio result for the [[holdings]] card. The portfolio lookup's
+ * result arrives through rememberTable(); get_profit_and_loss reads the same
+ * portfolio inside itself and hands it over here, so a reply that used only
+ * that lookup can still show the card (replay case two-cards, 24 Nov 2026).
+ */
+export function rememberHoldings(pf) {
+  try {
+    const hold = pf && pf.ok !== false ? holdingsCardFrom(pf) : null;
+    if (hold) _lastHoldings = { card: hold, at: Date.now() };
+  } catch {}
 }
 
 /** Called with each round of lookup results; keeps the latest rows a table can show. */
@@ -821,7 +1009,7 @@ function tableHtml(c) {
   const th = (key, label, cls = "") => `<button type="button" class="ss-tb-th ${cls}" role="columnheader" aria-sort="none" data-tb-sort="${key}">${esc(label)}</button>`;
   const vars = `${m && /^(pe|pb|roe|dividend_yield|debt_to_equity)$/.test(c.by) ? "--tb-m:62px;" : ""}${fresh ? `--el:${age}ms;` : ""}`;
   return `<div class="ss-card ss-card-table${m ? "" : " no-metric"}${c.kind === "popular" ? " no-move" : ""}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}" data-sort="rank" data-dir="asc"${vars ? ` style="${vars}"` : ""}>
-    <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
+    <div class="ss-tb-head has-copy">${FOLD_BTN}${COPY_BTN}<div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
     <div class="ss-tb" role="table" aria-label="${esc(tableTitle(c))}">
       <div class="ss-tb-row ss-tb-cols" role="row">${th("rank", "#", "ss-tb-rank")}${th("name", L("Company", "Company"), "ss-tb-co")}${m ? th("metric", m.label, "ss-tb-num") : ""}${c.kind === "popular" ? "" : th("move", L("Day move", "Day move"), "ss-tb-px")}</div>
       <div class="ss-tb-rows">${tableRowsHtml(c)}</div>
@@ -876,7 +1064,7 @@ export function cardRecord(card) {
   }
   if (card?.type === "journey" && Array.isArray(card.pts) && card.pts.length) {
     const a = card.pts[0], b = card.pts[card.pts.length - 1];
-    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "account value over time", first: `₹${a[1]}`, latest: `₹${b[1]}`, points: card.pts.length })}</stocksaathi_lookup_provenance>`;
+    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "account value over time", first: `₹${a[1]}`, latest: `₹${b[1]}`, ...(Number.isFinite(b[2]) ? { dashed_line_same_buys_and_sells_in_nifty_50_latest: `₹${b[2]}` } : {}), points: card.pts.length })}</stocksaathi_lookup_provenance>`;
   }
   if (card?.type !== "table" || !Array.isArray(card.rows)) return "";
   const m = card.kind === "movers" && card.by !== "volume" ? null : TABLE_METRICS[card.by];

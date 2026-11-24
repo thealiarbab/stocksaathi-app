@@ -926,6 +926,8 @@ async function execGetProfitAndLoss() {
   }
   const realised = shortTerm + longTerm;
   const pf = await execGetUserPortfolio();
+  // The same holdings feed the [[holdings]] card, whichever lookup read them.
+  try { (await import("../features/chatCards.js")).rememberHoldings(pf); } catch {}
   const clean = (pf.holdings || []).filter((h) => Number.isFinite(h.qty) && h.qty <= 1e7 && h.avg_cost_inr > 0);
   const unreal = clean.reduce((a, h) => a + (h.current_price_inr - h.avg_cost_inr) * h.qty, 0);
   const closed = wins + losses;

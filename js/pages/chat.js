@@ -774,6 +774,9 @@ export function renderChat(main, opts = {}) {
       const onShort = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); }
         else if (e.shiftKey && e.key === "Escape") { e.preventDefault(); input.focus(); }
+        // Esc stops a reply that is being written, unless a menu or sheet is
+        // open (Esc closes that first).
+        else if (e.key === "Escape" && m_pending && m_abortController && slash.hidden && !document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet")) { e.preventDefault(); m_abortController.abort(); }
         else if (document.activeElement === document.body && input.isConnected && !document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet")) {
           // Nothing is focused: a letter starts a message (as in ChatGPT and
           // Claude), and the paging keys move the thread.

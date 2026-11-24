@@ -29,8 +29,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { withLookupProvenance } from "../js/coach/lookupProvenance.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = fs.readFileSync(path.join(ROOT, "js/coach/agent.js"), "utf8");
-const PERSONA_SRC = fs.readFileSync(path.join(ROOT, "js/coach/persona.js"), "utf8");
+// Line endings are normalised first: a Windows checkout can hold CRLF, and the
+// block searches below look for a blank line written as two LFs.
+const readSrc = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8").replace(/\r\n/g, "\n");
+const SRC = readSrc("js/coach/agent.js");
+const PERSONA_SRC = readSrc("js/coach/persona.js");
 
 /** Slice a top-level `export function name(...) { ... }` out of the source. */
 function extractFn(name) {
