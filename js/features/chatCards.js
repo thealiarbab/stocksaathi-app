@@ -526,7 +526,7 @@ You can show the user an interactive price chart under your reply. When a chart 
 [[holdings]]  for the student's own holdings as a card: money put in, value now, profit, each holding's share, a total and the split by sector. It needs this turn's numbers, so call get_user_portfolio first. Use it when they ask to see their portfolio or holdings, or how their money is split.
 [[journey]]  for a chart of how the student's whole account value (cash plus holdings) has moved since they started. Use it when they ask how they have done over time; get_profit_and_loss gives you the numbers to talk about.
 [[ask: first question | second question]]  optional, on the very last line: two or three short questions the student might want to tap next, written the way they would ask them (under nine words each). The app shows them as buttons under your reply. Leave it out for greetings and small talk.
-RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a marker for crypto or a mutual fund. At most one marker per reply.`;
+RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a chart marker for crypto or a mutual fund. You may use up to three card markers in one reply, each on its own line, when each adds something the others do not (for example the holdings card and the journey chart).`;
 
 const MARKER_RE = /\[\[\s*(chart|compare)\s+([^\]]{1,60})\]\]/gi;
 // [[about]]: the "who built StockSaathi" card (links and contacts come from
@@ -571,7 +571,8 @@ function journeyHtml(c) {
   const vs = pts.map((p) => p[1]);
   const vMin = Math.min(...vs), vMax = Math.max(...vs), span = vMax - vMin || 1;
   const x = (t) => (t1 === t0 ? 0 : ((t - t0) / (t1 - t0)) * W);
-  const y = (v) => padT + (1 - (v - vMin) / span) * (H - padT - padB);
+  // A value that never moved draws through the middle, not along the floor.
+  const y = (v) => (vMax === vMin ? H / 2 : padT + (1 - (v - vMin) / span) * (H - padT - padB));
   const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join("");
   const first = pts[0], last = pts[pts.length - 1];
   const hi = pts.reduce((a, b) => (b[1] > a[1] ? b : a)), lo = pts.reduce((a, b) => (b[1] < a[1] ? b : a));
@@ -678,6 +679,9 @@ function tableCardFrom(tool, f) {
 // chevron). The click is handled once for all cards in hydrateCards().
 const FOLD_BTN = `<button type="button" class="ss-fold" data-card-fold aria-expanded="true" aria-label="Hide this card"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
 
+// "HDFC Balanced Advantage Fund - Direct Plan - Growth Option" -> the fund's name.
+const fundName = (n) => String(n || "").replace(/\s*[-(]\s*(direct|regular)\b.*$/i, "").replace(/\s*-\s*growth\b.*$/i, "").trim();
+
 function holdingsCardFrom(f) {
   const all = Array.isArray(f?.holdings) ? f.holdings : [];
   const rows = all.filter((h) => h && h.symbol && Number.isFinite(+h.invested_inr) && Number.isFinite(+h.value_inr));
@@ -690,7 +694,8 @@ function holdingsCardFrom(f) {
     split: (Array.isArray(sum.split_by_sector_pct) ? sum.split_by_sector_pct : []).slice(0, 12)
       .map((x) => ({ k: String(x.sector || "Other").slice(0, 28), p: fin(x.pct) || 0 })),
     rows: rows.slice().sort((a, b) => b.value_inr - a.value_inr).slice(0, 40).map((h) => ({
-      s: String(h.symbol), n: trimName(h.name || h.symbol).slice(0, 40), i: +h.invested_inr, c: +h.value_inr, w: fin(h.share_of_holdings_pct),
+      s: String(h.symbol), n: (h.kind === "MF" ? fundName(h.name) || String(h.symbol) : trimName(h.name || h.symbol)).slice(0, 40),
+      f: h.kind === "MF" ? 1 : 0, i: +h.invested_inr, c: +h.value_inr, w: fin(h.share_of_holdings_pct),
     })),
   };
 }
@@ -712,7 +717,7 @@ function holdingsHtml(c) {
   const row = (r, k) => {
     const g = gain(r.i, r.c);
     return `<a class="ss-hd-row" role="row" style="--i:${Math.min(k, 9)}" href="/stocks/${encodeURIComponent(r.s)}">
-      <span class="ss-hd-co" role="cell"><b>${esc(r.n)}</b><i><span>${esc(r.s)}</span>${r.w != null ? `<span>${r.w.toFixed(1)}%<span class="ss-hd-lbl"> ${L("of holdings", "hissa")}</span></span>` : ""}</i></span>
+      <span class="ss-hd-co" role="cell"><b>${esc(r.n)}</b><i><span>${r.f ? L("Mutual fund", "Mutual fund") : esc(r.s)}</span>${r.w != null ? `<span>${r.w.toFixed(1)}%<span class="ss-hd-lbl"> ${L("of holdings", "hissa")}</span></span>` : ""}</i></span>
       <span class="ss-hd-num" role="cell"><b>${rs2(r.c)}</b><i><span class="ss-hd-lbl">${L("put in", "lagaya")} </span>${rs2(r.i)}</i></span>
       <span class="ss-hd-num" role="cell"><b class="${g.cls}">${g.pct}</b><i>${g.amt}</i></span>
     </a>`;
@@ -884,32 +889,43 @@ export function hideChartMarkers(text) {
   return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(HOLDINGS_RE, "").replace(JOURNEY_RE, "").replace(NEXT_RE, "").replace(/\[\[[^\]]{0,270}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
-/** { text, card } for a finished reply: the first valid marker becomes a card. */
+/**
+ * { text, card, cards, next } for a finished reply. Every valid marker becomes
+ * a card, in the order written, up to three (GR-1 puts a table and a chart in
+ * one answer; until 24 Nov 2026 only the first marker counted). `card` is the
+ * first one, for the places that show a single card.
+ */
 export function extractChartMarker(text) {
-  let card = null;
-  if (ABOUT_RE.test(String(text || ""))) { ABOUT_RE.lastIndex = 0; card = { type: "about" }; }
-  ABOUT_RE.lastIndex = 0;
-  for (const m of String(text || "").matchAll(MARKER_RE)) {
-    if (card) break;
+  const src = String(text || "");
+  const found = [];
+  const at = (re) => { re.lastIndex = 0; const m = re.exec(src); re.lastIndex = 0; return m ? m.index : -1; };
+  let i = at(ABOUT_RE);
+  if (i >= 0) found.push({ i, card: { type: "about" } });
+  for (const m of src.matchAll(MARKER_RE)) {
     const kind = m[1].toLowerCase();
     const toks = m[2].trim().split(/\s+/);
     const rangeTok = toks.find((t) => /^\d+\s*[a-z]+$/i.test(t));
     const names = toks.filter((t) => t !== rangeTok);
     if (kind === "chart") {
       const sym = resolveSymbol(names.join(" ")) || resolveSymbol(names[0]);
-      if (sym) card = { type: "chart", sym, range: parseRange(rangeTok, "3mo") };
+      if (sym) found.push({ i: m.index, card: { type: "chart", sym, range: parseRange(rangeTok, "3mo") } });
     } else {
-      const a = resolveSymbol(names[0]), b = resolveSymbol(names[1]);
-      if (a && b && a !== b) card = { type: "compare", syms: [a, b], range: parseRange(rangeTok, "1y") };
+      const x = resolveSymbol(names[0]), y = resolveSymbol(names[1]);
+      if (x && y && x !== y) found.push({ i: m.index, card: { type: "compare", syms: [x, y], range: parseRange(rangeTok, "1y") } });
     }
   }
-  // [[table]]: the rows of the latest screener or movers lookup.
-  if (!card && TABLE_RE.test(String(text || "")) && _lastTable && Date.now() - _lastTable.at < TABLE_KEEP_MS) card = _lastTable.card;
-  TABLE_RE.lastIndex = 0;
+  // [[table]]: the rows of the latest screener, movers or comparison lookup.
+  i = at(TABLE_RE);
+  if (i >= 0 && _lastTable && Date.now() - _lastTable.at < TABLE_KEEP_MS) found.push({ i, card: _lastTable.card });
   // [[holdings]]: the holdings the portfolio lookup returned this turn.
-  if (!card && HOLDINGS_RE.test(String(text || "")) && _lastHoldings && Date.now() - _lastHoldings.at < TABLE_KEEP_MS) card = _lastHoldings.card;
-  HOLDINGS_RE.lastIndex = 0;
-  if (!card && JOURNEY_RE.test(String(text || ""))) card = journeyCard();
-  JOURNEY_RE.lastIndex = 0;
-  return { text: hideChartMarkers(text), card, next: extractNext(text) };
+  i = at(HOLDINGS_RE);
+  if (i >= 0 && _lastHoldings && Date.now() - _lastHoldings.at < TABLE_KEEP_MS) found.push({ i, card: _lastHoldings.card });
+  i = at(JOURNEY_RE);
+  if (i >= 0) { const j = journeyCard(); if (j) found.push({ i, card: j }); }
+  const cards = [];
+  for (const f of found.sort((p, q) => p.i - q.i)) {
+    const key = JSON.stringify({ ...f.card, at: 0 });
+    if (cards.length < 3 && !cards.some((c) => JSON.stringify({ ...c, at: 0 }) === key)) cards.push(f.card);
+  }
+  return { text: hideChartMarkers(text), card: cards[0] || null, cards, next: extractNext(text) };
 }

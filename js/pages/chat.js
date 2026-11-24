@@ -1290,7 +1290,8 @@ function renderBubble(m) {
       <button type="button" class="cc-act" data-copy aria-label="Copy reply">${I.copy}<span>Copy</span></button>
       <button type="button" class="cc-act" data-quote-msg="${i}" aria-label="Reply to this" title="Reply to this">${QUOTE_ICON}</button>
     </div>`;
-  const card = m.card ? cardHtml(m.card) : "";
+  // The first card, then any more the reply asked for (m.cards).
+  const card = [m.card, ...(Array.isArray(m.cards) ? m.cards : [])].filter(Boolean).map((c) => cardHtml(c)).join("");
   const body = m.status ? statusHtml(m.text) : renderMarkdown(hideChartMarkers(m.text));
   // A command card already shows its text summary (what the AI and share
   // links read), so that text is for screen readers only. A chart Saathi
@@ -2007,7 +2008,7 @@ async function sendAndReply(userText) {
       (m.role === "user" && m.quote ? `> ${String(m.quote).replace(/\n+/g, "\n> ")}\n\n(The student quoted the lines above from the chat and asks:)\n` : "") +
       (m.role === "user" && m.chartText ? `${m.text}\n\n[The app attached this chart to the question.]${m.chartText}` : m.text),
       m.lookupProvenance,
-    ) + (m.role === "user" ? "" : cardRecord(m.card)),
+    ) + (m.role === "user" ? "" : cardRecord(m.card) + (Array.isArray(m.cards) ? m.cards.map(cardRecord).join("") : "")),
   }));
 
   // Heuristic: does the message obviously need live data (stock price,
@@ -2242,7 +2243,7 @@ async function sendAndReply(userText) {
     const ex = extractChartMarker(finalText);
     finalText = ex.text || finalText;
     const chartExtra = {
-      ...(ex.card && isPreview() ? { card: ex.card, cardWithText: true } : {}),
+      ...(ex.card && isPreview() ? { card: ex.card, cardWithText: true, ...(ex.cards && ex.cards.length > 1 ? { cards: ex.cards.slice(1) } : {}) } : {}),
       // Questions to tap next (the [[ask: ...]] marker); shown under the latest reply only.
       ...(ex.next && ex.next.length ? { next: ex.next } : {}),
     };

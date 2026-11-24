@@ -218,7 +218,7 @@ The student is looking at: ${screen}` : ""}` + (isPreview() ? CHART_TOOL_NOTE : 
   // Preserve full conversation history up to platform limits
   const messages = history.map(m => ({
     role: m.role === "user" ? "user" : "assistant",
-    content: withLookupProvenance(m.text, m.lookupProvenance) + (m.role === "user" ? "" : cardRecord(m.card)),
+    content: withLookupProvenance(m.text, m.lookupProvenance) + (m.role === "user" ? "" : cardRecord(m.card) + (Array.isArray(m.cards) ? m.cards.map(cardRecord).join("") : "")),
   }));
   // Tool-use path: "fast" profile (Gemini 3 Flash Preview) is more reliable
   // at function calling than Lite.
@@ -607,7 +607,8 @@ function render() {
       if (entry && entry.text) {
         const ex = extractChartMarker(entry.text);
         if (ex.text) entry.text = ex.text;
-        if (ex.card && isPreview()) { entry.card = ex.card; entry.cardWithText = true; }
+        if (ex.card && isPreview()) { entry.card = ex.card; entry.cardWithText = true; if (ex.cards && ex.cards.length > 1) entry.cards = ex.cards.slice(1); }
+        if (ex.next && ex.next.length) entry.next = ex.next;
       }
       if (entry) {
         const provenance = normalizeLookupProvenance(lookupProvenance);
@@ -712,7 +713,8 @@ function render() {
         () => callLlmAgent(s.settings.llmApiKey || null, chatHistory.filter((m) => m !== entry), s, LANG_RETRY_NOTE, null, null, lookupProvenance));
       const ex = extractChartMarker(entry.text);
       if (ex.text) entry.text = ex.text;
-      if (ex.card && isPreview()) { entry.card = ex.card; entry.cardWithText = true; }
+      if (ex.card && isPreview()) { entry.card = ex.card; entry.cardWithText = true; if (ex.cards && ex.cards.length > 1) entry.cards = ex.cards.slice(1); }
+        if (ex.next && ex.next.length) entry.next = ex.next;
       const provenance = normalizeLookupProvenance(lookupProvenance);
       if (provenance.length) entry.lookupProvenance = provenance;
       logChatTurn({
@@ -863,7 +865,12 @@ function renderMessagesHtml(state) {
         </div>
       `;
     }
-    const card = preview && m.card ? cardHtml(m.card) : "";
+    // The first card, then any more the reply asked for (m.cards), as on /chat.
+    const card = preview && m.card ? [m.card, ...(Array.isArray(m.cards) ? m.cards : [])].filter(Boolean).map((c) => cardHtml(c)).join("") : "";
+    // Tap-to-ask follow-ups under the newest reply only ([[ask: ...]]); the
+    // click goes through hydrateCards' data-card-ask handler.
+    const next = preview && m.ts === lastBot?.ts && !pending && !m.streaming && Array.isArray(m.next) && m.next.length
+      ? `<div class="cc-next" role="group" aria-label="Ask next">${m.next.map((q) => `<button type="button" class="cc-next-q" data-card-ask="${escapeAttr(q)}">${escapeHtml(q)}</button>`).join("")}</div>` : "";
     // Thinking: an empty host the live row is patched into (no redraws).
     if (m.streaming && m.trace && !String(m.text || "").trim()) {
       return `<div class="cc-row cc-row-bot"><span class="cc-avatar" aria-hidden="true">S</span><div class="cc-bot-col"><div class="cc-bubble cc-bot"><span class="msg-body" data-pc-live>${liveTraceHtml(m.trace, { hinglish: !!getState()?.settings?.hinglish })}</span></div></div></div>`;
@@ -879,7 +886,7 @@ function renderMessagesHtml(state) {
     return `
       <div class="cc-row cc-row-bot">
         <span class="cc-avatar" aria-hidden="true">S</span>
-        <div class="cc-bot-col">${m.cardWithText ? textHtml + card : card + textHtml}${acts}</div>
+        <div class="cc-bot-col">${m.cardWithText ? textHtml + card : card + textHtml}${acts}${next}</div>
       </div>
     `;
   }).join("") + (pending && !all.some(m => m.streaming) ? `

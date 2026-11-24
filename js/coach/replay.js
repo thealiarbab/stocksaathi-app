@@ -143,7 +143,10 @@ export const REPLAY_CASES = [
     id: "pnl",
     title: "How am I doing",
     from: "GR-1: Pulling Up Your Profit and Loss, net worth, tax and capital gains.",
-    turns: [{ say: "how much have i made or lost so far?", expect: { tools: ["get_profit_and_loss"], maxLookups: 2, never: [PASTED, LEAKS] } }],
+    // Asks for things only the lookup has (win rate, best and worst trade). The
+    // plain "how much have I made" is answered, correctly, from the account
+    // facts the app already gives the model, with no lookup.
+    turns: [{ say: "what is my win rate, and which were my best and worst trades?", expect: { tools: ["get_profit_and_loss"], maxLookups: 2, never: [PASTED, LEAKS] } }],
   },
   {
     id: "popular",
@@ -176,6 +179,12 @@ export const REPLAY_CASES = [
     turns: [{ say: "if my trades were real how much would i have paid in charges and tax?", expect: { tools: ["estimate_charges_and_tax"], maxLookups: 2, must: [/STT/], never: [LEAKS] } }],
   },
   {
+    id: "two-cards",
+    title: "Holdings and the journey in one answer",
+    from: "GR-1 answers a portfolio question with a table and charts together.",
+    turns: [{ say: "give me the full picture of my portfolio: what i hold and how the account has moved over time", expect: { tools: ["get_user_portfolio"], maxLookups: 3, markers: ["holdings", "journey"], never: [PASTED, LEAKS] } }],
+  },
+  {
     id: "journey-card",
     title: "How have I done over time",
     from: "GR-1: your total net worth, with a chart of the journey.",
@@ -203,10 +212,12 @@ export const REPLAY_CASES = [
 
 const words = (t) => (String(t || "").trim().match(/\S+/g) || []).length;
 
-function judge(expect = {}, { raw, text, card, tools }) {
+function judge(expect = {}, { raw, text, card, cards, tools }) {
   const out = [];
   const add = (name, ok, detail = "") => out.push({ name, ok: !!ok, detail });
   add("answered", !!text && text.length > 1);
+  // Every card the reply asked for (up to three), not only the first.
+  const shown = (Array.isArray(cards) && cards.length ? cards : [card]).filter(Boolean).map((c) => c.type);
   for (const re of expect.never || []) {
     const m = raw.match(re);
     add(`never says ${String(re).slice(1, 38)}…`, !m, m ? `"${m[0]}"` : "");
@@ -214,8 +225,9 @@ function judge(expect = {}, { raw, text, card, tools }) {
   for (const re of expect.must || []) add(`says ${String(re).slice(1, 38)}…`, re.test(raw));
   for (const t of expect.tools || []) add(`used ${t}`, tools.includes(t));
   if (expect.maxLookups != null) add(`at most ${expect.maxLookups} lookup${expect.maxLookups === 1 ? "" : "s"}`, tools.length <= expect.maxLookups, `${tools.length} ran`);
-  if (expect.marker === "table") add("shows a table", card?.type === "table" || /\n\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}/.test(raw));
-  else if (expect.marker) add(`shows the ${expect.marker} card`, card?.type === expect.marker);
+  if (expect.marker === "table") add("shows a table", shown.includes("table") || /\n\s*\|.+\|\s*\n\s*\|?\s*:?-{2,}/.test(raw));
+  else if (expect.marker) add(`shows the ${expect.marker} card`, shown.includes(expect.marker));
+  for (const mk of expect.markers || []) add(`shows the ${mk} card`, shown.includes(mk));
   if (expect.hinglish) add("replies in casual Hinglish", looksHinglish(text) && !hasFormalHindiRegister(text));
   if (expect.maxWords != null) add(`at most ${expect.maxWords} words`, words(text) <= expect.maxWords, `${words(text)} words`);
   return out;
@@ -260,7 +272,7 @@ export async function runReplay({ lean = false, only = null, onCase = null, sign
       const ms = Math.round(performance.now() - t0);
       const ex = extractChartMarker(raw);
       const text = ex.text || raw;
-      const checks = error ? [{ name: "answered", ok: false, detail: error }] : judge(turn.expect, { raw, text, card: ex.card, tools });
+      const checks = error ? [{ name: "answered", ok: false, detail: error }] : judge(turn.expect, { raw, text, card: ex.card, cards: ex.cards, tools });
       const ok = checks.every((k) => k.ok);
       history.push({ role: "assistant", text, prov, card: ex.card });
       res.turns.push({ say: turn.say, reply: text, card: ex.card?.type || null, tools, ms, checks, ok });

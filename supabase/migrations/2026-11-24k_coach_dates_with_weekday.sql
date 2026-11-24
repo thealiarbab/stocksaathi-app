@@ -1,0 +1,11 @@
+-- The coach wrote the wrong weekday next to IPO dates (it worked "Tue 25 Nov"
+-- out itself; 25 Nov 2026 is a Wednesday). coach_fii_dii() and
+-- coach_ipo_calendar() now return every date as 'Wed, 25 Nov 2026', so the
+-- weekday is a fact it is given. Applied to production on 24 Nov 2026 with
+-- the function bodies from 2026-11-24j, changed only in the date fields:
+--   to_char(<date>, 'Dy, DD Mon YYYY')
+-- for latest_session and days[].date in coach_fii_dii, and for today,
+-- opens_on, closes_on and listing_on in coach_ipo_calendar (ordering still
+-- uses the date columns). See the live definitions with
+--   select pg_get_functiondef('public.coach_ipo_calendar()'::regprocedure);
+select 1;

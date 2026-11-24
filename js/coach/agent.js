@@ -12,7 +12,7 @@ import { getInstrument, getAllInstruments, STOCKS, MUTUAL_FUNDS } from "../data/
 import { getQuote, getQuoteBatch, getFundamentals } from "../data/marketData.js";
 import { listPendingOrders, listAllOrders } from "../features/limitOrders.js";
 import { getNews } from "../data/news.js";
-import { getState, getPortfolioValue, getReturnSummary } from "../state.js";
+import { getState, getPortfolioValue, getReturnSummary, getRealPricePaise } from "../state.js";
 import { SYSTEM_PROMPT, NO_TOOLS_NOTE } from "./persona.js";
 import { normalizeLookupProvenance } from "./lookupProvenance.js";
 
@@ -563,16 +563,26 @@ async function execGetUserPortfolio() {
   const state = getState();
   if (!state.isAuthed) return { ok: false, error: "User not logged in." };
   const holdings = [];
+  // Funds: their names and NAVs come with the fund list, which loads on
+  // demand. Without it a fund showed as "MF_100119" at what was paid for it
+  // (seen on a real account, 24 Nov 2026).
+  if (Object.keys(state.holdings || {}).some((sym) => sym.startsWith("MF_"))) {
+    try { await (await import("../data/universeLoader.js")).ensureMfUniverseLoaded(); } catch {}
+  }
   for (const [sym, h] of Object.entries(state.holdings || {})) {
     const inst = getInstrument(sym);
     if (!inst) continue;
     try {
-      const q = await getQuote(sym);
-      // A synthetic chart walk is not a price; fall back to cost like a miss.
-      const curPx = q && q.source !== "synthetic" ? q.pricePaise : h.avgCostPaise;
+      const isFund = inst.kind === "MF" || sym.startsWith("MF_");
+      // The quote feed has no funds; a fund's price is its latest NAV.
+      const q = isFund ? null : await getQuote(sym);
+      // A synthetic chart walk is not a price; use the last real one, else cost.
+      const real = q && q.source !== "synthetic" ? q.pricePaise : getRealPricePaise(sym);
+      const curPx = Number.isFinite(real) && real > 0 ? real : h.avgCostPaise;
       holdings.push({
         symbol: sym, name: inst.name, qty: h.qty,
-        sector: inst.sector || null, kind: inst.kind || "EQ",
+        ...(curPx === h.avgCostPaise && !(Number.isFinite(real) && real > 0) ? { no_price_yet_shown_at_cost: true } : {}),
+        sector: inst.sector || null, kind: isFund ? "MF" : (inst.kind || "EQ"),
         avg_cost_inr: +(h.avgCostPaise / 100).toFixed(2),
         current_price_inr: +(curPx / 100).toFixed(2),
         value_inr: +((h.qty * curPx) / 100).toFixed(2),
