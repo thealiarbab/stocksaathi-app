@@ -158,6 +158,36 @@ export const REPLAY_CASES = [
     turns: [{ say: "explain pe ratio like i'm 12", expect: { maxLookups: 0, maxWords: 190, never: [LEAKS] } }],
   },
   {
+    id: "fii-dii",
+    title: "Are foreigners buying or selling",
+    from: "GR-1: Checking FII/DII Activity. Saathi had no data for this before 24 Nov.",
+    turns: [{ say: "are fiis buying or selling right now?", expect: { tools: ["get_fii_dii"], maxLookups: 2, must: [/crore|cr\b/i], never: [LEAKS, ADVICE] } }],
+  },
+  {
+    id: "ipo-list",
+    title: "Upcoming IPOs",
+    from: "GR-1: Upcoming IPO pipeline.",
+    turns: [{ say: "any ipos coming up this week?", expect: { tools: ["get_ipo_calendar"], maxLookups: 2, never: [LEAKS, ADVICE] } }],
+  },
+  {
+    id: "charges-tax",
+    title: "Charges and tax on my trades",
+    from: "GR-1: Pulling Up Your Equity Charges, Tax and Capital Gains.",
+    turns: [{ say: "if my trades were real how much would i have paid in charges and tax?", expect: { tools: ["estimate_charges_and_tax"], maxLookups: 2, must: [/STT/], never: [LEAKS] } }],
+  },
+  {
+    id: "journey-card",
+    title: "How have I done over time",
+    from: "GR-1: your total net worth, with a chart of the journey.",
+    turns: [{ say: "show me a chart of how my account has done since i started", expect: { maxLookups: 2, marker: "journey", never: [PASTED, LEAKS] } }],
+  },
+  {
+    id: "holdings-card",
+    title: "Show me my holdings",
+    from: "GR-1: a holdings table with money put in, value now and a total, then how the money is split.",
+    turns: [{ say: "show me my holdings and how my money is split", expect: { tools: ["get_user_portfolio"], maxLookups: 2, marker: "holdings", never: [PASTED, LEAKS] } }],
+  },
+  {
     id: "hinglish-concept",
     title: "Hinglish switch on: a concept",
     from: "The chat page reruns a turn when the reply is not casual Hinglish. This checks the first answer.",

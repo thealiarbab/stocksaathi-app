@@ -287,6 +287,8 @@ export function cardHtml(card) {
   }
   if (card.type === "whatif") return whatifHtml(card);
   if (card.type === "portfolio") return portfolioHtml(card);
+  if (card.type === "holdings") return holdingsHtml(card);
+  if (card.type === "journey") return journeyHtml(card);
   if (card.type === "about") return aboutHtml();
   if (card.type === "table") return tableHtml(card);
   return `<div class="ss-card ss-card-chart" data-card="${data}"><div class="ss-card-loading">${L("Loading chart…", "Chart load ho raha hai…")}</div></div>`;
@@ -477,6 +479,16 @@ export function hydrateCards(root, { onAsk, onRun, onFill } = {}) {
     const ask = e.target.closest("[data-card-ask]");
     const run = e.target.closest("[data-card-run]");
     const fill = e.target.closest("[data-card-fill]");
+    const fold = e.target.closest("[data-card-fold]");
+    if (fold) {
+      const card = fold.closest(".ss-card");
+      if (card) {
+        const shut = card.classList.toggle("is-folded");
+        fold.setAttribute("aria-expanded", String(!shut));
+        fold.setAttribute("aria-label", shut ? "Show this card" : "Hide this card");
+      }
+      return;
+    }
     const tbAll = e.target.closest("[data-tb-all]");
     const tbSort = e.target.closest("[data-tb-sort]");
     if (tbAll || tbSort) {
@@ -511,6 +523,9 @@ export const CHART_TOOL_NOTE = `
 You can show the user an interactive price chart under your reply. When a chart would help (how a stock moved, a trend, comparing two stocks, "show me"), put ONE marker on its own line at the end of your reply:
 [[chart SYMBOL RANGE]]  for one stock, e.g. [[chart TCS 6m]]
 [[compare SYMBOL SYMBOL RANGE]]  for two, e.g. [[compare INFY TCS 1y]]
+[[holdings]]  for the student's own holdings as a card: money put in, value now, profit, each holding's share, a total and the split by sector. It needs this turn's numbers, so call get_user_portfolio first. Use it when they ask to see their portfolio or holdings, or how their money is split.
+[[journey]]  for a chart of how the student's whole account value (cash plus holdings) has moved since they started. Use it when they ask how they have done over time; get_profit_and_loss gives you the numbers to talk about.
+[[ask: first question | second question]]  optional, on the very last line: two or three short questions the student might want to tap next, written the way they would ask them (under nine words each). The app shows them as buttons under your reply. Leave it out for greetings and small talk.
 RANGE is one of 1m, 3m, 6m, 1y, 5y. Use NSE symbols. The app draws the chart from real exchange data, so do not describe numbers you have not been given; refer to "the chart below" instead. Never show a marker for crypto or a mutual fund. At most one marker per reply.`;
 
 const MARKER_RE = /\[\[\s*(chart|compare)\s+([^\]]{1,60})\]\]/gi;
@@ -527,6 +542,68 @@ const TABLE_RE = /\[\[\s*table\s*\]\]/gi;
 const TABLE_KEEP_MS = 5 * 60 * 1000;
 const TABLE_FIRST = 8;       // rows shown before "Show all"
 let _lastTable = null;
+// [[holdings]]: the student's own holdings as a card (get_user_portfolio).
+const HOLDINGS_RE = /\[\[\s*holdings\s*\]\]/gi;
+let _lastHoldings = null;
+// [[journey]]: the account's value since the student started (GR-1: "your
+// total net worth, with a chart of the journey"). Drawn from the saved daily
+// values in state; no lookup needed.
+const JOURNEY_RE = /\[\[\s*journey\s*\]\]/gi;
+function journeyCard() {
+  let hist = [];
+  try { hist = getState().portfolioHistory || []; } catch { hist = []; }
+  const pts = hist.map((p) => [Number(p.ts), Number(p.valuePaise) / 100])
+    .filter((p) => p[0] > 0 && p[1] > 0 && p[1] < 1e11).sort((a, b) => a[0] - b[0]);
+  if (pts.length < 3) return null;
+  // At most 140 points: keep the first, the last, the high and the low.
+  const step = Math.ceil(pts.length / 140);
+  const hi = pts.reduce((a, b) => (b[1] > a[1] ? b : a)), lo = pts.reduce((a, b) => (b[1] < a[1] ? b : a));
+  const keep = pts.filter((p, i) => i % step === 0 || i === pts.length - 1 || p === hi || p === lo);
+  return { type: "journey", at: Date.now(), pts: keep.map((p) => [p[0], +p[1].toFixed(2)]) };
+}
+
+function journeyHtml(c) {
+  const pts = Array.isArray(c.pts) ? c.pts : [];
+  if (pts.length < 3) return "";
+  const age = Date.now() - (c.at || 0), fresh = age >= 0 && age < 1500;
+  const W = 600, H = 170, padT = 14, padB = 10;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0];
+  const vs = pts.map((p) => p[1]);
+  const vMin = Math.min(...vs), vMax = Math.max(...vs), span = vMax - vMin || 1;
+  const x = (t) => (t1 === t0 ? 0 : ((t - t0) / (t1 - t0)) * W);
+  const y = (v) => padT + (1 - (v - vMin) / span) * (H - padT - padB);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join("");
+  const first = pts[0], last = pts[pts.length - 1];
+  const hi = pts.reduce((a, b) => (b[1] > a[1] ? b : a)), lo = pts.reduce((a, b) => (b[1] < a[1] ? b : a));
+  const d = last[1] - first[1], pct = (d / first[1]) * 100, up = d >= 0;
+  const day = (t) => new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const rs2 = (v) => `₹${num2(v)}`;
+  const dot = (p, cls) => `<circle class="${cls}" cx="${x(p[0]).toFixed(1)}" cy="${y(p[1]).toFixed(1)}" r="3.5"/>`;
+  const title = L("Your account since you started", "Shuru se ab tak aapka account");
+  return `<div class="ss-card ss-card-journey ${up ? "is-up" : "is-down"}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}">
+    <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(title)}</div>
+      <p class="ss-tb-sub">${rs2(last[1])} ${L("now", "abhi")}, <b class="${up ? "up" : "down"}">${up ? "+" : "−"}${Math.abs(pct).toFixed(2)}%</b> ${L("since", "jab se")} ${esc(day(first[0]))}. ${L("Cash and holdings together, one point a day.", "Cash aur holdings milakar, din ka ek point.")}</p></div>
+    <svg class="ss-jr" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${title}: ${rs2(first[1])} to ${rs2(last[1])}`)}">
+      <path class="ss-jr-area" d="${line}L${W} ${H}L0 ${H}Z"/>
+      <path class="ss-jr-line" pathLength="1" d="${line}"/>
+      ${dot(hi, "ss-jr-hi")}${dot(lo, "ss-jr-lo")}${dot(last, "ss-jr-now")}
+    </svg>
+    <dl class="ss-jr-key">
+      <div><dt>${L("Started", "Shuruaat")}</dt><dd>${rs2(first[1])}<i>${esc(day(first[0]))}</i></dd></div>
+      <div><dt>${L("Highest", "Sabse upar")}</dt><dd>${rs2(hi[1])}<i>${esc(day(hi[0]))}</i></dd></div>
+      <div><dt>${L("Lowest", "Sabse neeche")}</dt><dd>${rs2(lo[1])}<i>${esc(day(lo[0]))}</i></dd></div>
+      <div><dt>${L("Now", "Abhi")}</dt><dd>${rs2(last[1])}<i>${esc(day(last[0]))}</i></dd></div>
+    </dl>
+  </div>`;
+}
+
+// [[ask: one | two | three]]: questions the student can tap to ask next.
+const NEXT_RE = /\[\[\s*ask\s*:\s*([^\]]{3,260})\]\]/gi;
+export function extractNext(text) {
+  const m = [...String(text || "").matchAll(NEXT_RE)].pop();
+  if (!m) return [];
+  return m[1].split("|").map((q) => q.trim().replace(/\s+/g, " ")).filter((q) => q.length >= 3 && q.length <= 90).slice(0, 3);
+}
 
 const fin = (v) => (v != null && Number.isFinite(+v) ? +v : null);
 const num2 = (v) => Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -597,10 +674,84 @@ function tableCardFrom(tool, f) {
   return null;
 }
 
+// Long cards can be folded down to their title (GR-1's cards have the same
+// chevron). The click is handled once for all cards in hydrateCards().
+const FOLD_BTN = `<button type="button" class="ss-fold" data-card-fold aria-expanded="true" aria-label="Hide this card"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+
+function holdingsCardFrom(f) {
+  const all = Array.isArray(f?.holdings) ? f.holdings : [];
+  const rows = all.filter((h) => h && h.symbol && Number.isFinite(+h.invested_inr) && Number.isFinite(+h.value_inr));
+  if (!rows.length) return null;
+  const sum = f.holdings_summary || {};
+  return {
+    type: "holdings", at: Date.now(),
+    inv: fin(sum.invested_inr), cur: fin(sum.value_now_inr), cash: fin(f.cash_inr),
+    left: Math.max(0, all.length - rows.length),
+    split: (Array.isArray(sum.split_by_sector_pct) ? sum.split_by_sector_pct : []).slice(0, 12)
+      .map((x) => ({ k: String(x.sector || "Other").slice(0, 28), p: fin(x.pct) || 0 })),
+    rows: rows.slice().sort((a, b) => b.value_inr - a.value_inr).slice(0, 40).map((h) => ({
+      s: String(h.symbol), n: trimName(h.name || h.symbol).slice(0, 40), i: +h.invested_inr, c: +h.value_inr, w: fin(h.share_of_holdings_pct),
+    })),
+  };
+}
+
+// The holdings card. Each row: the holding and its share, what it is worth now
+// over what was put in, and the profit. Then a total, and a bar that shows how
+// the money is split. Rows past the eighth sit behind a native disclosure, so
+// the card needs no listeners of its own.
+function holdingsHtml(c) {
+  const rows = Array.isArray(c.rows) ? c.rows : [];
+  if (!rows.length) return "";
+  const age = Date.now() - (c.at || 0);
+  const fresh = age >= 0 && age < 1500;
+  const rs2 = (v) => `₹${num2(v)}`;
+  const gain = (put, now) => {
+    const d = now - put, sign = d > 0 ? "+" : d < 0 ? "−" : "";
+    return { cls: d > 0 ? "up" : d < 0 ? "down" : "", pct: put > 0 ? `${sign}${Math.abs((d / put) * 100).toFixed(2)}%` : "—", amt: `${sign}${rs2(Math.abs(d))}` };
+  };
+  const row = (r, k) => {
+    const g = gain(r.i, r.c);
+    return `<a class="ss-hd-row" role="row" style="--i:${Math.min(k, 9)}" href="/stocks/${encodeURIComponent(r.s)}">
+      <span class="ss-hd-co" role="cell"><b>${esc(r.n)}</b><i><span>${esc(r.s)}</span>${r.w != null ? `<span>${r.w.toFixed(1)}%<span class="ss-hd-lbl"> ${L("of holdings", "hissa")}</span></span>` : ""}</i></span>
+      <span class="ss-hd-num" role="cell"><b>${rs2(r.c)}</b><i><span class="ss-hd-lbl">${L("put in", "lagaya")} </span>${rs2(r.i)}</i></span>
+      <span class="ss-hd-num" role="cell"><b class="${g.cls}">${g.pct}</b><i>${g.amt}</i></span>
+    </a>`;
+  };
+  const first = rows.length > TABLE_FIRST + 2 ? rows.slice(0, TABLE_FIRST) : rows;
+  const rest = rows.slice(first.length);
+  const inv = c.inv != null ? c.inv : rows.reduce((a, r) => a + r.i, 0);
+  const cur = c.cur != null ? c.cur : rows.reduce((a, r) => a + r.c, 0);
+  const all = gain(inv, cur);
+  const split = (Array.isArray(c.split) ? c.split : []).filter((x) => x.p > 0);
+  const shown = split.length > 6 ? split.slice(0, 5).concat([{ k: L("Everything else", "Baaki sab"), p: +split.slice(5).reduce((a, x) => a + x.p, 0).toFixed(1) }]) : split;
+  const title = rows.length === 1 ? L("Your holding", "Aapki holding") : L(`Your ${rows.length} holdings`, `Aapki ${rows.length} holdings`);
+  const sub = `${L("Worth", "Abhi")} ${rs2(cur)} ${L("now, on", "ki value,")} ${rs2(inv)} ${L("put in.", "lagaya tha.")}${c.left ? ` ${L(`${c.left} with broken data left out.`, `${c.left} kharab data wali holdings chhodi gayi.`)}` : ""}`;
+  return `<div class="ss-card ss-card-hold${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}"${fresh ? ` style="--el:${age}ms"` : ""}>
+    <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(title)}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
+    ${shown.length > 1 ? `<div class="ss-al-wrap"><div class="ss-al" role="img" aria-label="${esc(shown.map((x) => `${x.k} ${x.p}%`).join(", "))}">${shown.map((x, k) => `<span style="--w:${x.p}%;--i:${k}"></span>`).join("")}</div>
+    <ul class="ss-al-key">${shown.map((x) => `<li><i aria-hidden="true"></i>${esc(x.k)} <b>${x.p.toFixed(1)}%</b></li>`).join("")}</ul></div>` : ""}
+    <div class="ss-hd" role="table" aria-label="${esc(title)}">
+      <div class="ss-hd-row ss-hd-cols" role="row"><span role="columnheader">${L("Holding", "Holding")}</span><span class="ss-hd-num" role="columnheader">${L("Worth now", "Abhi ki value")}</span><span class="ss-hd-num" role="columnheader">${L("Profit", "Profit")}</span></div>
+      ${first.map(row).join("")}
+      ${rest.length ? `<details class="ss-hd-more"><summary>${esc(L(`Show the other ${rest.length}`, `Baaki ${rest.length} dikhao`))}</summary>${rest.map((r) => row(r, 0)).join("")}</details>` : ""}
+      <div class="ss-hd-row ss-hd-total" role="row">
+        <span class="ss-hd-co" role="cell"><b>${esc(L("All together", "Sab milakar"))}</b>${c.cash != null ? `<i><span>${L("plus", "aur")} ${rs2(c.cash)} ${L("cash", "cash")}</span></i>` : ""}</span>
+        <span class="ss-hd-num" role="cell"><b>${rs2(cur)}</b><i><span class="ss-hd-lbl">${L("put in", "lagaya")} </span>${rs2(inv)}</i></span>
+        <span class="ss-hd-num" role="cell"><b class="${all.cls}">${all.pct}</b><i>${all.amt}</i></span>
+      </div>
+    </div>
+  </div>`;
+}
+
 /** Called with each round of lookup results; keeps the latest rows a table can show. */
 export function rememberTable(lookups) {
   for (const l of lookups || []) {
     if (l?.status !== "returned" || !l.facts) continue;
+    if (l.tool === "get_user_portfolio") {
+      const hold = holdingsCardFrom(l.facts);
+      if (hold) _lastHoldings = { card: hold, at: Date.now() };
+      continue;
+    }
     const card = tableCardFrom(l.tool, l.facts);
     if (card && card.rows.length >= 3) _lastTable = { card, at: Date.now() };
   }
@@ -665,7 +816,7 @@ function tableHtml(c) {
   const th = (key, label, cls = "") => `<button type="button" class="ss-tb-th ${cls}" role="columnheader" aria-sort="none" data-tb-sort="${key}">${esc(label)}</button>`;
   const vars = `${m && /^(pe|pb|roe|dividend_yield|debt_to_equity)$/.test(c.by) ? "--tb-m:62px;" : ""}${fresh ? `--el:${age}ms;` : ""}`;
   return `<div class="ss-card ss-card-table${m ? "" : " no-metric"}${c.kind === "popular" ? " no-move" : ""}${fresh ? " is-fresh" : ""}" data-card="${esc(JSON.stringify(c))}" data-sort="rank" data-dir="asc"${vars ? ` style="${vars}"` : ""}>
-    <div class="ss-tb-head"><div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
+    <div class="ss-tb-head">${FOLD_BTN}<div class="ss-card-title">${esc(tableTitle(c))}</div><p class="ss-tb-sub">${esc(sub)}</p></div>
     <div class="ss-tb" role="table" aria-label="${esc(tableTitle(c))}">
       <div class="ss-tb-row ss-tb-cols" role="row">${th("rank", "#", "ss-tb-rank")}${th("name", L("Company", "Company"), "ss-tb-co")}${m ? th("metric", m.label, "ss-tb-num") : ""}${c.kind === "popular" ? "" : th("move", L("Day move", "Day move"), "ss-tb-px")}</div>
       <div class="ss-tb-rows">${tableRowsHtml(c)}</div>
@@ -714,6 +865,14 @@ function tableClick(el, all, sort) {
  * looked up). Empty for every other card.
  */
 export function cardRecord(card) {
+  if (card?.type === "holdings" && Array.isArray(card.rows)) {
+    const rows = card.rows.map((r) => `${r.s} put in ₹${r.i} now ₹${r.c}${r.w != null ? ` share ${r.w}%` : ""}`);
+    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "the student's holdings", total_put_in: card.inv, total_now: card.cur, cash: card.cash, rows })}</stocksaathi_lookup_provenance>`;
+  }
+  if (card?.type === "journey" && Array.isArray(card.pts) && card.pts.length) {
+    const a = card.pts[0], b = card.pts[card.pts.length - 1];
+    return `\n\n<stocksaathi_lookup_provenance>${JSON.stringify({ shown_as_card: "account value over time", first: `₹${a[1]}`, latest: `₹${b[1]}`, points: card.pts.length })}</stocksaathi_lookup_provenance>`;
+  }
   if (card?.type !== "table" || !Array.isArray(card.rows)) return "";
   const m = card.kind === "movers" && card.by !== "volume" ? null : TABLE_METRICS[card.by];
   const rows = card.rows.map((r, i) => `${i + 1} ${r.s}${m && r.v != null ? ` ${m.label} ${r.v}` : ""}${r.v2 != null ? (card.kind === "popular" ? ` sellers ${r.v2}` : ` sector ${r.v2}`) : ""}${r.p != null ? ` ₹${r.p.toFixed(2)}` : ""}${r.c != null ? ` ${r.c > 0 ? "+" : ""}${r.c}%` : ""}`).join("; ");
@@ -722,7 +881,7 @@ export function cardRecord(card) {
 
 /** Text as shown while it streams: markers (and a half-typed one) hidden. */
 export function hideChartMarkers(text) {
-  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(/\[\[[^\]]{0,60}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return String(text || "").replace(MARKER_RE, "").replace(ABOUT_RE, "").replace(TABLE_RE, "").replace(HOLDINGS_RE, "").replace(JOURNEY_RE, "").replace(NEXT_RE, "").replace(/\[\[[^\]]{0,270}$/, "").replace(/\n{3,}/g, "\n\n").trimEnd();
 }
 
 /** { text, card } for a finished reply: the first valid marker becomes a card. */
@@ -747,5 +906,10 @@ export function extractChartMarker(text) {
   // [[table]]: the rows of the latest screener or movers lookup.
   if (!card && TABLE_RE.test(String(text || "")) && _lastTable && Date.now() - _lastTable.at < TABLE_KEEP_MS) card = _lastTable.card;
   TABLE_RE.lastIndex = 0;
-  return { text: hideChartMarkers(text), card };
+  // [[holdings]]: the holdings the portfolio lookup returned this turn.
+  if (!card && HOLDINGS_RE.test(String(text || "")) && _lastHoldings && Date.now() - _lastHoldings.at < TABLE_KEEP_MS) card = _lastHoldings.card;
+  HOLDINGS_RE.lastIndex = 0;
+  if (!card && JOURNEY_RE.test(String(text || ""))) card = journeyCard();
+  JOURNEY_RE.lastIndex = 0;
+  return { text: hideChartMarkers(text), card, next: extractNext(text) };
 }

@@ -103,3 +103,19 @@ jobs:
           for d in res.get("divergent") or []:
               print(f"::warning::{d['symbol']}: Yahoo {d['yahoo']} vs NSE close {d['nse_close']} ({d['ratio']}x)")
           PY
+
+      # FII/DII flows and the IPO list for the coach (migration 2026-11-24j).
+      # Separate from the price import: neither step may fail the other.
+      - name: Check out the fetch script
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/market_extras.py
+          sparse-checkout-cone-mode: false
+
+      - name: FII/DII flows and the IPO list
+        if: always()
+        continue-on-error: true
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: python3 scripts/market_extras.py

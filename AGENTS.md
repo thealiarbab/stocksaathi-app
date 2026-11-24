@@ -217,7 +217,31 @@ message, a 5,000-word rulebook, reply checkers that rerun the turn). Rules:
   sector's median P/E), `get_profit_and_loss` (from state: booked and paper
   profit, first in first out, value over time) and
   `get_popular_on_stocksaathi` (RPC `coach_platform_popular`, counts only).
-  Not built, no data source: FII/DII flows, option chains, the IPO pipeline.
+  Since the second pass against all 28 GR-1 screenshots (24 Nov):
+  `get_fii_dii` (RPC `coach_fii_dii`) and `get_ipo_calendar` (RPC
+  `coach_ipo_calendar`), both fed by `scripts/market_extras.py`, which the
+  `nse-eod` workflow runs on a GitHub runner (NSE blocks Vercel) and posts to
+  `/api/admin-ingest-eod` with `kind: "market_extras"` (migration
+  `2026-11-24j`; FII/DII history starts 23 Nov 2026, one row a session);
+  `estimate_charges_and_tax` (in the browser: STT, exchange and SEBI fees,
+  stamp duty, GST, depository fee and capital gains tax on the student's own
+  trades, FY 2026-27 rates in `REAL_COSTS`; re-check them after each Budget).
+  `get_user_portfolio` also returns money put in, each holding's share, the
+  split by sector and totals; `get_profit_and_loss` also returns the same
+  money in the Nifty 50 (`benchmarkPl`) and, after 90 days, the yearly rate
+  (XIRR). Still not built: option chains (the site has no F&O), price alerts
+  and SIPs (the site has neither feature).
+- **Cards the model can ask for:** `[[chart]]`, `[[compare]]`, `[[table]]`,
+  `[[about]]`, `[[holdings]]` (the student's holdings with a total and the
+  sector split; needs `get_user_portfolio` in the same turn) and
+  `[[ask: one | two]]` (up to three follow-up questions shown as buttons
+  under the newest reply; `m.next`). One card per reply.
+- **Chat page layout:** the thread scrolls across the whole pane and the text
+  column is centred inside it with padding (never put `max-width` on
+  `#chat-messages` again: that put the scrollbar mid-page and killed the
+  wheel in the margins). The wheel is forwarded from the top bar and the
+  composer; a letter typed with nothing focused starts a message; Page
+  Up/Down, Home and End move the thread.
   A new lookup needs: the definition and executor in `agent.js`, a label,
   source line and receipt in `thoughtSteps.js`, a mention in BOTH prompts
   (`persona.js` lean brief, `turnSystem.js` tool section) and a replay case.

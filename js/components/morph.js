@@ -58,7 +58,7 @@ function morphNode(o, n) {
     return;
   }
   if (o.hasAttribute("data-card") && o.getAttribute("data-card") === n.getAttribute("data-card")
-      && (o.hasAttribute("data-drawn") || o.classList.contains("ss-card-table"))) return;
+      && (o.hasAttribute("data-drawn") || o.classList.contains("ss-card-table") || o.classList.contains("ss-card-hold") || o.classList.contains("ss-card-journey"))) return;
   if (o.isEqualNode(n)) {
     // Equal markup can still hide a field whose shown value has drifted.
     if (_syncInputs) {

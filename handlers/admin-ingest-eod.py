@@ -27,6 +27,10 @@ With "kind": "status" the body is the exchanges' listing status instead
 A stock that is not active can no longer be traded (trigger on transactions
 and limit_orders); its pending orders are closed and holders are told.
 
+With "kind": "market_extras" the body carries "fii_dii" (daily institutional
+flows) and "ipos" (the IPO list) from scripts/market_extras.py, stored by
+admin_ingest_market_extras() (migration 2026-11-24j).
+
 Auth: Authorization: Bearer <CRON_SECRET> (or ADMIN_TOKEN). Stdlib only.
 """
 
@@ -178,6 +182,13 @@ class handler(BaseHTTPRequestHandler):
         except Exception:
             return self._respond(400, {"ok": False, "error": "bad_json"})
         rows = data.get("rows")
+        if data.get("kind") == "market_extras":
+            # FII/DII flows and the IPO list (scripts/market_extras.py).
+            try:
+                return self._respond(200, _post("rpc/admin_ingest_market_extras", {
+                    "p": {"fii_dii": data.get("fii_dii") or [], "ipos": data.get("ipos") or []}}, timeout=30))
+            except Exception as e:
+                return self._respond(500, {"ok": False, "error": str(e)[:300]})
         if data.get("kind") == "status":
             if not isinstance(rows, list):
                 return self._respond(400, {"ok": False, "error": "need rows"})

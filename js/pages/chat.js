@@ -621,6 +621,13 @@ export function renderChat(main, opts = {}) {
     messagesEl.addEventListener("click", async (e) => {
       const foldBtn = e.target.closest("[data-trace]");
       if (foldBtn) { openTraceSheet(_traces.get(foldBtn.dataset.trace)); return; }
+      const nextQ = e.target.closest("[data-next-q]");
+      if (nextQ) {
+        if (m_pending) return;
+        input.value = nextQ.dataset.nextQ;
+        form.dispatchEvent(new Event("submit"));
+        return;
+      }
       const copyBtn = e.target.closest("[data-copy]");
       if (!copyBtn) return;
       const body = copyBtn.closest(".cc-row")?.querySelector(".msg-body");
@@ -631,11 +638,23 @@ export function renderChat(main, opts = {}) {
         setTimeout(() => { copyBtn.classList.remove("is-done"); copyBtn.lastChild.textContent = "Copy"; }, 1500);
       } catch {}
     });
+    // The wheel scrolls the thread from anywhere in the chat pane: the top
+    // bar, the strip under the thread, the box you type in. Anything that
+    // scrolls by itself (a long draft, a menu) keeps the wheel.
+    const pane = main.querySelector(".cc-main");
+    pane?.addEventListener("wheel", (e) => {
+      if (e.ctrlKey || messagesEl.contains(e.target)) return;
+      for (let n = e.target; n && n !== pane; n = n.parentElement) {
+        if (n.scrollHeight > n.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(n).overflowY)) return;
+      }
+      messagesEl.scrollTop += e.deltaMode === 1 ? e.deltaY * 32 : e.deltaY;
+    }, { passive: true });
     const jump = main.querySelector("#cc-jump");
     messagesEl.addEventListener("scroll", () => {
       const gap = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
       // Scrolled up to read: stop following new text until back at the end.
       messagesEl._follow = gap < 80;
+      pane?.classList.toggle("is-scrolled", messagesEl.scrollTop > 6);
       jump.hidden = gap < 160;
     }, { passive: true });
     jump.addEventListener("click", () => {
@@ -755,6 +774,17 @@ export function renderChat(main, opts = {}) {
       const onShort = (e) => {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); }
         else if (e.shiftKey && e.key === "Escape") { e.preventDefault(); input.focus(); }
+        else if (document.activeElement === document.body && input.isConnected && !document.querySelector(".term-pop-overlay, .cc-modal, .ts-sheet")) {
+          // Nothing is focused: a letter starts a message (as in ChatGPT and
+          // Claude), and the paging keys move the thread.
+          if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && e.key !== " ") input.focus();
+          else if (["PageUp", "PageDown", "Home", "End"].includes(e.key) && messagesEl.isConnected) {
+            e.preventDefault();
+            const page = messagesEl.clientHeight * 0.85;
+            messagesEl.scrollTop = e.key === "Home" ? 0 : e.key === "End" ? messagesEl.scrollHeight
+              : messagesEl.scrollTop + (e.key === "PageDown" ? page : -page);
+          }
+        }
       };
       document.addEventListener("keydown", onShort);
       window.addEventListener("ss:navigate", () => document.removeEventListener("keydown", onShort), { once: true });
@@ -1227,6 +1257,10 @@ function verNav(i) {
   </span>`;
 }
 
+// The reply that just finished, so its follow-up buttons ease in once and
+// never again on a later repaint.
+let _freshReply = null, _freshAt = 0;
+
 function renderBubble(m) {
   const streamAttr = m.streaming ? ` data-streaming="1"` : "";
   const preview = isPreview();
@@ -1269,7 +1303,11 @@ function renderBubble(m) {
     : m.streaming ? `<div class="cc-bubble cc-bot"><span class="msg-body">${statusHtml("Thinking…")}</span></div>` : "";
   if (m.streaming && m.trace) textHtml = `<div class="cc-bubble cc-bot"><span class="msg-body">${liveBotBody(m)}</span></div>`;
   const fold = !m.streaming && m.trace ? foldedTraceHtml(m.trace, rememberTrace(m.trace)) : "";
-  return `<div class="cc-row cc-row-bot"${streamAttr} data-i="${i}"><div class="cc-bot-col">${fold}${m.cardWithText ? textHtml + card : card + textHtml}${actions}</div></div>`;
+  // Tap-to-ask follow-ups, under the newest reply only: an older reply's
+  // suggestions are about a conversation that has moved on.
+  const next = done && Array.isArray(m.next) && m.next.length && chatLog[chatLog.length - 1] === m
+    ? `<div class="cc-next${m === _freshReply && Date.now() - _freshAt < 1600 ? " is-fresh" : ""}" role="group" aria-label="Ask next">${m.next.map((q) => `<button type="button" class="cc-next-q" data-next-q="${escapeAttr(q)}">${escapeHtml(q)}</button>`).join("")}</div>` : "";
+  return `<div class="cc-row cc-row-bot"${streamAttr} data-i="${i}"><div class="cc-bot-col">${fold}${m.cardWithText ? textHtml + card : card + textHtml}${actions}${next}</div></div>`;
 }
 
 // ---- Scrolling -------------------------------------------------------------------
@@ -2203,7 +2241,11 @@ async function sendAndReply(userText) {
     let finalText = (cleanedReply && cleanedReply.trim()) ? cleanedReply : (errorText || "Saathi couldn't answer that. Try rephrasing or asking again.");
     const ex = extractChartMarker(finalText);
     finalText = ex.text || finalText;
-    const chartExtra = ex.card && isPreview() ? { card: ex.card, cardWithText: true } : {};
+    const chartExtra = {
+      ...(ex.card && isPreview() ? { card: ex.card, cardWithText: true } : {}),
+      // Questions to tap next (the [[ask: ...]] marker); shown under the latest reply only.
+      ...(ex.next && ex.next.length ? { next: ex.next } : {}),
+    };
     // Stamp the reply just after ITS question, not when it finished: chats
     // are re-sorted by ts on sync, so a slow answer used to land below a
     // later question's answer.
@@ -2217,6 +2259,7 @@ async function sendAndReply(userText) {
     m_abortController = null;
     restoreForm();
     if (live) {
+      _freshReply = live; _freshAt = Date.now();
       live.trace = freezeTrace(trace);
       live.text = finalText; live.streaming = false; live.status = false; live.ts = replyTs;
       Object.assign(live, chartExtra);

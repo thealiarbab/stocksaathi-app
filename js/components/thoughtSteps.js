@@ -53,6 +53,9 @@ const SUB = {
   compare_stocks: ["Loading fundamentals for the group", "From the fundamentals store"],
   get_profit_and_loss: ["Adding up your trades", "From your trades and holdings"],
   get_popular_on_stocksaathi: ["Counting what students traded", "Practice trades on StockSaathi"],
+  get_fii_dii: ["Loading institutional flows", "NSE's FII and DII figures"],
+  get_ipo_calendar: ["Loading the IPO list", "IPOs announced on NSE"],
+  estimate_charges_and_tax: ["Working out real-world costs", "FY 2026-27 charges and tax rates"],
   get_corporate_actions: ["Loading dividends and splits", "Five years of dividends and splits"],
   get_mutual_fund: ["Searching AMFI's fund list", "NAV from AMFI"],
   screen_stocks: ["Ranking about 3,800 companies", "Ranked from the fundamentals store"],
@@ -95,6 +98,9 @@ function toolLabel(name, a, done) {
     }
     case "get_profit_and_loss": return T("Working out your profit and loss", "Worked out your profit and loss");
     case "get_popular_on_stocksaathi": return T("Checking what students are buying", "Checked what students are buying");
+    case "get_fii_dii": return T("Checking what big investors bought and sold", "Checked what big investors bought and sold");
+    case "get_ipo_calendar": return T("Looking at the IPO list", "Looked at the IPO list");
+    case "estimate_charges_and_tax": return T("Working out charges and tax", "Worked out charges and tax");
     case "get_index": {
       const names = (Array.isArray(a.indices) ? a.indices : [a.indices || a.index]).filter(Boolean).map(String);
       const what = names.length === 1 ? names[0] : names.length ? `${names.length} indices` : "the index";
@@ -164,6 +170,20 @@ function receipt(name, facts) {
     case "get_popular_on_stocksaathi": {
       const top = Array.isArray(facts.results) ? facts.results[0] : null;
       return top ? { text: top.symbol, extra: `${top.buyers} buyers` } : null;
+    }
+    case "get_fii_dii": {
+      const d = Array.isArray(facts.days) ? facts.days[0] : null;
+      const v = d ? Number(d.foreign_net_cr) : NaN;
+      return Number.isFinite(v) ? { text: `Foreign ${v < 0 ? "−" : "+"}₹${Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Cr`, dir: v > 0 ? "up" : v < 0 ? "down" : "" } : null;
+    }
+    case "get_ipo_calendar": {
+      const open = Array.isArray(facts.open_now) ? facts.open_now.length : 0;
+      const soon = Array.isArray(facts.opening_soon) ? facts.opening_soon.length : 0;
+      return { text: `${open} open`, extra: `${soon} soon` };
+    }
+    case "estimate_charges_and_tax": {
+      const v = Number(facts.charges ? facts.charges.total_inr : facts.total_charges_inr);
+      return Number.isFinite(v) ? { text: `${inr(v)} in charges` } : null;
     }
     case "get_index": {
       const top = Array.isArray(facts.results) ? facts.results.find((r) => !r.error) : null;

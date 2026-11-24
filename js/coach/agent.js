@@ -324,6 +324,42 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "get_fii_dii",
+      description:
+        "What foreign investors (FII/FPI) and Indian institutions (DII) bought and sold in the cash market on the latest sessions, in rupees crore, from NSE. Use for 'FII DII data', 'are foreigners buying or selling', 'institutional flows', 'who is selling the market'.",
+      parameters: {
+        type: "object",
+        properties: { days: { type: "number", description: "How many recent sessions, 1 to 30 (default 5)." } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_ipo_calendar",
+      description:
+        "The IPOs NSE has announced: open for applications now, opening soon, and closed in the last month, with dates, price band and whether each is a mainboard or an SME issue. Use for 'upcoming IPOs', 'is any IPO open', 'when does X IPO open', 'recent IPOs'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "estimate_charges_and_tax",
+      description:
+        "What the student's practice trades would have cost with real money in India: the government and exchange charges on each buy and sell (STT, exchange fee, SEBI fee, stamp duty, GST, depository fee) and the capital gains tax on profit booked this financial year. StockSaathi charges nothing; this shows what a real account would take. Use for 'what are the charges', 'brokerage', 'STT', 'how much tax would I pay', 'capital gains tax', 'profit after tax'. Give side and amount_inr to price one made-up trade instead of their history.",
+      parameters: {
+        type: "object",
+        properties: {
+          side: { type: "string", description: "BUY or SELL, for one made-up trade." },
+          amount_inr: { type: "number", description: "Value of that one trade in rupees." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_market_movers",
       description:
         "Top gainers, top losers or most-traded NSE stocks for the latest session in NSE's official end-of-day file (the result says which date). Use for 'top gainers', 'biggest losers', 'what moved today/yesterday', 'most active stocks'.",
@@ -536,6 +572,7 @@ async function execGetUserPortfolio() {
       const curPx = q && q.source !== "synthetic" ? q.pricePaise : h.avgCostPaise;
       holdings.push({
         symbol: sym, name: inst.name, qty: h.qty,
+        sector: inst.sector || null, kind: inst.kind || "EQ",
         avg_cost_inr: +(h.avgCostPaise / 100).toFixed(2),
         current_price_inr: +(curPx / 100).toFixed(2),
         value_inr: +((h.qty * curPx) / 100).toFixed(2),
@@ -570,6 +607,35 @@ async function execGetUserPortfolio() {
     out.data_warning =
       "These figures are corrupt, not real performance. Tell the user their portfolio data looks broken and to contact support. Do NOT present these numbers as their actual holdings, and do NOT explain them as free or zero-cost shares." +
       (suspect.length ? ` Affected: ${suspect.join(", ")}.` : "");
+  }
+  // What GR-1's portfolio answer shows and this lookup did not: the money put
+  // into each holding, its share of the whole, a total, and how the money is
+  // split. Holdings with broken data stay out of every sum.
+  const good = holdings.filter((h) => !suspect.includes(h.symbol));
+  if (good.length) {
+    const worth = good.reduce((a, h) => a + h.value_inr, 0);
+    let put = 0;
+    for (const h of good) {
+      h.invested_inr = +(h.qty * h.avg_cost_inr).toFixed(2);
+      h.share_of_holdings_pct = worth > 0 ? +((h.value_inr / worth) * 100).toFixed(1) : null;
+      put += h.invested_inr;
+    }
+    const split = {};
+    for (const h of good) {
+      const k = h.kind === "MF" ? "Mutual funds" : h.kind === "ETF" ? "ETFs" : (h.sector || "Other");
+      split[k] = (split[k] || 0) + h.value_inr;
+    }
+    const top = good.slice().sort((a, b) => b.value_inr - a.value_inr);
+    out.holdings_summary = {
+      counted: good.length, left_out_for_broken_data: suspect.length,
+      invested_inr: +put.toFixed(2), value_now_inr: +worth.toFixed(2),
+      paper_profit_inr: +(worth - put).toFixed(2),
+      paper_profit_pct: put > 0 ? +(((worth - put) / put) * 100).toFixed(2) : null,
+      cash_share_of_account_pct: worth + out.cash_inr > 0 ? +((out.cash_inr / (worth + out.cash_inr)) * 100).toFixed(1) : null,
+      biggest_3_share_pct: worth > 0 ? +((top.slice(0, 3).reduce((a, h) => a + h.value_inr, 0) / worth) * 100).toFixed(1) : null,
+      split_by_sector_pct: worth > 0 ? Object.entries(split).sort((a, b) => b[1] - a[1]).map(([sector, v]) => ({ sector, pct: +((v / worth) * 100).toFixed(1) })) : [],
+    };
+    out.how_to_show = HOLDINGS_HINT;
   }
   return out;
 }
@@ -783,6 +849,7 @@ async function execScreenStocks(args = {}) {
 // model writes about them instead of retyping them. 24 Nov: a 48-company
 // ranking took 48 price lookups and came back as one paragraph.
 const TABLE_HINT = "The app can draw these rows for the student as a table (rank, company, the ranked figure, price and day move). To show it, put [[table]] on its own line in your reply. When you do, do NOT list the rows yourself: write two to four sentences on what stands out and what the figure means. The rows already carry the last price and that session's move, so do not look prices up again.";
+const HOLDINGS_HINT = "The app can draw these holdings for the student as a card: each holding with the money put in, its value now, the profit and its share of the holdings, a total row, and a bar showing how the money is split by sector. To show it, put [[holdings]] on its own line in your reply. When you do, do NOT list the holdings yourself: say in two to four sentences what stands out (the biggest position, how concentrated it is, what is up or down the most). The card leaves out any holding with broken data and says so.";
 function withTableHint(data) {
   return Array.isArray(data?.results) && data.results.length >= 3 ? { ...data, how_to_show: TABLE_HINT } : data;
 }
@@ -874,6 +941,40 @@ async function execGetProfitAndLoss() {
   // portfolio page without explaining why.
   const leftOut = (pf.holdings || []).filter((h) => !clean.includes(h)).map((h) => h.symbol);
   if (leftOut.length) out.holdings_left_out_of_paper_profit = { symbols: leftOut, why: "Their stored quantity or cost is not believable, so they are not counted. Tell the student which ones were left out." };
+  // Against the Nifty 50 (GR-1 puts the portfolio's XIRR next to the index's):
+  // the same rupees on the same days in the index, with the function the
+  // report card uses, plus the student's own yearly rate once there is enough
+  // history for a yearly figure to mean anything.
+  try {
+    const skip = new Set(leftOut);
+    const mine = tx.filter((t) => t && t.symbol && !skip.has(t.symbol) && t.qty > 0 && t.pricePaise > 0 && (t.side === "BUY" || t.side === "SELL"));
+    const first = mine.find((t) => t.side === "BUY");
+    if (first) {
+      const [{ niftyCloses }, { benchmarkPl }] = await Promise.all([import("../data/indexCloses.js"), import("./reportCardCore.js")]);
+      const bench = benchmarkPl(mine, await niftyCloses(first.ts));
+      if (bench && bench.peakInvestedPaise > 0) {
+        const minePl = mine.reduce((a, t) => a + (t.side === "SELL" ? 1 : -1) * t.qty * t.pricePaise, 0) / 100 + clean.reduce((a, h) => a + h.value_inr, 0);
+        out.against_nifty_50 = {
+          since: dayLabel(first.ts),
+          your_profit_pct: +((minePl / (bench.peakInvestedPaise / 100)) * 100).toFixed(2),
+          same_money_in_nifty_50_pct: +((bench.benchPlPaise / bench.peakInvestedPaise) * 100).toFixed(2),
+          how_to_read: "Every buy is matched with buying the Nifty 50 that day and every sell with selling it. Both figures are profit as a share of the most money that was invested at one time, so they compare like with like. It answers one question: did picking these stocks beat simply owning the index over the same days? One period proves little either way.",
+        };
+      }
+      const now = Date.now();
+      if (now - first.ts >= 90 * 864e5) {
+        const flows = mine.map((t) => ({ t: t.ts, amt: (t.side === "SELL" ? 1 : -1) * t.qty * t.pricePaise / 100 }));
+        flows.push({ t: now, amt: clean.reduce((a, h) => a + h.value_inr, 0) });
+        const f = (r) => flows.reduce((a, x) => a + x.amt / Math.pow(1 + r, (x.t - first.ts) / YEAR), 0);
+        let lo = -0.99, hi = 20;
+        if (f(lo) * f(hi) < 0) {
+          for (let i = 0; i < 90; i++) { const mid = (lo + hi) / 2; if (f(lo) * f(mid) <= 0) hi = mid; else lo = mid; }
+          out.yearly_return_xirr_pct = +(((lo + hi) / 2) * 100).toFixed(2);
+          out.yearly_return_note = "XIRR: the yearly rate that fits when each rupee went in and came out. A few months stretched into a yearly rate looks bigger than it is.";
+        }
+      }
+    }
+  } catch (e) { /* the index series is a nice-to-have; the rest of the answer stands */ }
   // How the whole portfolio's value moved (one point a trading day).
   const hist = (Array.isArray(state.portfolioHistory) ? state.portfolioHistory : [])
     .map((p) => ({ t: Number(p.ts), v: Number(p.valuePaise) })).filter((p) => p.t > 0 && p.v > 0 && p.v < 1e13).sort((a, b) => a.t - b.t);
@@ -888,6 +989,142 @@ async function execGetProfitAndLoss() {
     };
   }
   return out;
+}
+
+// ---- Institutional flows and IPOs (GR-1: "Checking FII/DII Activity", "IPO pipeline") --
+// Both come from NSE through the nightly runner (scripts/market_extras.py).
+async function execGetFiiDii(args = {}) {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Unavailable right now." };
+    const days = Number.isFinite(+args.days) && args.days != null ? Math.min(30, Math.max(1, Math.round(+args.days))) : 5;
+    const { data, error } = await client.rpc("coach_fii_dii", { p_days: days });
+    if (error || !data) return { ok: false, error: "Lookup failed." };
+    if (!Array.isArray(data.days) || !data.days.length) return { ok: false, error: "No institutional flow data has been collected yet." };
+    return data;
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
+async function execGetIpoCalendar() {
+  try {
+    const client = await sb();
+    if (!client) return { ok: false, error: "Unavailable right now." };
+    const { data, error } = await client.rpc("coach_ipo_calendar");
+    if (error || !data) return { ok: false, error: "Lookup failed." };
+    return data;
+  } catch (e) { return { ok: false, error: String(e?.message || e) }; }
+}
+
+// ---- Charges and tax (GR-1: "Pulling Up Your Equity Charges", "Tax and Capital Gains") --
+// A practice account pays none of these, so this is an estimate of what the
+// same trades would cost in a real one. Delivery trades in listed shares,
+// FY 2026-27; checked on 24 Nov 2026 (Budget 2026 left STT on delivery and
+// the capital gains rates unchanged). Rates that depend on the broker are
+// named as such in the result.
+const REAL_COSTS = {
+  stt: 0.001,            // 0.1% of the trade value, on buys and on sells
+  exchange: 0.0000297,   // NSE transaction charge, about 0.00297%
+  sebi: 0.000001,        // Rs 10 per crore
+  stamp: 0.00015,        // 0.015%, on buys only
+  gst: 0.18,             // on brokerage, exchange and SEBI fees
+  depository: 15.34,     // per company, per day shares are sold (broker-specific)
+  stcg: 0.20, ltcg: 0.125, ltcgFree: 125000, cess: 0.04,
+};
+function tradeCosts(side, value) {
+  const c = REAL_COSTS, fees = value * (c.exchange + c.sebi);
+  return {
+    stt: value * c.stt, exchange_and_sebi: fees, gst: fees * c.gst,
+    stamp_duty: side === "BUY" ? value * c.stamp : 0,
+  };
+}
+async function execEstimateChargesAndTax(args = {}) {
+  const r2 = (v) => +Number(v).toFixed(2);
+  const basis = {
+    for: "delivery trades in listed shares and ETFs, FY 2026-27 rates (checked 24 Nov 2026)",
+    stt: "0.1% of the trade value, on every buy and every sell (a government tax)",
+    exchange_fee: "about 0.00297% (NSE's transaction charge; brokers quote it slightly differently)",
+    sebi_fee: "Rs 10 per crore traded",
+    stamp_duty: "0.015% on buys only",
+    gst: "18% on the exchange and SEBI fees (and on brokerage, where there is any)",
+    depository_fee: "about Rs 15 per company on each day you sell it (set by the broker; Rs 15.34 used here)",
+    brokerage: "Rs 0 assumed. Several large brokers charge nothing for delivery trades; others charge up to Rs 20 an order.",
+  };
+  const made = String(args.side || "").toUpperCase();
+  if ((made === "BUY" || made === "SELL") && Number(args.amount_inr) > 0) {
+    const v = Number(args.amount_inr), c = tradeCosts(made, v);
+    const dp = made === "SELL" ? REAL_COSTS.depository : 0;
+    const total = c.stt + c.exchange_and_sebi + c.gst + c.stamp_duty + dp;
+    return {
+      ok: true, one_trade: { side: made, value_inr: r2(v) },
+      stt_inr: r2(c.stt), exchange_and_sebi_fees_inr: r2(c.exchange_and_sebi), gst_inr: r2(c.gst),
+      stamp_duty_inr: r2(c.stamp_duty), depository_fee_inr: r2(dp),
+      total_charges_inr: r2(total), charges_as_pct_of_trade: +((total / v) * 100).toFixed(3),
+      rates_used: basis,
+      note: "An estimate for a real account. StockSaathi itself charges nothing because the money is virtual.",
+    };
+  }
+  const state = getState();
+  if (!state.isAuthed) return { ok: false, error: "User not logged in." };
+  const tx = (Array.isArray(state.transactions) ? state.transactions : [])
+    .filter((t) => t && t.symbol && t.qty > 0 && t.qty <= 1e7 && t.pricePaise > 0 && (t.side === "BUY" || t.side === "SELL"))
+    .slice().sort((a, b) => a.ts - b.ts);
+  const istDay = (ms) => new Date(ms + 19800000).toISOString().slice(0, 10);
+  const now = Date.now(), nowDay = istDay(now);
+  const fyStartYear = Number(nowDay.slice(5, 7)) >= 4 ? Number(nowDay.slice(0, 4)) : Number(nowDay.slice(0, 4)) - 1;
+  const fyStart = `${fyStartYear}-04-01`;
+  const sum = { stt: 0, exchange_and_sebi: 0, gst: 0, stamp_duty: 0 };
+  const sellDays = new Set(), lots = {};
+  let turnover = 0, counted = 0, funds = 0, shortGain = 0, longGain = 0;
+  for (const t of tx) {
+    const inst = getInstrument(t.symbol);
+    const value = (t.qty * t.pricePaise) / 100;
+    const isFund = inst?.kind === "MF";
+    if (isFund) funds++;
+    else {
+      const c = tradeCosts(t.side, value);
+      for (const k of Object.keys(sum)) sum[k] += c[k];
+      if (t.side === "SELL") sellDays.add(`${t.symbol}|${istDay(t.ts)}`);
+      turnover += value; counted++;
+    }
+    // Booked gains, first in first out, for sells in this financial year.
+    const book = lots[t.symbol] || (lots[t.symbol] = []);
+    if (t.side === "BUY") { book.push({ qty: t.qty, px: t.pricePaise, ts: t.ts }); continue; }
+    let left = t.qty;
+    while (left > 1e-9 && book.length) {
+      const lot = book[0], take = Math.min(left, lot.qty);
+      const gain = (take * (t.pricePaise - lot.px)) / 100;
+      if (istDay(t.ts) >= fyStart) { if (t.ts - lot.ts > 365 * 864e5) longGain += gain; else shortGain += gain; }
+      lot.qty -= take; left -= take;
+      if (lot.qty <= 1e-9) book.shift();
+    }
+  }
+  const dp = sellDays.size * REAL_COSTS.depository;
+  const charges = sum.stt + sum.exchange_and_sebi + sum.gst + sum.stamp_duty + dp;
+  // A loss on shares held under a year is set against other gains first.
+  const longNet = longGain + Math.min(0, shortGain);
+  const taxShort = Math.max(0, shortGain) * REAL_COSTS.stcg;
+  const taxLong = Math.max(0, longNet - REAL_COSTS.ltcgFree) * REAL_COSTS.ltcg;
+  const tax = (taxShort + taxLong) * (1 + REAL_COSTS.cess);
+  return {
+    ok: true,
+    trades_counted: counted, value_traded_inr: r2(turnover),
+    charges: {
+      stt_inr: r2(sum.stt), exchange_and_sebi_fees_inr: r2(sum.exchange_and_sebi), gst_inr: r2(sum.gst),
+      stamp_duty_inr: r2(sum.stamp_duty), depository_fees_inr: r2(dp),
+      total_inr: r2(charges), as_pct_of_value_traded: turnover > 0 ? +((charges / turnover) * 100).toFixed(3) : null,
+    },
+    mutual_fund_trades_left_out: funds || undefined,
+    capital_gains_this_financial_year: {
+      financial_year: `1 Apr ${fyStartYear} to 31 Mar ${fyStartYear + 1}`,
+      booked_on_shares_held_up_to_1_year_inr: r2(shortGain),
+      booked_on_shares_held_over_1_year_inr: r2(longGain),
+      estimated_tax_inr: r2(tax),
+      how: "Profit on shares sold within a year of buying is taxed at 20%. Profit on shares held longer is taxed at 12.5%, and only on the part above Rs 1,25,000 in a financial year. 4% cess is added on top. Losses are set against gains.",
+      caveat: "A rough figure. Real tax depends on the person's other income: someone with little or no other income may owe nothing on small gains, and losses can be carried forward. Not tax advice.",
+    },
+    rates_used: basis,
+    note: "These are estimates of what a real account would take. StockSaathi charges nothing because the money is virtual. Show the student how charges grow with the number of trades, not just the rupee total.",
+  };
 }
 
 // ---- What other students traded (GR-1: "most-bought stocks on the platform") --
@@ -1151,6 +1388,9 @@ const EXECUTORS = {
   compare_stocks: execCompareStocks,
   get_profit_and_loss: execGetProfitAndLoss,
   get_popular_on_stocksaathi: execGetPopular,
+  get_fii_dii: execGetFiiDii,
+  get_ipo_calendar: execGetIpoCalendar,
+  estimate_charges_and_tax: execEstimateChargesAndTax,
   get_index: execGetIndex,
   get_corporate_actions: execGetCorporateActions,
   get_mutual_fund: execGetMutualFund,

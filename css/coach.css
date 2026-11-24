@@ -1286,3 +1286,140 @@ a.ss-tb-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2p
 @media (max-width: 340px) { .ss-card-table.no-move { --tb-cols: minmax(0, 1fr) 80px; } }
 
 .ss-card-table .ss-tb-th { white-space: nowrap; }
+
+/* The thread scrolls across the whole pane (owner, 24 Nov 2026: "it's in a
+   box, the wheel does nothing outside it"). The scroller used to be the
+   780px column itself, so its scrollbar sat in the middle of the page and the
+   wheel was dead in the margins. ChatGPT and Claude both scroll the full pane
+   and centre a column inside it; this does the same with padding. The column
+   is exactly as wide as before (740px of text). */
+@media (min-width: 821px) {
+  body.chat-app .cc-messages.chat-messages {
+    max-width: none; margin: 0;
+    padding-inline: max(20px, calc(50% - 370px));
+    scrollbar-gutter: stable both-edges;
+  }
+}
+
+/* [[holdings]] card (chatCards.js holdingsHtml): the student's holdings with
+   money put in, value now, profit, a total, and how the money is split. */
+.ss-card-hold { gap: 12px; }
+.ss-al-wrap { display: grid; gap: 8px; }
+.ss-al { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; }
+.ss-al span { flex: 0 1 var(--w); min-width: 4px; background: var(--c, var(--text-dim)); transform-origin: left center; }
+.ss-al span:nth-child(1), .ss-al-key li:nth-child(1) i { --c: var(--brand); }
+.ss-al span:nth-child(2), .ss-al-key li:nth-child(2) i { --c: var(--accent); }
+.ss-al span:nth-child(3), .ss-al-key li:nth-child(3) i { --c: color-mix(in srgb, var(--brand) 50%, var(--surface-elev)); }
+.ss-al span:nth-child(4), .ss-al-key li:nth-child(4) i { --c: color-mix(in srgb, var(--accent) 50%, var(--surface-elev)); }
+.ss-al span:nth-child(5), .ss-al-key li:nth-child(5) i { --c: var(--text-muted); }
+.ss-al-key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--text-xs); color: var(--text-muted); }
+.ss-al-key li { display: inline-flex; align-items: center; gap: 6px; }
+.ss-al-key i { width: 8px; height: 8px; border-radius: 2px; background: var(--c, var(--text-dim)); }
+.ss-al-key b { font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.ss-hd { display: grid; }
+.ss-hd-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(72px, auto); column-gap: 14px; align-items: center; padding: 8px 6px; margin: 0 -6px; border-radius: 10px; color: inherit; text-decoration: none; }
+.ss-hd-row + .ss-hd-row, .ss-hd-more .ss-hd-row, .ss-hd-more { box-shadow: 0 -1px 0 var(--border); }
+a.ss-hd-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); box-shadow: none; }
+a.ss-hd-row:hover + .ss-hd-row { box-shadow: none; }
+a.ss-hd-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.ss-hd-cols { padding-block: 0 6px; font-size: var(--text-xs); color: var(--text-dim); }
+.ss-hd-co { min-width: 0; }
+.ss-hd-co b, .ss-hd-num b { display: block; font-size: var(--text-sm); font-weight: 600; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-hd-co i, .ss-hd-num i { display: flex; gap: 8px; font-style: normal; font-size: var(--text-xs); color: var(--text-dim); white-space: nowrap; }
+.ss-hd-co i { overflow: hidden; }
+.ss-hd-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ss-hd-num i { justify-content: flex-end; gap: 4px; }
+.ss-hd-num b.up { color: var(--positive); } .ss-hd-num b.down { color: var(--negative); }
+.ss-hd-more summary { cursor: pointer; padding: 9px 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-strong); list-style: none; }
+.ss-hd-more summary::-webkit-details-marker { display: none; }
+.ss-hd-more summary:hover { color: var(--brand); }
+.ss-hd-more[open] summary { display: none; }
+.ss-hd-total { box-shadow: 0 -1px 0 var(--border-strong, var(--border)) !important; padding-top: 10px; }
+.ss-hd-total .ss-hd-co b { font-weight: 800; }
+.ss-card-hold.is-fresh .ss-al span { animation: ssGrow 560ms cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--i, 0) * 70ms + 80ms - var(--el, 0ms)); }
+.ss-card-hold.is-fresh a.ss-hd-row { animation: ssRowIn 340ms cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--i, 0) * 36ms + 260ms - var(--el, 0ms)); }
+@keyframes ssGrow { from { transform: scaleX(0); } }
+@media (max-width: 520px) {
+  .ss-hd-row { column-gap: 10px; }
+  .ss-hd-lbl { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ss-card-hold.is-fresh .ss-al span, .ss-card-hold.is-fresh a.ss-hd-row { animation: none; } }
+
+/* Tap-to-ask follow-ups under the newest reply ([[ask: ...]], chat.js). */
+.cc-next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cc-next-q {
+  max-width: 100%; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+  font: 500 var(--text-sm)/1.35 var(--font-sans); color: var(--text); text-align: left; cursor: pointer;
+  transition: border-color 140ms var(--ease), color 140ms var(--ease), background 140ms var(--ease), transform 140ms var(--ease);
+}
+.cc-next-q:hover { border-color: var(--brand); color: var(--text-strong); background: color-mix(in srgb, var(--brand) 7%, transparent); }
+.cc-next-q:active { transform: scale(.97); }
+.cc-next-q:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .cc-next-q { transition: none; } }
+
+
+/* Small motion and polish (24 Nov 2026). Transitions, not keyframes, wherever
+   a later repaint could replay them. */
+/* A hairline under the top bar once the thread is scrolled. */
+body.chat-app .cc-has-side .cc-head { box-shadow: 0 1px 0 transparent; transition: box-shadow 200ms var(--ease); }
+body.chat-app .cc-main.is-scrolled .cc-head { box-shadow: 0 1px 0 var(--border); }
+/* The thread fades out just above the box you type in. */
+@media (min-width: 821px) {
+  body.chat-app .cc-panel:not(.is-empty) .cc-messages.chat-messages {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  }
+}
+/* Thumbs answer the press. */
+.cc-act[data-fb] svg { transition: transform 200ms cubic-bezier(.3, 1.6, .5, 1); }
+.cc-act[data-fb]:active svg { transform: scale(.8); }
+.cc-act[data-fb].is-on svg { transform: scale(1.1); }
+/* Follow-up buttons ease in once, when the reply lands. */
+.cc-next.is-fresh .cc-next-q { animation: ssRowIn 320ms cubic-bezier(.2, .7, .2, 1) backwards; }
+.cc-next.is-fresh .cc-next-q:nth-child(2) { animation-delay: 70ms; }
+.cc-next.is-fresh .cc-next-q:nth-child(3) { animation-delay: 140ms; }
+/* Rows revealed by "Show the other N" in the holdings card. */
+.ss-hd-more[open] > a.ss-hd-row { animation: ssRowIn 300ms cubic-bezier(.2, .7, .2, 1) backwards; }
+@media (prefers-reduced-motion: reduce) {
+  body.chat-app .cc-has-side .cc-head, .cc-act[data-fb] svg { transition: none; }
+  .cc-next.is-fresh .cc-next-q, .ss-hd-more[open] > a.ss-hd-row { animation: none; }
+}
+
+
+/* [[journey]] card: the account's value since the student started. */
+.ss-card-journey { gap: 12px; }
+.ss-card-journey .ss-tb-sub b { font-weight: 700; }
+.ss-card-journey .ss-tb-sub b.up { color: var(--positive); } .ss-card-journey .ss-tb-sub b.down { color: var(--negative); }
+.ss-jr { display: block; width: 100%; height: 150px; overflow: visible; --jr: var(--positive); }
+.ss-card-journey.is-down .ss-jr { --jr: var(--negative); }
+.ss-jr-line { fill: none; stroke: var(--jr); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.ss-jr-area { fill: color-mix(in srgb, var(--jr) 12%, transparent); stroke: none; }
+.ss-jr circle { fill: var(--surface-elev); stroke: var(--text-dim); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.ss-jr circle.ss-jr-now { fill: var(--jr); stroke: var(--surface-elev); stroke-width: 2; }
+.ss-jr-key { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px 14px; }
+.ss-jr-key dt { font-size: var(--text-xs); color: var(--text-dim); }
+.ss-jr-key dd { margin: 2px 0 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ss-jr-key dd i { display: block; font-style: normal; font-weight: 400; font-size: var(--text-xs); color: var(--text-dim); }
+.ss-card-journey.is-fresh .ss-jr-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ssDraw 900ms cubic-bezier(.3, .6, .2, 1) 80ms forwards; }
+.ss-card-journey.is-fresh .ss-jr-area, .ss-card-journey.is-fresh .ss-jr circle { animation: ssFadeIn 420ms var(--ease) 700ms backwards; }
+@keyframes ssDraw { to { stroke-dashoffset: 0; } }
+@keyframes ssFadeIn { from { opacity: 0; } }
+@media (max-width: 520px) { .ss-jr-key { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ss-jr { height: 130px; } }
+@media (prefers-reduced-motion: reduce) {
+  .ss-card-journey.is-fresh .ss-jr-line { stroke-dasharray: none; stroke-dashoffset: 0; animation: none; }
+  .ss-card-journey.is-fresh .ss-jr-area, .ss-card-journey.is-fresh .ss-jr circle { animation: none; }
+}
+
+
+/* Fold a long card down to its title (chatCards.js FOLD_BTN). */
+.ss-tb-head { position: relative; padding-right: 34px; }
+.ss-fold {
+  position: absolute; top: -5px; right: -6px; width: 32px; height: 32px; display: grid; place-items: center;
+  border: 0; border-radius: 8px; background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.ss-fold:hover { background: color-mix(in srgb, var(--text-muted) 14%, transparent); color: var(--text-strong); }
+.ss-fold:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.ss-fold svg { width: 16px; height: 16px; transition: transform 200ms var(--ease); }
+.ss-card.is-folded .ss-fold svg { transform: rotate(180deg); }
+.ss-card.is-folded > :not(.ss-tb-head), .ss-card.is-folded .ss-tb-sub { display: none; }
+@media (prefers-reduced-motion: reduce) { .ss-fold svg { transition: none; } }
