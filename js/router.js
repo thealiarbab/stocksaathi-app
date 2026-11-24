@@ -13,7 +13,7 @@ import { go, installNavigation, upgradeLegacyHash, NAV_EVENT } from "./navigatio
 import { renderStaticPage, captureBootMain, bootTitleFor, syncBootCompanion, keepBootMain } from "./pages/staticPage.js";
 import { PAGE_TITLES } from "./pageTitles.js";
 import { getInstrument } from "./data/universe.js";
-import { ensureCoachStyles } from "./features/styles.js";
+import { ensureCoachStyles, reloadForNewBuild } from "./features/styles.js";
 
 const DEFAULT_TITLE = PAGE_TITLES["/"] || "StockSaathi";
 const APP_TITLES = {
@@ -369,19 +369,11 @@ export function mountRouter() {
     } catch (err) {
       if (renderSeq !== _routeRenderSeq || location.pathname !== routePath) return;
       console.error(`[router] ${r.name} render failed:`, err);
-      // A page's code that will not download is almost always a tab still
-      // running the previous deploy (24 Oct: chat.js, themedSelect.js).
-      // One reload picks up the new version; the stamp stops a reload loop
-      // when the server really is unreachable.
-      if (/dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(String(err && err.message))) {
-        let last = 0;
-        try { last = Number(sessionStorage.getItem("ss.chunkReload") || 0); } catch {}
-        if (Date.now() - last > 60000) {
-          try { sessionStorage.setItem("ss.chunkReload", String(Date.now())); } catch {}
-          window.location.reload();
-          return;
-        }
-      }
+      // A page's code or styles that will not download is almost always a
+      // tab still running the previous deploy (24 Oct: chat.js,
+      // themedSelect.js; Nov: coach.<hash>.css). One reload picks up the
+      // new version.
+      if (reloadForNewBuild(err)) return;
       // Hotfix50b: surface the actual error message + stack in the UI
       // so we can debug without DevTools. Plain pre-formatted text in a
       // collapsible details element â€” doesn't break the existing layout

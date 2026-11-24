@@ -367,10 +367,15 @@ function render() {
       <div class="coach-embed" id="coach-embed"></div>`;
     root.querySelector("#coach-close-btn").addEventListener("click", () => setSetting("coachPanelOpen", false));
     wireResize(root);
-    Promise.all([import("../pages/chat.js"), import("../features/styles.js").then(st => st.ensureCoachStyles())]).then(([m]) => {
+    const styles = import("../features/styles.js");
+    Promise.all([import("../pages/chat.js"), styles.then(st => st.ensureCoachStyles())]).then(([m]) => {
       const box = root.querySelector("#coach-embed");
       if (box) m.renderChat(box, { embedded: true });
-    }).catch(e => console.warn("[coach] embed failed", e));
+    }).catch(async (e) => {
+      // Tab still on the previous deploy: one reload opens the new build.
+      try { if ((await styles).reloadForNewBuild(e)) return; } catch {}
+      console.warn("[coach] embed failed", e);
+    });
   }
   return;
   // eslint-disable-next-line no-unreachable

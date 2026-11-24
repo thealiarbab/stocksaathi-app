@@ -19,7 +19,7 @@ import { startServerTimeSync } from "./data/serverTime.js";
 import { mountMarketStatusPopover } from "./features/marketStatusPopover.js";
 import { ensureUniverseLoaded } from "./data/universe.js";
 import { upgradeLegacyHash } from "./navigation.js";
-import { ensureCoachStyles, ensureStylesheet } from "./features/styles.js";
+import { ensureCoachStyles, ensureStylesheet, reloadForNewBuild } from "./features/styles.js";
 import { toast } from "./components/toast.js";
 import { captureOpen } from "./features/openTracking.js";
 
@@ -80,6 +80,8 @@ function syncCoachPanel() {
     panel.mountCoachPanel();
   })().catch((error) => {
     coachPanelLoad = undefined;
+    // Tab still on the previous deploy: reload with the panel left open.
+    if (reloadForNewBuild(error)) return;
     console.error("[coach] Failed to load Coach panel:", error);
     setSetting("coachPanelOpen", false);
     toast({ kind: "error", message: "Coach could not load. Please try again." });
