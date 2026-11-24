@@ -1831,8 +1831,8 @@ function statusHtml(text) {
 // user/LLM content can't inject tags), then converts a whitelist of common
 // Gemini-output patterns: **bold**, *italic*, `code`, auto-linked URLs.
 // Paragraph spacing is handled by CSS white-space: pre-wrap on the bubble.
-// Shared markdown renderer body — written once, injected into both
-// chat.js and coachPanel.js by patch-md.py.
+// The markdown renderer. The pop-up shows this same view, so this is the
+// only copy (the pop-up's own copy was removed 25 Nov 2026).
 export function renderMarkdown(text) {
   if (!text) return "";
   const esc = (x) => { const d = document.createElement("div"); d.textContent = String(x ?? ""); return d.innerHTML; };
