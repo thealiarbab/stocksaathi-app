@@ -5422,6 +5422,11 @@ body.chart-fs-open #main { animation: none; transform: none; }
    the browser paints an opaque white canvas behind it; matching schemes
    keeps the canvas transparent around the pill. */
 .auth-google-gis, .auth-google-gis iframe { color-scheme: light; }
+/* Google draws its iframe 20px wider than the width we ask for and pulls it
+   back with -10px side margins (room for its focus ring). The phone-wide
+   `iframe { max-width: 100% }` in main.css shrank it back to the slot, which
+   cut the right edge off and shifted the pill 10px left. */
+.auth-google-gis iframe { max-width: none; }
 .auth-or {
   display: flex; align-items: center; gap: var(--sp-3);
   margin-top: var(--sp-4); color: var(--text-dim); font-size: var(--text-xs);
