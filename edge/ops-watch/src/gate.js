@@ -105,7 +105,10 @@ export function usageNow(u, log, now) {
 
 const WAITING = new Set(["tight", "cap", "blind_cap", "five", "queued", "paused", "nowake", "owner_busy"]);
 // How long after the owner's last prompt the agent leaves the limit to him.
-export const OWNER_QUIET = 45 * 60 * 1000;
+// 10 minutes since 25 Nov 2026 (was 45): the owner moved to a larger plan, so
+// the shared limit no longer needs that much room.
+export const OWNER_QUIET = 10 * 60 * 1000;
+const QUIET_MIN = OWNER_QUIET / 60000;
 
 const pct = (x) => `${Math.round(x)}%`;
 const daysText = (d) => (d >= 1 ? `${Math.round(d * 10) / 10} day(s)` : `${Math.max(1, Math.round(d * 24))} hour(s)`);
@@ -174,7 +177,7 @@ export function decide(g, c) {
     // serious or not. He gets the popup and the mail and decides himself;
     // his OK on the issue still starts it.
     const quietAt = (c.ownerActiveAt || 0) + OWNER_QUIET;
-    if (!g.approvedAt && now < quietAt) return out("hold", "owner_busy", "serious, but you are working in Claude right now: it starts when you have been quiet for 45 minutes, or when you approve it", quietAt);
+    if (!g.approvedAt && now < quietAt) return out("hold", "owner_busy", `serious, but you are working in Claude right now: it starts when you have been quiet for ${QUIET_MIN} minutes, or when you approve it`, quietAt);
     // Only a reading from the last few hours may hold back a serious wake.
     if (recent && Number.isFinite(u.five) && u.five >= 98) return out("hold", "limit_full", "serious, but the 5-hour limit is full", fiveBack, { alert: true });
     if (recent && u.weekly >= 99) return out("hold", "limit_full", "serious, but the weekly limit is used up", Math.min(u.weeklyReset, now + 6 * HOUR), { alert: true });
@@ -188,7 +191,7 @@ export function decide(g, c) {
     // The owner's own Claude sessions and the agent share one limit. While he
     // is working, nothing that is not serious starts; his OK still does.
     const busyUntil = (c.ownerActiveAt || 0) + OWNER_QUIET;
-    if (mode !== "approved" && now < busyUntil) return out("hold", "owner_busy", "you are working in Claude right now: waits until you have been quiet for 45 minutes", busyUntil);
+    if (mode !== "approved" && now < busyUntil) return out("hold", "owner_busy", `you are working in Claude right now: waits until you have been quiet for ${QUIET_MIN} minutes`, busyUntil);
     if (fiveKnown && u.five >= 95) return out("hold", "five", `5-hour limit at ${pct(u.five)}: waits for its reset`, fiveBack);
     if (capped && (c.wakesToday || 0) >= 6) return out("brief", "cap", "6 agent runs today already: waits for tomorrow or your OK", now + HOUR);
     if (now < gapUntil) return out("wait", "gap", "another run started less than 10 minutes ago", gapUntil);
@@ -220,7 +223,7 @@ export function decide(g, c) {
   // stream of sessions.
   if (c.lastSeriousWakeAt && now < c.lastSeriousWakeAt + HOUR) return out("brief", "queued", "an incident is being handled: small fixes wait an hour", c.lastSeriousWakeAt + HOUR);
   if (c.lastSmallWakeAt && now < c.lastSmallWakeAt + 2 * HOUR) return out("brief", "queued", "small fixes run in batches, at most every 2 hours", c.lastSmallWakeAt + 2 * HOUR);
-  if (fiveKnown && u.five >= 85) return out("hold", "five", `5-hour limit at ${pct(u.five)}: waits for its reset`, fiveBack);
+  // The 5-hour hold for small work is the one in start(): 95% (was 85% here until 25 Nov 2026).
   if (!u.known || !u.fresh) {
     if ((c.blindToday || 0) >= 3) return out("brief", "blind_cap", "no limit reading for 36 hours and 3 small fixes already today", now + HOUR);
     return start("small", "blind", "no limit reading for 36 hours: assuming you are away");

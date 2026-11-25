@@ -101,8 +101,9 @@ test("small things: stopped = brief; still happening = weighed against the week"
   assert.equal(decide(G(), C(U(96, 10, 0.5))).act, "brief", "the last 5% of the week is never spent on small things");
 });
 
-test("the 5-hour window holds small work at 85% and a look at 95%", () => {
-  const v = decide(G(), C(U(20, 90)));
+test("the 5-hour window holds small work and a look at 95%, not before", () => {
+  assert.equal(decide(G(), C(U(20, 90))).act, "wake", "90% no longer holds small work");
+  const v = decide(G(), C(U(20, 96)));
   assert.equal(v.act, "hold"); assert.equal(v.next, NOW + 2 * HOUR);
   assert.equal(decide(G({ band: "middle" }), C(U(20, 90))).act, "wake");
   assert.equal(decide(G({ band: "middle" }), C(U(20, 96))).act, "hold");
@@ -389,13 +390,13 @@ test("while the owner is working in Claude, nothing starts the agent, serious or
   const w = makeWorld(); await on(w);
   await setActive(w.env, w.deps);
   await browserError(w, 12);
-  for (let i = 0; i < 40; i++) { w.tick(); await runGate(w.env, w.deps); }
+  for (let i = 0; i < 40; i++) { w.tick(); await setActive(w.env, w.deps); await runGate(w.env, w.deps); }
   assert.equal(w.wakes.length, 0, "a look waits while he is working");
   await threeCrashes(w);
   await runGate(w.env, w.deps);
   assert.equal(w.wakes.length, 0, "serious waits too");
   for (let i = 0; i < 12; i++) { w.tick(); await ingest(w.env, w.deps, { src: "py", events: [crash()] }); await runGate(w.env, w.deps); }
-  assert.equal(w.wakes.length, 1, "once he has been quiet for 45 minutes it starts");
+  assert.equal(w.wakes.length, 1, "once he has been quiet for 10 minutes it starts");
   assert.ok(w.wakes[0].includes("mode=fix"));
 });
 
