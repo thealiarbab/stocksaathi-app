@@ -3731,6 +3731,79 @@ const EV_BOT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|fac
 const EV_ID = /^[A-Za-z0-9_-]{8,40}$/;
 const evRate = new Map();   // ip -> { n, reset }  (per warm instance; a soft cap)
 
+// Which Google network a visit came from, from Google's own published IP
+// lists. Only the label is stored on session_start (props.gnet), never the
+// address, and nothing the page shows depends on it: it exists so a visit
+// during an AdSense review can be found afterwards.
+//   crawler = Googlebot and Google's special crawlers (AdSense's among them)
+//   fetcher = fetches a Google product makes when a person asks it to
+//   gcloud  = Google Cloud, rented by anyone (not proof it is Google)
+//   google  = Google's own network outside Cloud
+const GNET_LISTS = [
+  ["crawler", "https://developers.google.com/static/crawling/ipranges/common-crawlers.json"],
+  ["crawler", "https://developers.google.com/static/crawling/ipranges/special-crawlers.json"],
+  ["fetcher", "https://developers.google.com/static/crawling/ipranges/user-triggered-fetchers.json"],
+  ["fetcher", "https://developers.google.com/static/crawling/ipranges/user-triggered-fetchers-google.json"],
+  ["gcloud", "https://www.gstatic.com/ipranges/cloud.json"],    // checked before goog.json, which contains it
+  ["google", "https://www.gstatic.com/ipranges/goog.json"],
+];
+let gnetNets = null, gnetAt = 0, gnetLoading = null;
+
+function ipBig(ip) {
+  if (!ip) return null;
+  if (ip.includes(".") && !ip.includes(":")) {
+    const p = ip.split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => !(n >= 0 && n <= 255))) return null;
+    return { v6: false, n: BigInt(((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) };
+  }
+  let s = ip.toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  if (s.startsWith("::ffff:") && s.includes(".")) return ipBig(s.slice(7));
+  const [head, tail] = s.includes("::") ? s.split("::") : [s, null];
+  const h = head ? head.split(":") : [], t = tail ? tail.split(":") : [];
+  const groups = tail === null ? h : [...h, ...Array(8 - h.length - t.length).fill("0"), ...t];
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return { v6: true, n: groups.reduce((a, g) => (a << 16n) + BigInt(parseInt(g, 16)), 0n) };
+}
+
+async function gnetLoad() {
+  const nets = [];
+  await Promise.all(GNET_LISTS.map(async ([label, url], order) => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return;
+      for (const p of (await r.json()).prefixes || []) {
+        const cidr = p.ipv4Prefix || p.ipv6Prefix;
+        if (!cidr) continue;
+        const [addr, len] = cidr.split("/");
+        const a = ipBig(addr);
+        if (!a) continue;
+        const width = a.v6 ? 128n : 32n, bits = BigInt(len);
+        nets.push({ order, label, v6: a.v6, net: a.n >> (width - bits), shift: width - bits });
+      }
+    } catch { /* one list failing leaves the others */ }
+  }));
+  nets.sort((x, y) => x.order - y.order);
+  return nets;
+}
+
+async function gnetOf(ip) {
+  const a = ipBig(ip);
+  if (!a) return null;
+  if (!gnetNets || Date.now() - gnetAt > 12 * 3600_000) {
+    gnetLoading = gnetLoading || gnetLoad().then((n) => {
+      if (n.length) { gnetNets = n; gnetAt = Date.now(); }
+      gnetLoading = null;
+    });
+    // Never hold up tracking for long: the first visit after a cold start may go untagged.
+    await Promise.race([gnetLoading, new Promise((res) => setTimeout(res, 1500))]);
+    if (!gnetNets) return null;
+  }
+  for (const n of gnetNets) {
+    if (n.v6 === a.v6 && (a.n >> n.shift) === n.net) return n.label;
+  }
+  return null;
+}
+
 function evClean(v, max = 300) {
   if (v == null) return null;
   const t = typeof v;
@@ -3820,6 +3893,7 @@ async function opEv(req, origin) {
   if (!EV_ID.test(String(vid || "")) || !EV_ID.test(String(sid0 || ""))) return j(400, { error: "bad_ids" }, origin);
   const list = Array.isArray(body.e) ? body.e.slice(0, 80) : [];
   const cc = (req.headers.get("x-vercel-ip-country") || "").slice(0, 2) || null;
+  const gnet = list.some((e) => Array.isArray(e) && e[1] === "session_start") ? await gnetOf(ip).catch(() => null) : null;
   const rows = [];
   for (const e of list) {
     if (!Array.isArray(e)) continue;
@@ -3828,6 +3902,7 @@ async function opEv(req, origin) {
     const ts = Number.isFinite(t) ? Math.min(now, Math.max(now - 2 * 86400_000, t)) : now;
     const pr = evProps(props);
     if (kind === "session_start" && cc) pr.cc = cc;
+    if (kind === "session_start") { if (gnet) pr.gnet = gnet; else delete pr.gnet; }
     rows.push({
       ts: new Date(ts).toISOString(),
       vid, sid: EV_ID.test(String(sid || "")) ? sid : sid0,

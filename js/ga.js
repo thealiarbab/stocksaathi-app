@@ -83,8 +83,22 @@ window.ssAfterLoad = function (fn) {
 (function () {
   var EXACT = { "/": 1, "/stocks": 1, "/portfolio": 1, "/learn-stock-market": 1 };
   var PREFIX = ["/crash-replay", "/learn"]; // the page itself and anything under it
+  // Pages that are only a login form to a visitor who is not signed in.
+  // They carry ads for signed-in users only, so nobody ever gets the ad
+  // script on a screen with no content of ours (Google's rule for ads on
+  // screens without publisher content). Same rule for every visitor.
+  var SIGNED_IN_ONLY = { "/portfolio": 1 };
+  function signedIn() {
+    try {
+      var raw = window.localStorage.getItem("ss.sb.session.v1");
+      if (!raw) return false;
+      var s = JSON.parse(raw);
+      return !!(s && (s.refresh_token || (s.currentSession && s.currentSession.refresh_token)));
+    } catch (e) { return false; }
+  }
   window.ssAdsAllowed = function (path) {
     path = String(path || "/").replace(/\/+$/, "") || "/";
+    if (SIGNED_IN_ONLY[path] && !signedIn()) return false;
     if (EXACT[path]) return true;
     for (var i = 0; i < PREFIX.length; i++) {
       if (path === PREFIX[i] || path.indexOf(PREFIX[i] + "/") === 0) return true;
