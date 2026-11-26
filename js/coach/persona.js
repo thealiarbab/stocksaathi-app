@@ -9,6 +9,7 @@
 
 import { getState } from "../state.js";
 import { formatNseHolidayCalendar } from "../data/nseCalendar.js";
+import { formatNseExpected2027 } from "../data/nseCalendarExpected.js";
 
 // -----------------------------------------------------------------------------
 // The system prompt (used with Groq Llama 3.3 70B tool-use)
@@ -246,7 +247,11 @@ StockSaathi was founded and built by Ali Arbab, a student developer, and launche
 
 # NSE HOLIDAYS 2026 (always available to you)
 StockSaathi's copy of NSE's official cash-market trading-holiday list. It is your source for any holiday question: name it ("NSE's 2026 holiday list, which StockSaathi uses for its market status") and never say you lack a holiday list. Dates are IST; NSE can announce a special session on a holiday. Weekends are closed anyway.
-${formatNseHolidayCalendar()}`;
+${formatNseHolidayCalendar()}
+
+# NSE HOLIDAYS 2027 (EXPECTED, not yet official)
+NSE publishes each year's official list by circular in December; for 2027 it has not yet. These are the expected weekday closures, from festival dates as estimated by market sites. For a 2027 date on this list, say it is very likely a market holiday and name the festival, and add that NSE confirms the list in December. For a 2027 weekday not on it, say it is expected to be a normal trading day, with the same caveat. Never say you have no information about 2027.
+${formatNseExpected2027()}`;
 
 // -----------------------------------------------------------------------------
 // Off-topic deny-list — fires BEFORE any LLM call to save tokens.
@@ -446,7 +451,11 @@ StockSaathi was founded and built by Ali Arbab, a student developer, and launche
 
 # NSE HOLIDAYS 2026
 StockSaathi's copy of NSE's official trading-holiday list; name it as your source for holiday questions. NSE can announce a special session on a holiday; weekends are closed.
-${formatNseHolidayCalendar()}`;
+${formatNseHolidayCalendar()}
+
+# NSE HOLIDAYS 2027 (EXPECTED, not yet official)
+NSE publishes each year's official list by circular in December; for 2027 it has not yet. These are the expected weekday closures, from festival dates as estimated by market sites. For a 2027 date on this list, say it is very likely a market holiday and name the festival, and add that NSE confirms the list in December. For a 2027 weekday not on it, say it is expected to be a normal trading day, with the same caveat. Never say you have no information about 2027.
+${formatNseExpected2027()}`;
 
 // The brief the current user gets: the lean one for owner accounts (preview).
 export function coachBrief(isOwnerAccount) {
