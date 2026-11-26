@@ -355,8 +355,29 @@ export function openHeardPopup({ variant = "onboarding", debug = false } = {}) {
 // Boot hooks (app.js): the admin ?heard_debug=1 preview, and the one-time
 // backfill ask on /portfolio.
 // ---------------------------------------------------------------------------
-const BACKFILL_LS = "ss.heard.backfill.v1";
+// v2 (26 Nov): v1 was set the moment the card opened, so a page that reloaded
+// a second later (new deploy) lost the card and never asked again: 123 of the
+// first 302 asks were never seen. v1 flags are ignored; the server copy
+// (heard_backfill_shown_at) is what stops a repeat.
+const BACKFILL_LS = "ss.heard.backfill.v2";
+const SEEN_MS = 4000;
 let _openNow = false;
+
+// Counts the ask as made only once the card has been on screen, in a visible
+// tab, for SEEN_MS. If it goes first (answered, or the page reloaded) nothing
+// is marked: an answer is saved anyway, and a lost card is asked again.
+function markWhenSeen(uid) {
+  let ms = 0;
+  const step = 500;
+  const t = setInterval(async () => {
+    if (!document.querySelector(".hp-overlay")) { clearInterval(t); return; }
+    if (document.visibilityState === "visible") ms += step;
+    if (ms < SEEN_MS) return;
+    clearInterval(t);
+    try { localStorage.setItem(`${BACKFILL_LS}.${uid}`, "1"); } catch {}
+    try { (await sb())?.rpc("mark_heard_backfill_shown").then(() => {}, () => {}); } catch {}
+  }, step);
+}
 
 export async function heardOnRoute() {
   const user = getState()?.user;
@@ -381,9 +402,7 @@ export async function heardOnRoute() {
     if (seen) return;
     const cfg = await heardConfig();
     if (!cfg.backfill) return;
-    // Marked shown the moment it opens, here and on the profile, so it never repeats.
-    try { localStorage.setItem(`${BACKFILL_LS}.${user.id}`, "1"); } catch {}
-    try { (await sb())?.rpc("mark_heard_backfill_shown").then(() => {}, () => {}); } catch {}
+    markWhenSeen(user.id);
     await openHeardPopup({ variant: "backfill", debug: false });
   } catch (e) {
     console.warn("[heard] route hook skipped:", e?.message || e);
