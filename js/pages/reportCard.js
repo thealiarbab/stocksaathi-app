@@ -28,6 +28,7 @@ import { factText, unlockText, pillarName, pillarCopy, gradeTitle, overallSummar
 import { niftyCloses, cachedNiftyCloses } from "../data/indexCloses.js";
 import { loadActivity, cachedActivity } from "../features/learning.js";
 import { onBackdropClick } from "../components/backdrop.js";
+import { smoothedPl } from "../coach/reportCardWeek.js";
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const hinglish = () => { try { return !!getState()?.settings?.hinglish; } catch { return false; } };
@@ -119,25 +120,41 @@ function buildInput(state, extras) {
   const bench = extras.nifty ? benchmarkPl(trades, extras.nifty) : null;
   const plPaise = getReturnSummary(state).plPaise;
   const sig = extras.activity;      // { weeks, research, curve } from report_card_signals()
+  const now = Date.now();
+  const cashPaise = (state.portfolio?.cashPaise || 0) + getReservedCashPaise(state);
+  const valuePaise = cashPaise + positions.reduce((s, p) => s + p.valuePaise, 0);
   return {
-    now: Date.now(),
+    now,
     accountCreatedAt: createdAtOf(state),
     trades,
     stats: computeTradeStats(tx),
-    portfolio: { cashPaise: (state.portfolio?.cashPaise || 0) + getReservedCashPaise(state), positions },
+    portfolio: { cashPaise, positions },
     activity: sig ? { weeks: sig.weeks } : null,
     activeNow: true,                 // the viewer is in the app this week
     research: sig?.research ?? null,
     curve: sig?.curve ?? null,
     // Only once real prices are in: a holding valued at cost would read as
-    // breaking even.
-    profit: extras.pricesReady ? { plPaise } : null,
+    // breaking even. The score reads the middle of the last five days.
+    profit: extras.pricesReady ? { plPaise, scorePlPaise: smoothedPl(plPaise, valuePaise, sig?.curve, now) } : null,
     market: bench ? { userPlPaise: plPaise, ...bench } : null,
   };
 }
 
 // ---- Page -----------------------------------------------------------------------
 export function renderReportCard(main) {
+  // Owner accounts get the card page (reportCardV4.js) until it is switched on
+  // for everyone; ?rc_old=1 shows them this page.
+  if (isOwner() && !/[?&]rc_old=1/.test(location.search)) {
+    let gone = false;
+    window.addEventListener("ss:navigate", () => { gone = true; }, { once: true });
+    import("./reportCardV4.js").then((m) => { if (!gone) m.renderReportCardV4(main); })
+      .catch((e) => { console.error("[report-card] card page failed to load", e); if (!gone) renderMarkSheet(main); });
+    return;
+  }
+  renderMarkSheet(main);
+}
+
+function renderMarkSheet(main) {
   let alive = true;
   let ready = false;
   shapeShown = false;
@@ -470,7 +487,7 @@ function openPillar(p, { input, rc }) {
   });
 }
 
-function openHow(rc) {
+function openHow(rc, { card = false } = {}) {
   const hi = hinglish();
   const rows = Object.values(rc.pillars).filter((p) => p.state !== "hidden").map((p) => `
     <tr><td>${esc(pillarName(p.key, hi))}</td>
@@ -491,6 +508,11 @@ function openHow(rc) {
       <div class="rc-scale">${scale}</div>
       <p>${T("These cut points come from how StockSaathi students really score: about half sit at B or B+, and an A+ is roughly 1 in 20.",
         "Yeh cut points StockSaathi ke students ke asli score se liye gaye hain: lagbhag aadhe B ya B+ par hain, aur A+ lagbhag 20 me se 1 ko milta hai.")}</p>
+      <p>${T("Results reads the middle value of your last five days, so one sharp day in the market does not move your grade.",
+        "Results pichhle paanch din ka beech ka value padhta hai, isliye market ka ek tez din tumhara grade nahi hilaata.")}${card ? " " + T("A letter is reached at its cut point and kept until you are 2 marks under it, so it does not flip back and forth.",
+        "Letter apne cut point par milta hai aur tab tak rehta hai jab tak tum usse 2 marks neeche na ho, isliye woh aage peeche nahi hota.") : ""}</p>
+      ${card ? `<p>${T("Each of the six parts has its own plating (bronze, silver, gold, platinum), with cut points set for that part: the parts do not spread alike, so one rule for all six would mislead.",
+        "Chhe hisson me har ek ki apni plating hai (bronze, silver, gold, platinum), aur cut points us hisse ke hisaab se hain: saare hisse ek jaise nahi phailte.")}</p>` : ""}
       <p class="rc-note">${T("Only real exchange prices are used. A holding with no live price is counted at what you paid for it.",
         "Sirf asli exchange prices use hote hain. Jis holding ka live price nahi hai woh utne par gini jaati hai jitne me tumne kharidi.")}</p>
       <div class="modal-foot"><button type="button" class="btn btn-primary" data-act="ok">${T("Got it", "Samajh gaya")}</button></div>
@@ -653,3 +675,11 @@ async function fetchAiCard(state, rc, input) {
   }
 }
 
+
+// What the card page (reportCardV4.js) shares with this one: the inputs, the
+// dialogs and Saathi's remarks, so there is one copy of each.
+export const v4Kit = {
+  buildInput, openPillar, openHow, openAiMore, openDialog, closeBtn, renderAiCard, emptyCard,
+  maybeFetchAiCard: (state, rc, input) => maybeFetchAiCard(state, rc, input).then((d) => { if (d) aiCard = d; return d; }),
+  resetAiFor(uid) { if (aiCardUser !== (uid || null)) { aiCard = null; aiCardSignature = null; aiCardUser = uid || null; } },
+};

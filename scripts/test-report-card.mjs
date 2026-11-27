@@ -536,5 +536,89 @@ function clean(x, pathName = "rc") {
   ok("every locked part says what unlocks it", seen.every((rc) => Object.values(rc.pillars).every((p) => p.state !== "locked" || (p.unlock && p.unlock.key))));
 }
 
+// ---- 17. The weekly card: plating per part, the letter that holds, smoothed profit ------
+{
+  const W = await import("../js/coach/reportCardWeek.js");
+  const A = await import("../js/coach/reportCardArt.js");
+
+  // plating per part: each part has its own cut points
+  ok("results 49 is bronze, 50 (break even) is silver", W.partPlating("results", 49) === "bronze" && W.partPlating("results", 50) === "silver");
+  ok("vs Nifty 50 (level with the index) is gold", W.partPlating("market", 50) === "gold" && W.partPlating("market", 49) === "silver");
+  ok("the same marks plate differently by part", W.partPlating("learning", 75) === "platinum" && W.partPlating("discipline", 75) === "bronze");
+  ok("research 25 / 50 / 75", ["bronze", "silver", "gold", "platinum"].join() === [24, 25, 50, 75].map((x) => W.partPlating("research", x)).join());
+  ok("discipline 100 with few trades stops at gold", W.partPlating("discipline", 100, { trades: 8 }) === "gold" && W.partPlating("discipline", 100, { trades: 20 }) === "platinum");
+  ok("a locked part has no plating", W.partPlating("research", null) === null && W.partPlating("nope", 50) === null);
+  ok("every part has three rising cut points", W.PART_KEYS.every((k) => { const c = W.PLATING_CUTS[k]; return c && c.length === 3 && c[0] < c[1] && c[1] < c[2] && c[2] <= 100; }));
+  const np = W.nextPlating("research", 37);
+  ok("next plating: research 37 needs 13 more for gold", np.plating === "gold" && np.at === 50 && np.left === 13);
+  ok("no next plating at the top", W.nextPlating("learning", 90) === null);
+  ok("discipline at 100 with few trades: the next plating waits for trades, not marks", W.nextPlating("discipline", 100, { trades: 8 })?.needsTrades === true);
+
+  // the letter that holds
+  ok("no saved card: the plain letter", W.stickyGrade(68, null) === "B+" && W.stickyGrade(69, undefined) === "A");
+  ok("going up happens at the cut point", W.stickyGrade(69, "B+") === "A" && W.stickyGrade(75, "B") === "A+");
+  ok("going down waits for 2 marks under the cut", W.stickyGrade(68, "A") === "A" && W.stickyGrade(67, "A") === "A" && W.stickyGrade(66, "A") === "B+");
+  ok("a big fall is not held", W.stickyGrade(56, "A") === "B" && W.stickyGrade(30, "A+") === "D");
+  ok("a held letter needs the cut point again once lost", W.stickyGrade(68, "B+") === "B+");
+  ok("an unknown saved letter is ignored", W.stickyGrade(60, "Z") === "B");
+  ok("no score, no letter", W.stickyGrade(null, "A") === null);
+  ok("card plating follows the letter", ["platinum", "gold", "silver", "bronze", "bronze", "plain"].join() === ["A+", "A", "B+", "B", "C", "D"].map(W.cardPlating).join());
+
+  // profit, smoothed
+  const dayIso = (ago) => new Date(NOW + 5.5 * 3600_000 - ago * DAY).toISOString().slice(0, 10);
+  const curve = [[dayIso(4), 1_000_000], [dayIso(3), 1_010_000], [dayIso(2), 1_020_000], [dayIso(1), 1_030_000]];
+  // live value 1,100,000 and live profit 100,000: the saved days read 0, 10k, 20k, 30k
+  ok("the middle of five days", W.smoothedPl(100_000, 1_100_000, curve, NOW) === 20_000);
+  ok("one sharp day does not move it", W.smoothedPl(-400_000, 600_000, curve, NOW) === 10_000);
+  ok("fewer than two saved days: the live figure", W.smoothedPl(100_000, 1_100_000, curve.slice(-1), NOW) === 100_000 && W.smoothedPl(5, 10, null, NOW) === 5);
+  ok("today's own row and stale rows are left out", W.smoothedPl(100_000, 1_100_000, [[dayIso(40), 1], [dayIso(30), 1], [dayIso(0), 1]], NOW) === 100_000);
+  ok("four values: the mean of the middle two", W.smoothedPl(100_000, 1_100_000, curve.slice(-3), NOW) === 25_000);
+  ok("a broken live figure passes through", Number.isNaN(W.smoothedPl(NaN, 1, curve, NOW)));
+  {
+    const base = { now: NOW, trades: [tr(40, "TCS", "BUY", 10, 100_000)], stats: computeTradeStats([]), portfolio: { cashPaise: 0, positions: [] } };
+    const live = core.scoreReportCard({ ...base, profit: { plPaise: 100_000 } }).pillars.results;
+    const smooth = core.scoreReportCard({ ...base, profit: { plPaise: 100_000, scorePlPaise: 0 } }).pillars.results;
+    ok("Results is scored on the smoothed profit", smooth.score < live.score && near(smooth.score, 50, 1), `${live.score} ${smooth.score}`);
+    ok("the sentence still quotes the live profit", smooth.facts[0].plPaise === 100_000);
+  }
+
+  // the week
+  ok("the week starts on Monday, IST", W.weekStartIso(Date.UTC(2026, 10, 13, 6)) === "2026-11-09" && W.weekStartIso(Date.UTC(2026, 10, 15, 18, 0)) === "2026-11-09" && W.weekStartIso(Date.UTC(2026, 10, 15, 18, 45)) === "2026-11-16");
+  const prev = { discipline: 74, results: 57, research: 25, diversification: 62, learning: 61, market: null };
+  const nowP = { discipline: 80, results: 58, research: 37, diversification: 62, learning: 53, market: 47 };
+  const ch = W.changesSince(prev, nowP);
+  ok("changes: 3 marks or more, biggest first, new parts left out", ch.map((c) => c.key).join() === "research,learning,discipline" && ch[1].by === -8);
+  ok("direction of a part", W.dirOf(25, 37) === "up" && W.dirOf(61, 53) === "down" && W.dirOf(57, 58) === "flat" && W.dirOf(null, 47) === "flat");
+  const saved = [{ week: "2026-10-12", score: 49, grade: "C" }, { week: "2026-10-26", score: 57, grade: "B" }, { week: "2026-11-02", score: 60, grade: "B" }, { week: "2026-11-09", score: 62, grade: "B+" }, { week: "2026-11-16", score: 63, grade: "B+" }];
+  const row = W.weekRow(saved, { score: 64, grade: "B+" }, "2026-11-16");
+  ok("week row: three past cards then this week, live", row.length === 4 && row[0].week === "2026-10-26" && row[3].now && row[3].score === 64 && row[2].plating === "silver");
+  ok("this week's saved row is not 'last week'", W.lastWeek(saved, "2026-11-16").week === "2026-11-09" && W.lastWeek([], "2026-11-16") === null);
+  const rd = W.road(64, "B+", saved);
+  ok("the road: far, next, here, done, done", rd.map((r) => r.state).join() === "far,next,here,done,done" && rd[1].left === 5 && rd[3].since === "2026-10-26" && rd[2].since === "2026-11-09");
+  ok("the road at D ends on D", W.road(30, "D", []).slice(-1)[0].grade === "D" && W.road(30, "D", []).filter((r) => r.state === "here").length === 1);
+  ok("the road at A+ has no next", W.road(80, "A+", []).every((r) => r.state !== "next") && W.nextGrade(80, "A+") === null);
+  ok("marks to the next letter", W.nextGrade(64, "B+").grade === "A" && W.nextGrade(64, "B+").left === 5 && W.nextGrade(67, "A").grade === "A+");
+  const rcLike = { pillars: { discipline: { state: "scored", score: 80, key: "discipline" }, results: { state: "scored", score: 58, key: "results" }, research: { state: "locked", key: "research" }, diversification: { state: "scored", score: 62, key: "diversification" }, learning: { state: "scored", score: 53, key: "learning" }, market: { state: "scored", score: 99, key: "market" } } };
+  ok("parts of a card: locked is null", W.partsOf(rcLike).research === null && W.partsOf(rcLike).discipline === 80);
+  ok("standouts leave vs Nifty out", W.standouts(rcLike).best.key === "discipline" && W.standouts(rcLike).low.key === "learning");
+
+  // the drawings
+  const stats = W.PART_KEYS.map((k) => ({ key: k, score: nowP[k], dir: W.dirOf(prev[k], nowP[k]) }));
+  const card = A.cardSvg({ score: 64, grade: "B+", name: `<Aarav & "co">`, plating: "silver", art: { key: "discipline", tier: "gold" }, stats, label: "Report card: 64 marks, grade B+" });
+  ok("the card prints the marks, the letter and all six parts", card.includes(">64<") && card.includes(">B+<") && ["DIS", "RES", "REA", "SPR", "LRN", "NIF"].every((x) => card.includes(">" + x + "<")));
+  ok("the name is escaped", card.includes("&lt;Aarav &amp; &quot;co&quot;&gt;") && !card.includes("<Aarav"));
+  ok("a card being built shows trades, not marks", A.cardSvg({ building: { have: 3, need: 5 }, stats: [] }).includes(">3/5<"));
+  ok("a long name shrinks to fit", /font-size="1[1-4]" font-weight="900" fill="#1C2340">Meenakshi Sundaram Iy/.test(A.cardSvg({ score: 70, grade: "A", name: "Meenakshi Sundaram Iyer", stats: [] })));
+  const mini = A.miniSvg({ score: 69, grade: "A", next: true });
+  ok("the coming card is a dashed outline", mini.includes("stroke-dasharray") && !mini.includes("url(#"));
+  const share = A.shareSvg({ card: { score: 64, grade: "B+", name: "Aarav", plating: "silver", stats }, week: "Week of 16 Nov", nums: [{ big: "B+", small: "this week" }, { big: "64", small: "marks of 100" }], fontCss: "@font-face{font-family:Inter}" });
+  ok("the picture stands alone: its own gradients and font", share.startsWith("<svg xmlns=") && share.includes('id="rcm-silver"') && share.includes('id="achm-silver"') && share.includes("@font-face{font-family:Inter}"));
+  ok("the picture carries no rupee amount", !share.includes("₹") && !/Rs\b/.test(share));
+  const all = card + mini + share + A.miniSvg({ score: 64, grade: "B+", plating: "silver" }) + A.sealSvg("A+", 44, "platinum") + A.sealSvg("D", 44, "plain") + A.starSvg("#123456");
+  ok("no blur, glow or drop shadow anywhere in the art", !/filter=|<filter|blur|drop-shadow|feGaussian/i.test(all));
+  ok("a gradient only on metal: every gradient fill is a plating", (all.match(/url\(#[^)]+\)/g) || []).every((u) => /^url\(#(rcm|achm)-(bronze|silver|gold|platinum)\)$/.test(u)));
+  ok("no broken number in the art", !/NaN|undefined|Infinity/.test(all));
+}
+
 console.log(`report card: ${pass}/${pass + fail} passing`);
 if (fail) process.exit(1);

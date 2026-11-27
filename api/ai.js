@@ -65,6 +65,7 @@ import { scoreReportCard, benchmarkPl } from "../js/coach/reportCardCore.js";
 import { tradesWithFlags } from "../js/coach/biasLedger.js";
 import { factText, unlockText, pillarName, overallSummary } from "../js/coach/reportCardCopy.js";
 import { computeTradeStats, returnSummary } from "../js/data/tradeStats.js";
+import { PART_KEYS, partsOf, partPlating, stickyGrade, smoothedPl, weekStartIso } from "../js/coach/reportCardWeek.js";
 
 export const config = { runtime: "edge" };
 
@@ -1711,6 +1712,7 @@ async function route(req) {
       case "market-mood":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opMarketMood(req, origin);
       case "market-search":       if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opMarketSearch(req, origin);
       case "report-card":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opReportCard(req, origin);
+      case "report-card-week":    if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opReportCardWeek(req, origin);
       case "crash-suggestions":   return await opCrashSuggestions(req, origin);
       case "command":             if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opCommand(req, origin);
       case "history":             return await opHistory(req, origin, url);
@@ -2465,7 +2467,9 @@ async function rcUniverse(req) {
   return _rcUniverse || new Map();
 }
 
-async function adminReportCardV2(req, origin, { userId, profile, portfolio, holdings, transactions, limitOrders }) {
+// The report card of one user, scored on the server by the same modules the
+// page runs. Used by the admin user view and by the weekly saved card.
+async function scoreCardFor(req, origin, { userId, profile, portfolio, holdings, transactions, limitOrders }) {
   const uni = await rcUniverse(req);
   const kindOf = (s) => (String(s).startsWith("MF_") ? "MF" : uni.get(s)?.kind === "ETF" ? "ETF" : "STOCK");
   const tx = (transactions || []).map((t) => ({
@@ -2526,11 +2530,18 @@ async function adminReportCardV2(req, origin, { userId, profile, portfolio, hold
     }
   }
 
+  const now = Date.now();
+  const valuePaise = cash + reserved + positions.reduce((s, p) => s + p.valuePaise, 0);
   const rc = scoreReportCard({
-    now: Date.now(), accountCreatedAt: Date.parse(profile?.created_at || "") || trades[0]?.ts || null,
+    now, accountCreatedAt: Date.parse(profile?.created_at || "") || trades[0]?.ts || null,
     trades, stats, portfolio: { cashPaise: cash + reserved, positions }, activity, research, curve,
-    profit: { plPaise: ret.plPaise }, market,
+    profit: { plPaise: ret.plPaise, scorePlPaise: smoothedPl(ret.plPaise, valuePaise, curve, now) }, market,
   });
+  return { rc, tradesSeen: tx.length };
+}
+
+async function adminReportCardV2(req, origin, who) {
+  const { rc, tradesSeen } = await scoreCardFor(req, origin, who);
   return {
     grade: rc.overall.grade, score: rc.overall.score, state: rc.overall.state,
     summary: overallSummary(rc.overall),
@@ -2538,8 +2549,84 @@ async function adminReportCardV2(req, origin, { userId, profile, portfolio, hold
       key: p.key, name: pillarName(p.key), state: p.state, score: p.state === "scored" ? p.score : null, share: p.share,
       lines: p.state === "scored" ? p.facts.map((f) => factText(f)).filter(Boolean) : p.state === "locked" ? [unlockText(p.key, p.unlock)] : [],
     })),
-    tradesSeen: tx.length, tradesCapped: tx.length >= 500,
+    tradesSeen, tradesCapped: tradesSeen >= 500,
   };
+}
+
+// The signed-in user's id from their Supabase token, or null.
+async function supabaseUserId(req) {
+  const env = globalThis.process?.env || {};
+  const url = env.SUPABASE_URL, anon = env.SUPABASE_ANON_KEY;
+  if (!url || !anon) return null;
+  const hdr = req.headers.get("Authorization") || "";
+  const token = hdr.startsWith("Bearer ") ? hdr.slice(7).trim() : "";
+  if (!token || token.split(".").length !== 3) return null;
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/auth/v1/user`, { headers: { apikey: anon, Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const id = (await res.json())?.id;
+    return typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+  } catch { return null; }
+}
+
+// The weekly card (table report_card_weeks, migration 2026-11-28a). The card
+// page calls this when it opens: the server scores the caller's own card and
+// saves it as this week's row (again at most every 30 minutes), then returns
+// the saved weeks, oldest first. A past week keeps the last card saved in it.
+// Scored here, not taken from the browser, so a later pin for a better grade
+// can be awarded from this table.
+const RC_WEEK_RESCORE_MS = 30 * 60_000;
+async function opReportCardWeek(req, origin) {
+  const userId = await supabaseUserId(req);
+  if (!userId) return j(401, { error: "unauthorized" }, origin);
+  const uid = encodeURIComponent(userId);
+  const wk = weekStartIso();
+  const pr = await sbAdminFetch(`/rest/v1/report_card_weeks?select=week_start,score,grade,parts,scored_at&user_id=eq.${uid}&order=week_start.desc&limit=16`);
+  if (!pr.ok) return j(502, { error: "weeks_unavailable" }, origin);
+  const rows = (await pr.json()).reverse();
+  const cur = rows.find((r) => r.week_start === wk);
+  let state = cur ? "kept" : "none";
+  if (!cur || !(Date.now() - Date.parse(cur.scored_at) < RC_WEEK_RESCORE_MS)) {
+    try {
+      const [profRes, portRes, holdRes, txRes, orderRes] = await Promise.all([
+        sbAdminFetch(`/rest/v1/profiles?select=id,created_at&id=eq.${uid}&limit=1`),
+        sbAdminFetch(`/rest/v1/portfolios?select=cash_paise,starting_cash_paise&user_id=eq.${uid}&limit=1`),
+        sbAdminFetch(`/rest/v1/holdings?select=symbol,qty,avg_cost_paise&user_id=eq.${uid}&limit=500`),
+        sbAdminFetch(`/rest/v1/transactions?select=id,created_at,symbol,side,qty,price_paise,value_paise,bias_flags&user_id=eq.${uid}&order=created_at.desc&limit=1000`),
+        sbAdminFetch(`/rest/v1/limit_orders?select=status,side,reserved_cash&user_id=eq.${uid}&status=eq.pending&limit=500`),
+      ]);
+      const { rc } = await scoreCardFor(req, origin, {
+        userId,
+        profile: profRes.ok ? (await profRes.json())[0] : null,
+        portfolio: portRes.ok ? (await portRes.json())[0] : null,
+        holdings: holdRes.ok ? await holdRes.json() : [],
+        transactions: txRes.ok ? await txRes.json() : [],
+        limitOrders: orderRes.ok ? await orderRes.json() : [],
+      });
+      if (rc.overall.state === "graded" && Number.isFinite(rc.overall.score)) {
+        const parts = partsOf(rc);
+        const platings = {};
+        for (const k of PART_KEYS) platings[k] = parts[k] == null ? null : partPlating(k, parts[k], rc.pillars[k].detail);
+        const row = {
+          user_id: userId, week_start: wk, score: rc.overall.score,
+          grade: stickyGrade(rc.overall.score, rows[rows.length - 1]?.grade), raw_grade: rc.overall.grade,
+          parts, platings, scored_at: new Date().toISOString(),
+        };
+        const up = await sbAdminFetch(`/rest/v1/report_card_weeks?on_conflict=user_id,week_start`, {
+          method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row),
+        });
+        if (up.ok) {
+          const mine = { week_start: wk, score: row.score, grade: row.grade, parts, scored_at: row.scored_at };
+          if (cur) rows[rows.indexOf(cur)] = mine; else rows.push(mine);
+          state = "saved";
+        } else state = "save_failed";
+      } else state = "not_graded";
+    } catch (e) {
+      console.warn("[report-card-week] scoring failed", String(e?.message || e).slice(0, 160));
+      state = "score_failed";
+    }
+  }
+  return j(200, { week: wk, state, weeks: rows.map((r) => ({ week: r.week_start, score: r.score, grade: r.grade, parts: r.parts || {} })) }, origin);
 }
 
 // Mirrors js/pages/reportCard.js:analyzeBehavior — keeps admin aggregation
@@ -3726,6 +3813,7 @@ const EV_KINDS = new Set([
   "achievement",
   "bias_note",   // after-trade note: shown / opened / dismissed / ask (tradeNote.js)
   "heard",       // how-did-you-hear card: shown / more / other_text (heardPopup.js)
+  "report_card", // the card page: story:open / story:N / send:open / send:share / send:save / part:<key> / how
 ]);
 const EV_BOT = /bot|crawl|spider|slurp|headless|lighthouse|pagespeed|preview|facebookexternalhit|whatsapp|python-requests|curl|wget/i;
 const EV_ID = /^[A-Za-z0-9_-]{8,40}$/;

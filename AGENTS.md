@@ -590,6 +590,53 @@ effort for A/B runs; unset to restore the per-op settings.
 - Admin user view (/a, section 11): `adminReportCardV2()` in api/ai.js
   scores the same card server-side with the same modules (prices from
   quote_cache / mf_master, real Nifty via opHistory).
+- **The card page (28 Nov 2026; owner accounts only until the owner flips
+  it).** `reportCard.js` hands over to `js/pages/reportCardV4.js` when
+  `isOwner()` (`?rc_old=1` shows an owner the mark sheet); everyone else
+  still gets the mark sheet above. To roll out: drop the `isOwner()` test
+  at the top of `renderReportCard`. The page is one object, the card
+  (`js/coach/reportCardArt.js`: `cardSvg`, `miniSvg`, `sealSvg`, `shareSvg`),
+  built like an achievement pin (side wall, plating, flat enamel), and
+  around it: What changed this week, Your card week by week, Six parts
+  (a pin per part), The road, then Saathi's remarks and the achievements
+  card. "Play this week's story" is five flat screens built from the card's
+  own facts; "Send my card" makes a 1080x1920 PNG in the browser (the SVG
+  carries Inter as a data: URL; no rupee amounts, no stock names). Design
+  rules the owner set: a gradient only where there is metal, every other
+  surface one flat colour, depth from the solid side wall (no blur, glow or
+  drop shadow), no boxes around sections; `test-report-card.mjs` checks the
+  art for them. The page never rebuilds on a state change: `morphHtml` and
+  ONE click listener on `<main>` (`data-rc="pillar:research"`, `story`,
+  `send`, `how`). Styles are injected by the page (`rc4-` classes).
+- **Week rules (`js/coach/reportCardWeek.js`, pure, tested in Node):**
+  - Plating per part: `PLATING_CUTS` holds each part's own cut points
+    (silver, gold, platinum), set from the marks of the 1,372 accounts with
+    5+ trades so each part splits near a third bronze, a third silver, a
+    quarter gold, under a tenth platinum. One rule for all six misled
+    (Discipline read A+ for 82%, Learning D for 70%). Discipline at 100
+    needs 20 trades for platinum (41% sit on 100). Fixed numbers, like the
+    grade cut points.
+  - The letter holds (`stickyGrade`): it goes up at the cut point and comes
+    down only 2 marks under it, against the letter on the last saved card.
+    Measured: 34% of students saw more than one letter inside 5 days.
+  - Results is scored on the middle of the last five days' profit
+    (`smoothedPl`, passed as `profit.scorePlPaise`; the sentence still
+    quotes the live profit). This one applies to everyone, mark sheet too.
+- **Saved weeks:** table `report_card_weeks` (migration `2026-11-28a`; one
+  row per user per IST week; users read their own, only the server writes).
+  The card page calls `/api/ai?op=report-card-week` with the user's token:
+  the server scores that user with `scoreCardFor` (the same modules; also
+  behind the admin view), saves this week's row (again at most every 30
+  minutes) and returns the weeks. A past week keeps the last card saved in
+  it. Rows exist only for users who opened the card page, so history starts
+  at rollout. A "grade went up" pin can read this table (not built).
+- **Research is timed from when the order was PLACED** (same migration):
+  `_report_card_signals` used the fill time, so the visit on which an
+  after-hours or limit order was placed counted as "looked into it
+  earlier" (99% of matcher-filled buys, 65% of taps). Now
+  `limit_orders.created_at` via `filled_txn_id`: 37% and 65%, one rule for
+  both. The overall spread has NOT been re-measured since; do that before
+  moving a grade cut point.
 - By design: panic/chase/disposition are not judged on orders the matcher
   filled (the decision was made when the order was placed, not at the fill)
   nor on taps before 24 Oct (the old detectors were measured wrong; churning,

@@ -320,6 +320,12 @@ function scoreResults(input) {
   const peak = peakInvested(trades);
   if (!Number.isFinite(pl) || !(peak > 0)) return { state: "pending", facts: [] };
   const r = (pl / peak) * 100;
+  // The score reads the smoothed figure when the caller has one (the middle of
+  // the last five days, reportCardWeek.js smoothedPl): one sharp day used to
+  // flip the letter for a third of students. The sentence still quotes the
+  // live profit, the number the portfolio page shows.
+  const plScore = Number.isFinite(input.profit?.scorePlPaise) ? input.profit.scorePlPaise : pl;
+  const rScore = (plScore / peak) * 100;
   // Risk: the deepest fall of the account's value from an earlier high (daily
   // values, real prices), against the money that was in stocks. Up to 10% is
   // normal market life; past that, half of the extra fall comes off.
@@ -332,7 +338,7 @@ function scoreResults(input) {
   }
   const ddPct = (dropPaise / peak) * 100;
   const riskCut = Math.max(0, ddPct - RESULTS.calmDrawdownPct) * RESULTS.drawdownWeight;
-  const raw = 50 + 50 * Math.tanh((r - riskCut) / RESULTS.scalePct);
+  const raw = 50 + 50 * Math.tanh((rScore - riskCut) / RESULTS.scalePct);
   const firstTs = trades.reduce((m, t) => Math.min(m, t.ts), Infinity);
   const spanDays = Math.max(0, (input.now - firstTs) / DAY);
   const confidence = clamp(spanDays / RESULTS.fullDays, RESULTS.minConfidence, 1);

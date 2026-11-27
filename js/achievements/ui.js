@@ -827,6 +827,7 @@ async function checkNow() {
 // ---------------------------------------------------------------------------
 // Styles (this module only loads for owner accounts, so they ride with it)
 // ---------------------------------------------------------------------------
+export const ensureAchStyle = () => ensureStyle();
 function ensureStyle() {
   if (!document.getElementById("ach-style")) {
     const s = document.createElement("style");
