@@ -16,6 +16,9 @@ import { mountThemedSelect } from "../components/themedSelect.js";
 const e = escapeHtml;
 const st = { data: null, dry: null, busy: false, show: "drafts" };
 const KINDS = ["results_season", "budget", "rbi_policy", "diwali", "month_end", "quarter_end", "fy_start", "other"];
+// A festival is kind "other" with a tag; its pin matches the tag (rule.event_tag).
+const FESTIVALS = ["new_year", "republic_day", "eid", "holi", "independence_day", "ganesh_chaturthi", "dussehra", "dhanteras", "christmas"];
+const KIND_OPTIONS = [...KINDS.map((k) => ({ value: k, label: k })), ...FESTIVALS.map((t) => ({ value: "other:" + t, label: "festival: " + t.replace(/_/g, " ") }))];
 const TIER = ["", "Bronze", "Silver", "Gold", "Platinum"];
 
 export function renderAchievementsTab(host, { adminGet, adminPost }) {
@@ -115,14 +118,14 @@ function paint(root, ctx) {
           ${events.map((v) => `
             <div class="ac-tr ac-ev ${v.ends_on < today ? "ac-past" : ""}">
               <span><b>${e(v.name)}</b>${v.note ? `<br><span class="dim text-xs">${e(v.note)}</span>` : ""}</span>
-              <span class="text-xs">${e(v.kind)}</span>
+              <span class="text-xs">${e(v.tag ? "festival: " + v.tag.replace(/_/g, " ") : v.kind)}</span>
               <span class="tabular text-xs">${e(v.starts_on)}${v.ends_on !== v.starts_on ? " → " + e(v.ends_on) : ""}</span>
               <span class="text-xs">${v.drafted_at ? "drafted" : v.drafts_requested_at ? "asked" : "—"}</span>
               <span>${v.kind !== "month_end" && v.ends_on >= today ? `<button class="btn btn-ghost btn-sm" data-draft="${v.id}">Draft now</button>` : ""}</span>
             </div>`).join("")}
         </div>
         <form class="ac-add">
-          <b>Add a date</b> <span class="dim text-xs">(next year's Budget, RBI meetings, Diwali; seasonal achievements of that kind pick it up)</span>
+          <b>Add a date</b> <span class="dim text-xs">(next year's Budget, RBI meetings, Diwali, a festival; the achievements of that kind pick it up)</span>
           <div class="ac-add-row">
             <input type="hidden" name="kind" value="${e(KINDS[0])}"><div class="select ac-kind" aria-label="Kind of date"></div>
             <input name="name" placeholder="Name, e.g. Union Budget 2028" required maxlength="80">
@@ -174,13 +177,14 @@ function wire(root, ctx) {
   const kindHost = root.querySelector(".ac-kind");
   if (kindHost) mountThemedSelect(kindHost, {
     value: KINDS[0], title: "Kind of date",
-    options: KINDS.map((k) => ({ value: k, label: k })),
+    options: KIND_OPTIONS,
     onChange: (v) => { const inp = root.querySelector('.ac-add input[name="kind"]'); if (inp) inp.value = v; },
   });
   root.querySelector(".ac-add")?.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     const event = Object.fromEntries([...f.entries()].filter(([, v]) => v !== ""));
+    if (String(event.kind || "").includes(":")) [event.kind, event.tag] = event.kind.split(":");
     ctx.act({ action: "add_event", event }, "Date added.");
   });
 }

@@ -25,6 +25,12 @@
 // comeback count only while the user has been active in the last 14 days
 // (ACTIVE_DAYS). Measured on every account: about 9 in 10 "patience" awards
 // were going to accounts that had left, for a holding nobody was watching.
+//
+// Festivals (27 Nov 2026): a festival is a market_events row of kind 'other'
+// with a `tag` (holi, eid, christmas). A calendar family names it with
+// rule.event_tag, so next year's date is one insert. Two calendar pins follow
+// the user, not the table: Market Birthday (the anniversary of the first
+// trade) and IPO Watcher (a company's first week on the exchange).
 // =============================================================================
 
 export const TIERS = [
@@ -40,7 +46,7 @@ export const CATEGORIES = [
   { key: "habit", en: "Good habits", hi: "Achhi aadatein" },
   { key: "learning", en: "Learning", hi: "Seekhna" },
   { key: "streak", en: "Coming back", hi: "Wapas aana" },
-  { key: "season", en: "Market calendar", hi: "Market calendar" },
+  { key: "season", en: "Calendar and festivals", hi: "Calendar aur tyohaar" },
 ];
 
 // A learning streak survives one missed day: two active days at most this
@@ -52,6 +58,14 @@ export const GRACE_WEEKS = 2;
 export const ACTIVE_DAYS = 14;
 // Red Day Calm: a session where the market (Nifty 50 ETF close) fell this much.
 export const RED_DAY_DROP = 0.01;
+// The report card shows a grade from this many trades on (reportCardCore.js).
+export const GRADED_TRADES = 5;
+// In the Green: two saved account values this many calendar days apart still
+// count as one run (a weekend, or a weekend next to a market holiday).
+export const GREEN_GAP_DAYS = 4;
+// IPO Watcher and Market Birthday: the day itself and this many days after.
+export const IPO_WEEK_DAYS = 6;
+export const BIRTHDAY_WEEK_DAYS = 6;
 // Trades flagged by the coach (bias_flags with a severity) start counting
 // on this day; older trades carry no flags at all.
 export const FLAG_ERA = "2026-10-24";
@@ -85,10 +99,22 @@ export const SEASON_METRICS = {
 export const FAMILIES = [
   // ---------------------------------------------------------------- milestones
   {
+    family: "day_one", category: "milestone", emoji: "🎒", metric: "onboarded", tiers: [1],
+    name: { en: "Day One", hi: "Pehla Din" },
+    desc: { en: "Finish setting up your account.", hi: "Apna account set up poora karo." },
+    why: { en: "You joined StockSaathi on {date}.", hi: "Tum {date} ko StockSaathi se jude." },
+  },
+  {
     family: "first_steps", category: "milestone", emoji: "🌱", metric: "trades", tiers: [1],
     name: { en: "First Steps", hi: "Pehla Kadam" },
     desc: { en: "Place your first trade.", hi: "Apna pehla trade karo." },
     why: { en: "Your first trade was {symbol} on {date}.", hi: "Tumhara pehla trade {symbol} tha, {date} ko." },
+  },
+  {
+    family: "first_week", category: "milestone", emoji: "🗓️", metric: "max_hold_days", tiers: [7],
+    name: { en: "One Week In", hi: "Ek Hafta Tika" },
+    desc: { en: "Hold one position for a full week.", hi: "Ek position poore ek hafte hold karo." },
+    why: { en: "You've held {symbol} for {days} days.", hi: "Tumne {symbol} ko {days} din hold kiya." },
   },
   {
     family: "first_profit", category: "milestone", emoji: "🪙", metric: "profit_booked", tiers: [1],
@@ -107,6 +133,28 @@ export const FAMILIES = [
     name: { en: "Basket Buyer", hi: "Basket Wala" },
     desc: { en: "Buy your first mutual fund or ETF: many companies in one go.", hi: "Pehla mutual fund ya ETF kharido: ek saath kai companies." },
     why: { en: "Your first fund was {symbol}.", hi: "Tumhara pehla fund {symbol} tha." },
+  },
+  {
+    family: "first_report_card", category: "milestone", emoji: "📋", metric: "graded_views", tiers: [1],
+    name: { en: "First Mark Sheet", hi: "Pehli Marksheet" },
+    desc: { en: "Open your report card once it shows a grade.", hi: "Report card pe grade aane ke baad use kholo." },
+    why: { en: "You opened your first graded report card.", hi: "Tumne apna pehla grade wala report card khola." },
+  },
+  {
+    family: "campus_tour", category: "milestone", emoji: "🧭", metric: "areas_tried", tiers: [3, 5, 8],
+    tierDesc: [
+      null, null, null,
+      { en: "Try all 8: a stock page, a chart, the watchlist, Saathi, a crash replay, a lesson, the news, your report card.", hi: "Aathon try karo: stock page, chart, watchlist, Saathi, crash replay, lesson, news, report card." },
+    ],
+    name: { en: "Looked Around", hi: "Poora Chakkar" },
+    desc: { en: "Try {t} of these 8: a stock page, a chart, the watchlist, Saathi, a crash replay, a lesson, the news, your report card.", hi: "In 8 mein se {t} try karo: stock page, chart, watchlist, Saathi, crash replay, lesson, news, report card." },
+    why: { en: "Parts of StockSaathi you've tried: {n} of 8.", hi: "Tumne StockSaathi ke 8 mein se {n} hisse try kiye." },
+  },
+  {
+    family: "in_the_green", category: "milestone", emoji: "🟢", metric: "green_days", tiers: [7, 14, 21],
+    name: { en: "In the Green", hi: "Hare Mein" },
+    desc: { en: "Keep your account worth more than the money you started with for {t} market days in a row.", hi: "{t} market din lagataar apna account shuruaati paise se upar rakho." },
+    why: { en: "Your best run above your starting money: {days} market days.", hi: "Shuruaati paise se upar tumhara best: {days} market din lagataar." },
   },
   {
     family: "old_friend", category: "streak", emoji: "🤝", metric: "member_days", tiers: [30, 90, 180],
@@ -351,6 +399,94 @@ export const FAMILIES = [
     desc: { en: "Learn something in the first week of the financial year (April).", hi: "Financial year ke pehle hafte (April) mein kuch seekho." },
     why: { en: "You started {event} by learning.", hi: "Tumne {event} seekh kar shuru kiya." },
   },
+
+  // Festivals and national days: market_events rows of kind 'other' with a
+  // tag. One pin each, earned in any year. Most are market holidays, so the
+  // ask is small: come by and learn one thing. None asks for a trade.
+  {
+    family: "new_year", category: "season", emoji: "🎆", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "new_year", pad: [0, 0], need: { review_views: 1, learn_actions: 1 } },
+    name: { en: "New Year, New Plan", hi: "Naya Saal, Naya Plan" },
+    desc: { en: "In the first week of January, look at your portfolio or report card and learn one new thing.", hi: "January ke pehle hafte mein apna portfolio ya report card dekho aur ek nayi cheez seekho." },
+    why: { en: "You began {event} by looking back and learning something new.", hi: "Tumne {event} peeche dekh kar aur kuch naya seekh kar shuru kiya." },
+  },
+  {
+    family: "republic_day", category: "season", emoji: "🇮🇳", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "republic_day", pad: [0, 1], need: { learn_actions: 1 } },
+    name: { en: "Republic Day", hi: "Gantantra Diwas" },
+    desc: { en: "Learn one thing on Republic Day (26 January) or the day after.", hi: "Republic Day (26 January) ya agle din ek cheez seekho." },
+    why: { en: "You learned something on {event}.", hi: "Tumne {event} pe kuch seekha." },
+  },
+  {
+    family: "eid", category: "season", emoji: "🌙", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "eid", pad: [1, 1], need: { learn_actions: 1 } },
+    name: { en: "Eid Mubarak", hi: "Eid Mubarak" },
+    desc: { en: "Learn one thing around Eid. A good day to think about what you would do with your Eidi.", hi: "Eid ke aas-paas ek cheez seekho. Socho ki apni Eidi ka kya karoge." },
+    why: { en: "You learned something on {event}.", hi: "Tumne {event} pe kuch seekha." },
+  },
+  {
+    family: "holi", category: "season", emoji: "🎨", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "holi", pad: [0, 1], need: { stock_views: 5 } },
+    name: { en: "Holi Colours", hi: "Holi Ke Rang" },
+    desc: { en: "On Holi or the day after, look up 5 different stocks: five colours of the market.", hi: "Holi ya agle din 5 alag stocks dekho: market ke paanch rang." },
+    why: { en: "You looked up 5 stocks on {event}.", hi: "Tumne {event} pe 5 stocks dekhe." },
+  },
+  {
+    family: "independence_day", category: "season", emoji: "🪁", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "independence_day", pad: [0, 1], need: { learn_actions: 1 } },
+    name: { en: "15 August", hi: "Pandrah August" },
+    desc: { en: "Learn one thing on Independence Day or the day after.", hi: "Independence Day ya agle din ek cheez seekho." },
+    why: { en: "You learned something on {event}.", hi: "Tumne {event} pe kuch seekha." },
+  },
+  {
+    family: "ganesh_chaturthi", category: "season", emoji: "🍡", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "ganesh_chaturthi", pad: [0, 1], need: { questions: 1 } },
+    name: { en: "Shubh Aarambh", hi: "Shubh Aarambh" },
+    desc: { en: "Ask Saathi one question on Ganesh Chaturthi or the day after. Every good start begins with a question.", hi: "Ganesh Chaturthi ya agle din Saathi se ek sawaal poocho. Har achhi shuruaat ek sawaal se hoti hai." },
+    why: { en: "You asked Saathi a question on {event}.", hi: "Tumne {event} pe Saathi se sawaal poocha." },
+  },
+  {
+    family: "dussehra", category: "season", emoji: "🏹", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "dussehra", pad: [0, 1], need: { report_views: 1 } },
+    name: { en: "Beat a Bad Habit", hi: "Buri Aadat Ko Harao" },
+    desc: { en: "On Dussehra or the day after, open your report card and pick one habit to beat.", hi: "Dussehra ya agle din apna report card kholo aur ek aadat chuno jise harana hai." },
+    why: { en: "You opened your report card on {event}.", hi: "Tumne {event} pe apna report card khola." },
+  },
+  {
+    family: "dhanteras", category: "season", emoji: "🪙", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "dhanteras", pad: [0, 1], need: { review_views: 1 } },
+    name: { en: "Count Your Dhan", hi: "Dhan Ka Hisaab" },
+    desc: { en: "On Dhanteras or the day after, open your portfolio or report card and see what you hold. No buying needed.", hi: "Dhanteras ya agle din apna portfolio ya report card kholo aur dekho tumhare paas kya hai. Kharidna zaroori nahi." },
+    why: { en: "You took stock of what you hold on {event}.", hi: "Tumne {event} pe apni holdings ka hisaab dekha." },
+  },
+  {
+    family: "christmas", category: "season", emoji: "🎄", metric: "season", tiers: [1],
+    rule: { event_kind: "other", event_tag: "christmas", pad: [0, 1], need: { learn_actions: 1 } },
+    name: { en: "Christmas Break", hi: "Christmas Ki Chhutti" },
+    desc: { en: "Learn one thing on Christmas Day or the day after.", hi: "Christmas ya agle din ek cheez seekho." },
+    why: { en: "You learned something on {event}.", hi: "Tumne {event} pe kuch seekha." },
+  },
+  // These two follow the user, not market_events: the database works out the
+  // window (my_achievements returns it in `calendar`). calNeed is what the
+  // sheet says to do in that window.
+  {
+    family: "ipo_watcher", category: "season", emoji: "🎟️", metric: "ipo_looks", tiers: [1, 3, 6], calNeed: { stock_views: 1 },
+    name: { en: "IPO Watcher", hi: "IPO Pe Nazar" },
+    desc: { en: "Look up {t} new listing{s} in the first week on the exchange. Looking is enough: new listings swing a lot.", hi: "{t} nayi listing ko exchange pe pehle hafte mein dekho. Sirf dekhna kaafi hai: nayi listing bahut hilti hai." },
+    why: { en: "New listings you looked up in their first week: {n} (latest: {company}).", hi: "Tumne {n} nayi listing pehle hafte mein dekhi, sabse nayi {company}." },
+  },
+  {
+    family: "market_birthday", category: "season", emoji: "🧁", metric: "trade_birthdays", tiers: [1, 2, 3], calNeed: { visit_days: 1 },
+    tierDesc: [
+      null,
+      { en: "Come back in the week of your first trade's first anniversary.", hi: "Apne pehle trade ki pehli saalgirah wale hafte mein wapas aao." },
+      { en: "Come back for two of your first trade's anniversaries.", hi: "Apne pehle trade ki do saalgirah pe wapas aao." },
+      { en: "Come back for three of your first trade's anniversaries.", hi: "Apne pehle trade ki teen saalgirah pe wapas aao." },
+    ],
+    name: { en: "Market Birthday", hi: "Market Birthday" },
+    desc: { en: "Come back in the week of your first trade's anniversary, {t} year{s}.", hi: "Apne pehle trade ki saalgirah wale hafte mein wapas aao, {t} saal." },
+    why: { en: "Your first trade was on {date}. Market birthdays you came back for: {n}.", hi: "Tumhara pehla trade {date} ko tha. Tum {n} market birthday pe wapas aaye." },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -464,6 +600,10 @@ export function deliveryPlan(newOnes) {
 //   holdings       [{ symbol, qty, price_paise }]   price = real price now
 //   events         [{ kind, at, subject }] user_events + coach (kind
 //                  'chat_user' / 'crash_end') + learn_events (kind 'learn')
+//   onboarded      true once the account is set up
+//   accountValues  [{ at, total_paise }] saved account value (portfolio_history)
+//   startingCash   paise the account started with
+//   ipos           [{ symbol, company, listing_on }] newly listed companies
 // ---------------------------------------------------------------------------
 const DAY = 86_400_000;
 const EPS = 1e-6;
@@ -730,7 +870,66 @@ export function deriveFacts(input) {
     && eps.some((e) => istDate(e.t0) < d && (e.tEnd == null || istDate(e.tEnd) > d))).sort();
   set("red_days", redCalm.length, redCalm.length ? { n: redCalm.length, date: redCalm[redCalm.length - 1] } : null);
 
+  // -- added 27 Nov 2026: more milestones, and two calendar pins that follow the user
+  set("onboarded", input.onboarded ? 1 : 0, input.onboarded && input.createdAt ? { date: istDate(input.createdAt) } : null);
+  // Looked around: how many of the 8 parts of the site have been used once.
+  // `left` is what the sheet suggests next, easiest first.
+  const rcViews = events.filter((x) => x.kind === "page_view" && x.subject === "/report-card");
+  const areas = [["stocks", sv.size], ["saathi", qd.length], ["lessons", reads.size], ["news", nd.length], ["chart", charts.size], ["watchlist", wl.size], ["report", rcViews.length], ["replay", replays.size]];
+  const areasLeft = areas.filter(([, n]) => !n).map(([k]) => k);
+  set("areas_tried", areas.length - areasLeft.length, { n: areas.length - areasLeft.length, left: areasLeft });
+  // First mark sheet: the report card opened after the 5th trade (when it shows a grade).
+  const t5 = sorted[GRADED_TRADES - 1] ? ms(sorted[GRADED_TRADES - 1].created_at) : null;
+  const graded = t5 == null ? 0 : rcViews.filter((x) => ms(x.at) >= t5).length;
+  set("graded_views", graded, graded ? { n: graded } : null);
+  // In the green: the best run of market days (saved values at most 4 calendar
+  // days apart, so a weekend does not break it) that ended above the starting
+  // money. Like days held, it counts only while the user is around.
+  const lastOfDay = new Map();
+  for (const a of input.accountValues || []) {
+    const d = istDate(a.at);
+    if (!lastOfDay.has(d) || ms(a.at) >= lastOfDay.get(d).at) lastOfDay.set(d, { at: ms(a.at), v: Number(a.total_paise) });
+  }
+  let greenBest = 0, greenRun = 0, greenPrev = null;
+  for (const d of [...lastOfDay.keys()].sort()) {
+    const green = lastOfDay.get(d).v > Number(input.startingCash || 0);
+    greenRun = !green ? 0 : greenRun > 0 && dnum(d) - dnum(greenPrev) <= GREEN_GAP_DAYS ? greenRun + 1 : 1;
+    greenBest = Math.max(greenBest, greenRun);
+    greenPrev = d;
+  }
+  set("green_days", recent ? greenBest : 0, greenBest ? { days: greenBest } : null);
+  // IPO watcher: newly listed companies looked up in their first week on the exchange.
+  const ipoSeen = new Map();
+  for (const x of events) {
+    if (x.kind !== "stock_view" || !x.subject) continue;
+    const ipo = (input.ipos || []).find((i) => i.symbol === x.subject && i.listing_on);
+    if (!ipo) continue;
+    const gap = dnum(istDate(x.at)) - dnum(ipo.listing_on);
+    if (gap < 0 || gap > IPO_WEEK_DAYS) continue;
+    if (!ipoSeen.has(ipo.symbol) || ms(x.at) > ipoSeen.get(ipo.symbol).at) ipoSeen.set(ipo.symbol, { at: ms(x.at), company: ipo.company || ipo.symbol });
+  }
+  const ipoLatest = [...ipoSeen.values()].sort((a, b) => b.at - a.at)[0];
+  set("ipo_looks", ipoSeen.size, ipoLatest ? { n: ipoSeen.size, company: ipoLatest.company } : null);
+  // Market birthday: anniversaries of the first trade with a visit that day
+  // or in the 6 days after.
+  const firstTradeDay = sorted[0] ? istDate(sorted[0].created_at) : null;
+  let bdays = 0;
+  if (firstTradeDay) for (let y = 1; y <= 5; y++) {
+    const a = dnum(addYears(firstTradeDay, y));
+    if (visit.some((d) => dnum(d) >= a && dnum(d) <= a + BIRTHDAY_WEEK_DAYS)) bdays++;
+  }
+  set("trade_birthdays", bdays, firstTradeDay ? { n: bdays, date: firstTradeDay } : null);
+
   return { m, ev };
+}
+
+/** The same day `years` later; 29 Feb becomes 28 Feb in a common year. */
+export function addYears(ymd, years) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const yy = y + years;
+  const leap = (yy % 4 === 0 && yy % 100 !== 0) || yy % 400 === 0;
+  const dd = m === 2 && d === 29 && !leap ? 28 : d;
+  return `${yy}-${String(m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
 }
 
 function sectorOf(i) {
@@ -744,7 +943,7 @@ function floor1(x) { return Math.floor(x * 10) / 10; }
 
 // ---------------------------------------------------------------------------
 // Seasonal: per-event metrics in a window, and the count of events a user
-// took part in. events = [{ id, kind, name, starts_on, ends_on }]
+// took part in. events = [{ id, kind, tag, name, starts_on, ends_on }]
 // ---------------------------------------------------------------------------
 export function windowOf(event, pad = [0, 0]) {
   const a = new Date(Date.parse(event.starts_on + "T00:00:00Z") - (pad[0] || 0) * DAY).toISOString().slice(0, 10);
@@ -791,7 +990,8 @@ export function deriveSeason(input, defs, marketEvents) {
   const season = {};
   for (const d of defs) {
     if (d.metric !== "season" || !d.rule) continue;
-    const evs = (marketEvents || []).filter((e) => (d.rule.event_id ? e.id === d.rule.event_id : e.kind === d.rule.event_kind));
+    const evs = (marketEvents || []).filter((e) => (d.rule.event_id ? e.id === d.rule.event_id
+      : e.kind === d.rule.event_kind && (!d.rule.event_tag || e.tag === d.rule.event_tag)));
     let n = 0, last = null;
     for (const e of evs) {
       const w = windowOf(e, d.rule.pad);

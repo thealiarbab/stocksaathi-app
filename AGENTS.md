@@ -380,7 +380,7 @@ effort for A/B runs; unset to restore the per-op settings.
 - Vercel Firewall: no config existed and the API refused to create one;
   the owner must open the Firewall tab once before rules can be added.
 
-## Achievements (13 Nov 2026, pins and rules v2 on 25 Nov; owner preview, not rolled out)
+## Achievements (13 Nov 2026, pins and rules v2 on 25 Nov, more pins and festivals 27 Nov; owner preview, not rolled out)
 
 - **Tables:** `achievement_defs` (one row per tier: copy EN/Hinglish, `metric`
   + `threshold`, or `metric='season'` + `rule` {event_kind|event_id, pad,
@@ -427,7 +427,7 @@ effort for A/B runs; unset to restore the per-op settings.
   the event kind's colour, a centre picked from the rule's `need`, and the
   event date on a ribbon; nothing to draw per draft. The plating gradients
   (`pinDefs()`) are added to the page once by `ensureStyle()`.
-- **The sheet:** header ("2 of 40 pins", and the tier count), "Next up"
+- **The sheet:** header ("2 of 56 pins", and the tier count), "Next up"
   (`chooseNext`: one thing to finish today, the closest pin, a calendar pin
   that is open or opens within 7 days), "On the way" (`chooseWaiting`: pins
   that only need time, no button) and the board (one grid per group, plus
@@ -458,6 +458,37 @@ effort for A/B runs; unset to restore the per-op settings.
   AI-drafted def, `event_kind`, `event_on`, `need`, `win_from`, `win_to`.
   The rules cost about 30 ms per user; the `authenticated` role's
   statement limit is 8 s.
+- **More pins (27 Nov 2026, migration `2026-11-27a`): 56 families, 131 tiers.**
+  Five milestones: Day One (`onboarded`), One Week In (`max_hold_days` 7,
+  the same clock as Long Termer), First Mark Sheet (`graded_views`: the
+  report card opened after the 5th trade), Looked Around (`areas_tried`
+  3/5/8 of the 8 parts of the site; `ev.areas_tried.left` lists what is
+  still untried, easiest first) and In the Green (`green_days` 7/14/21:
+  the best run of saved daily account values, `portfolio_history`, above
+  the starting money; counted only while active, like days held). Both
+  ladders were set from a count on every account, not guessed.
+  **Festivals:** `market_events.tag` (the kind CHECK cannot be widened
+  without a DROP). A festival is a kind `other` row with a tag, and its
+  pin names it with `rule.event_tag` (new_year, republic_day, eid, holi,
+  independence_day, ganesh_chaturthi, dussehra, dhanteras, christmas): one
+  tier each, earned in any year, never a trade or a holding. Lunar dates
+  for 2027 are the expected ones; fix a row on /a if one moves.
+  **Two calendar pins follow the user, not the table:** IPO Watcher
+  (`ipo_looks`: a stock in `ipo_calendar` looked up within 6 days of its
+  listing) and Market Birthday (`trade_birthdays`: a visit in the week of
+  the first trade's anniversary). `my_achievements()` puts their next
+  window in `calendar` like a dated pin (the IPO one with `name` and
+  `symbol`, which gives the row a "Look it up" button); in core.js they
+  carry `calNeed` for the words.
+  In ui.js a `UNITS` entry may be `{ pick(facts) }` when the step depends
+  on the user (Looked Around picks the next untried part; First Mark Sheet
+  is a to-do only from 5 trades). "On the way" shows one row per clock.
+  An AI-drafted limited edition for a festival takes the festival's
+  colour (`event_tag`). The sheet is ONE element from the first frame: the
+  loading state is drawn inside it and the data swapped in. An opening
+  story is kept in view by `follow()` (one measurement a frame for the
+  length of the slide); do not go back to scrollIntoView on a timer, the
+  story is not full height yet when it fires.
 - **Approval queue:** /a → Achievements. `op=ach-draft` (callLlm, op
   `ach-draft`, recorded in llm_usage) drafts 3-4 seasonal concepts for ONE
   event; `admin_ach_draft_insert` re-checks them (metric whitelist, no trade
@@ -466,9 +497,11 @@ effort for A/B runs; unset to restore the per-op settings.
   21 days when `auto_draft` is on (off until the API op is deployed).
 - **Add a season's dates:** insert into `market_events` (kind
   results_season / budget / rbi_policy / diwali / month_end / quarter_end /
-  fy_start / other, name, starts_on, ends_on), or /a → Achievements →
-  Market calendar → Add a date. Seasonal achievements match by kind, so
-  nothing else changes. Diwali 2027 and Budget 2028 are not in yet.
+  fy_start / other, name, starts_on, ends_on, and `tag` for a festival),
+  or /a → Achievements → Market calendar → Add a date (pick "festival:
+  holi" and the tag is set). Seasonal achievements match by kind, and a
+  festival pin by tag, so nothing else changes. Festival dates are in up
+  to New Year 2028 and Diwali 2027 (expected date); Budget 2028 is not.
 - **Rollout:** /a switch sets rollout = 'all' (server awards everyone on the
   next nightly pass, one summary each), AND lift the `isAdmin`/`isOwner()`
   check in `js/app.js` (and wire the card into the report card if wanted). Preview samples for

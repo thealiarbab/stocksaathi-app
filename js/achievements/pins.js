@@ -131,6 +131,48 @@ const PIN = {
       + ink("M11.5 44H52.5M13.5 50H50.5M22 38V57M32 38V57M42 38V57", C.chai, 1.2)
       + `<rect x="5" y="31" width="54" height="7.5" rx="3.7" fill="${C.chai}"/>`,
   },
+  day_one: {
+    // A school bag on the first day.
+    plate: null,
+    sil: bp.circle() + `<path d="M26 16V9Q26 3.5 32 3.5Q38 3.5 38 9V16" fill="none"/><rect x="12" y="13" width="40" height="45" rx="12"/><path d="${star4(55, 11, 7)}"/>`,
+    art: bp.circle(flat(C.mint)) + `<rect x="12" y="13" width="40" height="45" rx="12" fill="${C.saff}"/><path d="M12 30V25Q12 13 24 13H40Q52 13 52 25V30Z" fill="${C.red}"/>`
+      + ink("M21 25L27 20L32 24L42 17", C.cream, 2.4) + `<rect x="19" y="36" width="26" height="16" rx="5" fill="${C.mari}"/>` + ink("M24 41.5H40", C.chai, 1.6)
+      + `<rect x="30" y="40" width="4" height="6" rx="2" fill="${C.cream}" stroke-width="1.1"/><path d="${star4(55, 11, 7)}" fill="${C.mari}"/>`,
+  },
+  first_week: {
+    // A sand timer: a week of waiting.
+    plate: null,
+    sil: bp.circle() + `<rect x="13" y="4" width="38" height="7.5" rx="3.5"/><rect x="13" y="54" width="38" height="7.5" rx="3.5"/><path d="M18 11H46Q46 24 35 32Q46 40 46 54H18Q18 40 29 32Q18 24 18 11Z"/>`,
+    art: bp.circle(flat(C.mint)) + `<path d="M18 11H46Q46 24 35 32Q46 40 46 54H18Q18 40 29 32Q18 24 18 11Z" fill="#EAF7FF"/>`
+      + `<path d="M23.5 19H40.5Q38.5 25 33.5 29.5H30.5Q25.5 25 23.5 19Z"${flat(C.mari)}/><path d="M20.5 53Q21.5 44.5 32 42Q42.5 44.5 43.5 53Z"${flat(C.mari)}/>` + ink("M32 30V42", C.mari, 1.8)
+      + ink("M22 15Q23 20 26 23", "#fff", 1.6, ` opacity=".8"`) + `<rect x="13" y="4" width="38" height="7.5" rx="3.5" fill="${C.chai}"/><rect x="13" y="54" width="38" height="7.5" rx="3.5" fill="${C.chai}"/>`,
+  },
+  first_report_card: {
+    // A clipboard with the report card's hexagon on it.
+    plate: null,
+    sil: bp.circle() + `<rect x="14" y="9" width="36" height="50" rx="5"/><rect x="24" y="3" width="16" height="11" rx="3.5"/>`,
+    art: bp.circle(flat(C.mint)) + `<rect x="14" y="9" width="36" height="50" rx="5" fill="${C.chai}"/><rect x="18" y="15" width="28" height="40" rx="2" fill="${C.cream}" stroke-width="1.2"/>`
+      + ink("M23 21H35", "#B9B09A", 1.5) + `<path d="M32 26L42 31.8V43.2L32 49L22 43.2V31.8Z" fill="#fff" stroke="#9AA3B5" stroke-width="1.2"/>`
+      + `<path d="M32 29.5L39.5 33.5L37.5 42.5L32 45L25.5 41L27 33Z" fill="${C.mint}" stroke="${C.deep}" stroke-width="1.3"/>`
+      + `<rect x="24" y="3" width="16" height="11" rx="3.5" fill="${C.steel}"/><circle cx="32" cy="7.5" r="1.8"${flat(C.navy)}/>`,
+  },
+  campus_tour: {
+    // A folded map with a marker: looked around the whole place.
+    plate: [3, 47],
+    sil: bp.circle() + `<path d="M7 21L24 14L40 21L57 14V50L40 57L24 50L7 57Z"/><path d="M46 5C52.5 5 57 9.6 57 15.5C57 23 46 33 46 33C46 33 35 23 35 15.5C35 9.6 39.5 5 46 5Z"/>`,
+    art: bp.circle(flat(C.mint)) + `<path d="M7 21L24 14V50L7 57Z" fill="${C.cream}"/><path d="M24 14L40 21V57L24 50Z" fill="#DDF3FF"/><path d="M40 21L57 14V50L40 57Z" fill="${C.cream}"/>`
+      + ink("M12 47Q17 37 24 40T35 35", C.red, 2, ` stroke-dasharray="3.2 2.6"`) + ink("M44 46H52M44 41H50", "#C9BFA5", 1.4)
+      + `<path d="M46 5C52.5 5 57 9.6 57 15.5C57 23 46 33 46 33C46 33 35 23 35 15.5C35 9.6 39.5 5 46 5Z" fill="${C.red}"/><circle cx="46" cy="15.5" r="4" fill="${C.cream}" stroke-width="1.2"/>`,
+  },
+  in_the_green: {
+    // A hot-air balloon: up, and staying up.
+    plate: [21, 52],
+    sil: bp.circle() + `<path d="M32 2C43 2 49 9.5 49 18C49 26.5 40.5 31 37 36H27C23.5 31 15 26.5 15 18C15 9.5 21 2 32 2Z"/><rect x="25.5" y="41" width="13" height="9.5" rx="2.5"/>`,
+    art: bp.circle(flat(C.mint)) + `<circle cx="12.5" cy="40" r="2.2"${flat(C.cream)}/><circle cx="51" cy="43" r="1.8"${flat(C.cream)}/><circle cx="53.5" cy="30" r="1.4"${flat(C.cream)}/>`
+      + `<path d="M32 2C43 2 49 9.5 49 18C49 26.5 40.5 31 37 36H27C23.5 31 15 26.5 15 18C15 9.5 21 2 32 2Z" fill="${C.green}"/>`
+      + `<path d="M32 2C37.5 8 38 25 35 36H29C26 25 26.5 8 32 2Z" fill="${C.cream}" stroke-width="1.2"/>` + ink("M19.5 12Q21.5 8 25 6", "#fff", 2, ` opacity=".7"`)
+      + `<path d="M27.5 36L27 41M36.5 36L37 41" fill="none" stroke-width="1.2"/><rect x="25.5" y="41" width="13" height="9.5" rx="2.5" fill="${C.wood}"/>` + ink("M26 45.5H38", C.chai, 1.2),
+  },
   // ------------------------------------------------------------ coming back
   old_friend: {
     plate: [21, 51],
@@ -389,6 +431,107 @@ const PIN = {
       + ink("M22 23H38M22 27.5H33", C.sky, 1.4) + `</g><g transform="rotate(18 50 34)"><path d="M46 48H54L50 56Z" fill="${C.wood}"/><path d="M48.7 53.4H51.3L50 56Z"${flat(C.navy)}/>`
       + `<rect x="46" y="20" width="8" height="28" fill="${C.mari}"/><rect x="46" y="14" width="8" height="7" rx="2.5" fill="${C.pink}"/><rect x="46" y="20" width="8" height="3"${flat(C.steel)}/></g>`,
   },
+  // ------------------------------------------------------------ festivals
+  new_year: {
+    // A tear-off calendar on 1 January.
+    plate: null,
+    sil: bp.star() + `<rect x="13" y="15" width="38" height="41" rx="6"/><rect x="21" y="9" width="5.5" height="12" rx="2.7"/><rect x="37.5" y="9" width="5.5" height="12" rx="2.7"/><path d="${star4(54, 9, 8)}"/><path d="${star4(9, 14, 5)}"/>`,
+    art: bp.star(flat(C.plum)) + `<rect x="13" y="15" width="38" height="41" rx="6" fill="${C.cream}"/><path d="M13 29V21Q13 15 19 15H45Q51 15 51 21V29Z" fill="${C.saff}"/>`
+      + txt(32, 26.4, "JAN", 7.4, "#fff") + txt(32, 51, "1", 23, C.navy)
+      + `<rect x="21" y="9" width="5.5" height="12" rx="2.7" fill="#fff"/><rect x="37.5" y="9" width="5.5" height="12" rx="2.7" fill="#fff"/>`
+      + `<path d="${star4(54, 9, 8)}" fill="${C.mari}"/><path d="${star4(9, 14, 5)}" fill="${C.pink}"/>`,
+  },
+  republic_day: {
+    // India Gate under a band of saffron, white and green.
+    plate: null,
+    sil: bp.star() + `<path d="M8 20Q32 -2 56 20" fill="none" stroke-width="12.5"/><path d="M17 32H47V58H17Z"/><rect x="14" y="27" width="36" height="6.5" rx="2"/><rect x="24" y="21.5" width="16" height="6.5" rx="2"/>`,
+    art: bp.star(flat(C.plum)) + `<path d="M8 20Q32 -2 56 20" fill="none" stroke-width="12.5"/>`
+      + ink("M6.5 17Q32 -6 57.5 17", C.saff, 3.1) + ink("M8 20Q32 -2 56 20", "#fff", 3.1) + ink("M9.5 23Q32 2 54.5 23", C.green, 3.1)
+      + `<path d="M17 32H47V58H17Z" fill="${C.wood}"/><path d="M26 58V45.5Q26 39 32 39Q38 39 38 45.5V58Z" fill="${C.plum}"/>`
+      + ink("M21.5 37V54M42.5 37V54", C.chai, 1.3) + `<rect x="14" y="27" width="36" height="6.5" rx="2" fill="${C.cream}"/><rect x="24" y="21.5" width="16" height="6.5" rx="2" fill="${C.wood}"/>`,
+  },
+  eid: {
+    // The crescent and star, over an Eidi envelope.
+    plate: null,
+    sil: bp.star() + `<path d="M37 1A19 19 0 1 0 51 31A15 15 0 0 1 37 1Z"/><rect x="29" y="38" width="30" height="20" rx="3.5" transform="rotate(-8 44 48)"/>`,
+    art: bp.star(flat(C.plum)) + `<path d="M37 1A19 19 0 1 0 51 31A15 15 0 0 1 37 1Z" fill="${C.mari}"/><path d="${star5(43, 17, 7.5, 3.3)}" fill="${C.cream}" stroke-width="1.2"/>`
+      + `<g transform="rotate(-8 44 48)"><rect x="29" y="38" width="30" height="20" rx="3.5" fill="${C.green}"/><path d="M29 41.5L44 50L59 41.5" fill="none" stroke-width="1.3"/><circle cx="44" cy="50" r="4" fill="${C.mari}" stroke-width="1.2"/></g>`,
+  },
+  holi: {
+    // A pichkari and a burst of colour.
+    plate: null,
+    sil: bp.star() + `<g transform="rotate(-32 30 38)"><rect x="12" y="32" width="32" height="12" rx="3.5"/><rect x="44" y="35" width="8" height="6" rx="2"/><rect x="2" y="36.2" width="11" height="3.6" rx="1.8"/><rect x="-1" y="31" width="5" height="14" rx="2.5"/></g><circle cx="52" cy="13" r="8"/><circle cx="40" cy="7" r="4.5"/><circle cx="59" cy="27" r="4.5"/>`,
+    art: bp.star(flat(C.plum)) + `<circle cx="52" cy="13" r="8" fill="${C.pink}"/><circle cx="40" cy="7" r="4.5" fill="${C.mint}"/><circle cx="59" cy="27" r="4.5" fill="${C.sky}"/>`
+      + `<circle cx="21" cy="14" r="2.6"${flat(C.mari)}/><circle cx="29" cy="20" r="1.8"${flat(C.pink)}/><circle cx="46" cy="50" r="2.4"${flat(C.mint)}/><circle cx="51" cy="42" r="1.7"${flat(C.saff)}/>`
+      + `<g transform="rotate(-32 30 38)"><rect x="2" y="36.2" width="11" height="3.6" rx="1.8" fill="${C.steel}" stroke-width="1.1"/><rect x="-1" y="31" width="5" height="14" rx="2.5" fill="${C.red}"/>`
+      + `<rect x="12" y="32" width="32" height="12" rx="3.5" fill="${C.mari}"/><rect x="16" y="32" width="6" height="12" fill="${C.saff}" stroke-width="1.1"/><rect x="44" y="35" width="8" height="6" rx="2" fill="${C.saff}"/></g>`,
+  },
+  independence_day: {
+    // A kite in three bands, the way roofs fill with them on 15 August.
+    plate: null,
+    sil: bp.star() + `<path d="M34 2L57 25L34 52L11 25Z" transform="rotate(14 34 28)"/>`,
+    art: bp.star(flat(C.plum)) + ink("M27.5 51Q22 54 25 58T19 64", C.cream, 1.7)
+      + `<g transform="rotate(14 34 28)"><path d="M34 2L49 17H19Z" fill="${C.saff}"/><path d="M19 17H49L57 25L50.2 33H17.8L11 25Z" fill="#fff"/><path d="M17.8 33H50.2L34 52Z" fill="${C.green}"/>`
+      + `<path d="M34 2V52" fill="none" stroke-width="1.1"/><path d="M11 25Q34 15 57 25" fill="none" stroke-width="1.1"/></g>`
+      + `<path d="M22 54.5L27 57.5L23 60Z" fill="${C.mari}" stroke-width="1"/><path d="M27.5 59L22 62L26.5 64.5Z" fill="${C.pink}" stroke-width="1"/>`,
+  },
+  ganesh_chaturthi: {
+    // A modak on a leaf, with a marigold.
+    plate: null,
+    sil: bp.star() + `<ellipse cx="32" cy="52" rx="27" ry="6.5"/><path d="M32 3C34 13 49 20 49 35C49 46 42 52 32 52C22 52 15 46 15 35C15 20 30 13 32 3Z"/><circle cx="52" cy="44" r="7"/>`,
+    art: bp.star(flat(C.plum)) + `<ellipse cx="32" cy="52" rx="27" ry="6.5" fill="${C.green}"/>` + ink("M8 52H56", "#5ED3A0", 1.2)
+      + `<path d="M32 3C34 13 49 20 49 35C49 46 42 52 32 52C22 52 15 46 15 35C15 20 30 13 32 3Z" fill="${C.cream}"/>`
+      + ink("M32 6C31 20 25 34 23 49M32 6C33 20 39 34 41 49M32 8V51M31.5 9C27 20 19.5 30 18 41M32.5 9C37 20 44.5 30 46 41", "#E2C58F", 1.4)
+      + `<circle cx="52" cy="44" r="7" fill="${C.saff}"/><circle cx="52" cy="44" r="3.4" fill="${C.mari}" stroke-width="1.1"/>`,
+  },
+  dussehra: {
+    // A bow and an arrow let fly.
+    plate: null,
+    sil: bp.star() + `<g transform="rotate(-38 32 33)"><path d="M20 6Q54 33 20 60" fill="none" stroke-width="7.4"/><path d="M50 25.5L64 33L50 40.5Z"/><path d="M3 27L11 33L3 39Z"/></g>`,
+    art: bp.star(flat(C.plum)) + `<g transform="rotate(-38 32 33)">` + ink("M20 6V60", C.cream, 1.5) + ln("M20 6Q54 33 20 60", C.saff, 4.2, 7.4)
+      + ln("M7 33H52", C.cream, 2.6, 5.4) + `<path d="M50 25.5L64 33L50 40.5Z" fill="${C.red}"/><path d="M3 27L11 33L3 39Z" fill="${C.mint}"/>`
+      + ink("M33.5 19L35.5 22.5M33.5 47L35.5 43.5", C.mari, 2.4) + `</g>`,
+  },
+  dhanteras: {
+    // Coins counted under a marigold toran.
+    plate: null,
+    sil: bp.star() + `<path d="M5 12Q32 30 59 12" fill="none" stroke-width="9"/><rect x="16" y="33" width="30" height="25" rx="6"/><ellipse cx="31" cy="34" rx="15" ry="6"/><circle cx="51" cy="50" r="8.5"/>`,
+    art: bp.star(flat(C.plum))
+      + `<path d="M20 21L23.5 30L27 22.5Z" fill="${C.green}" stroke-width="1"/><path d="M28.5 23L32 32L35.5 23Z" fill="${C.green}" stroke-width="1"/><path d="M37 22.5L40.5 30L44 21Z" fill="${C.green}" stroke-width="1"/>`
+      + [[7, 13.3, 0], [13.5, 16.8, 1], [20.5, 19.4, 0], [28, 20.8, 1], [36, 20.8, 0], [43.5, 19.4, 1], [50.5, 16.8, 0], [57, 13.3, 1]].map(([x, y, k]) => `<circle cx="${x}" cy="${y}" r="3.9" fill="${k ? C.mari : C.saff}" stroke-width="1.1"/>`).join("")
+      + `<rect x="16" y="33" width="30" height="25" rx="6" fill="${C.mari}"/>` + ink("M16.5 42.5Q31 48 45.5 42.5M16.5 50Q31 55.5 45.5 50", "#B8860B", 1.3)
+      + `<ellipse cx="31" cy="34" rx="15" ry="6" fill="#FFE08A"/>` + ink("M26 34H36", "#B8860B", 1.5)
+      + `<circle cx="51" cy="50" r="8.5" fill="${C.mari}"/><circle cx="51" cy="50" r="5" fill="#FFE08A" stroke-width="1.1"/>`,
+  },
+  christmas: {
+    // A tree with a star on top.
+    plate: null,
+    sil: bp.star() + `<path d="M32 7L42 21H38L47 34H42L52 49H12L22 34H17L26 21H22Z"/><rect x="27.5" y="48" width="9" height="10" rx="2"/><path d="${star5(32, 7, 8, 3.6)}"/>`,
+    art: bp.star(flat(C.plum)) + `<rect x="27.5" y="48" width="9" height="10" rx="2" fill="${C.chai}"/><path d="M32 7L42 21H38L47 34H42L52 49H12L22 34H17L26 21H22Z" fill="${C.green}"/>`
+      + ink("M24.5 26Q32 30 40 25.5M19.5 40Q32 46 45 39.5", C.cream, 1.5)
+      + `<circle cx="30" cy="20" r="2.3" fill="${C.red}" stroke-width="1"/><circle cx="36" cy="33" r="2.5" fill="${C.mari}" stroke-width="1"/><circle cx="25" cy="34.5" r="2.2" fill="${C.sky}" stroke-width="1"/><circle cx="40" cy="45" r="2.5" fill="${C.red}" stroke-width="1"/><circle cx="23" cy="45.5" r="2.3" fill="${C.pink}" stroke-width="1"/>`
+      + `<path d="${star5(32, 7, 8, 3.6)}" fill="${C.mari}"/>`,
+  },
+  // ------------------------------------------------------------ calendar pins that follow the user
+  ipo_watcher: {
+    // An entry ticket: a company's first week on the exchange.
+    plate: [3, 47],
+    sil: bp.star() + `<rect x="4" y="20" width="56" height="27" rx="5" transform="rotate(-9 32 33)"/><path d="${star4(52, 9, 7.5)}"/>`,
+    art: bp.star(flat(C.plum)) + `<g transform="rotate(-9 32 33)"><rect x="4" y="20" width="56" height="27" rx="5" fill="${C.cream}"/><path d="M45 20H55Q60 20 60 25V42Q60 47 55 47H45Z" fill="${C.saff}"/>`
+      + ink("M45 22.5V44.5", C.navy, 1.3, ` stroke-dasharray="2.2 2.2"`) + txt(25, 39, "IPO", 14.5, C.navy) + `<path d="${star5(52.5, 33.5, 5, 2.2)}" fill="#fff" stroke-width="1"/></g>`
+      + `<path d="${star4(52, 9, 7.5)}" fill="${C.mari}"/>`,
+  },
+  market_birthday: {
+    // A cupcake whose candles are a green and a red candlestick.
+    plate: [3, 46],
+    sil: bp.star() + `<path d="M13 41Q13 31 23 30.5Q25 24 32 24Q39 24 41 30.5Q51 31 51 41Z"/><path d="M17 41H47L43 58H21Z"/><rect x="22.5" y="11" width="6" height="16" rx="1.5"/><rect x="35.5" y="15" width="6" height="12" rx="1.5"/>`
+      + `<path d="M25.5 1C28 4 28.5 6.5 25.5 9C22.5 6.5 23 4 25.5 1Z"/><path d="M38.5 5C41 8 41.5 10.5 38.5 13C35.5 10.5 36 8 38.5 5Z"/>`,
+    art: bp.star(flat(C.plum)) + `<path d="M25.5 8V30M38.5 12V30" fill="none" stroke-width="1.3"/><rect x="22.5" y="11" width="6" height="16" rx="1.5" fill="${C.green}"/><rect x="35.5" y="15" width="6" height="12" rx="1.5" fill="${C.red}"/>`
+      + `<path d="M25.5 1C28 4 28.5 6.5 25.5 9C22.5 6.5 23 4 25.5 1Z" fill="${C.mari}" stroke-width="1.1"/><path d="M38.5 5C41 8 41.5 10.5 38.5 13C35.5 10.5 36 8 38.5 5Z" fill="${C.mari}" stroke-width="1.1"/>`
+      + `<path d="M17 41H47L43 58H21Z" fill="${C.wood}"/>` + ink("M24 41L25.5 58M32 41V58M40 41L38.5 58", C.chai, 1.2)
+      + `<path d="M13 41Q13 31 23 30.5Q25 24 32 24Q39 24 41 30.5Q51 31 51 41Z" fill="${C.pink}"/>`
+      + `<circle cx="22" cy="36" r="1.3"${flat("#fff")}/><circle cx="30" cy="31" r="1.3"${flat(C.mari)}/><circle cx="38" cy="35.5" r="1.3"${flat("#fff")}/><circle cx="44" cy="37" r="1.3"${flat(C.mari)}/><circle cx="29" cy="37.5" r="1.3"${flat(C.sky)}/>`,
+  },
 };
 
 // ---- limited editions: built from parts --------------------------------------
@@ -396,6 +539,11 @@ const PIN = {
 const EVENT_COLOUR = {
   rbi_policy: "#0E7C86", budget: "#C2362F", results_season: "#2F5BEA", diwali: C.plum,
   month_end: "#3B4763", quarter_end: "#3B4763", fy_start: "#0E9F7A", other: "#D9488B",
+};
+// A festival (a market event of kind "other" with a tag) has its own colour.
+const FESTIVAL_COLOUR = {
+  new_year: "#3D4FD6", republic_day: "#D2691E", independence_day: "#D2691E", holi: "#D9488B", eid: "#0E8F6A",
+  ganesh_chaturthi: "#C2571A", dussehra: "#B8410F", dhanteras: "#8A6110", christmas: "#B3261E",
 };
 // The centre drawing, by what the pin asks the user to do.
 const MOTIF = {
@@ -446,11 +594,11 @@ export function pinSvg(family, tier = "gold", { size = 60, plate = null, categor
 
 /**
  * A limited-edition pin for an AI-drafted seasonal achievement.
- * kind: the market event's kind; need: what the pin asks for (the rule's
+ * kind: the market event's kind (tag: which festival, if it is one); need: what the pin asks for (the rule's
  * `need`); stamp: the short date printed on the ribbon ("4 Dec 26").
  */
-export function eventPinSvg({ kind = "other", need = null, stamp = "" } = {}, tier = "bronze", { size = 60, label = "" } = {}) {
-  const colour = EVENT_COLOUR[kind] || EVENT_COLOUR.other;
+export function eventPinSvg({ kind = "other", tag = null, need = null, stamp = "" } = {}, tier = "bronze", { size = 60, label = "" } = {}) {
+  const colour = FESTIVAL_COLOUR[tag] || EVENT_COLOUR[kind] || EVENT_COLOUR.other;
   const s = String(stamp || "").slice(0, 10);
   const sil = bp.star() + (s ? `<path d="${RIBBON}"/>` : "");
   const art = bp.star(flat(colour)) + (kind === "diwali" ? `<path d="${star4(14, 22, 3.2)}"${flat(C.mari)}/><path d="${star4(50, 22, 3.2)}"${flat(C.mari)}/>` : "")

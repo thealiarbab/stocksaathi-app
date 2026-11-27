@@ -27,7 +27,7 @@ import { sb } from "../db/supabase.js";
 import { logEvent } from "../features/telemetry.js";
 import { isOwner } from "../features/preview.js";
 import { onBackdropClick } from "../components/backdrop.js";
-import { CATEGORIES, FAMILIES, TIERS, fill, progressFor, deliveryPlan } from "./core.js";
+import { CATEGORIES, FAMILIES, TIERS, GRADED_TRADES, fill, progressFor, deliveryPlan } from "./core.js";
 import { pinDefs, pinSvg, eventPinSvg, hasPin } from "./pins.js";
 
 const AUTO_HIDE_MS = 9_000;
@@ -103,7 +103,7 @@ function medal(def, { size = "md", locked = false } = {}) {
   const px = PIN_PX[size] || 44;
   const tierKey = TIERS[def.tier]?.key || "bronze";
   const svg = def.source === "ai" && !hasPin(def.family)
-    ? eventPinSvg({ kind: def.event_kind, need: def.need, stamp: def.event_on ? stampOf(def.event_on) : "" }, tierKey, { size: px })
+    ? eventPinSvg({ kind: def.event_kind, tag: def.event_tag, need: def.need, stamp: def.event_on ? stampOf(def.event_on) : "" }, tierKey, { size: px })
     : pinSvg(def.family, def.tiers > 1 || def.tier > 1 ? tierKey : "gold", { size: px, plate: plateOf(def), category: def.category });
   return `<span class="ach-pin ach-${size}${locked ? " is-locked" : ""}" aria-hidden="true">${svg}</span>`;
 }
@@ -253,6 +253,18 @@ const pl = (n) => (n === 1 ? "" : "s");
 // perDay: at most one step a day (or week, or month).
 // session: how many steps are still a fair "finish it today".
 const BROWSE = ["Browse stocks", "Stocks dekho"];
+const REPORT = ["Open report card", "Report card kholo"];
+// The 8 parts of the site that Looked Around counts.
+const AREAS = {
+  stocks: { route: "/stocks", cta: BROWSE, en: "look up a stock", hi: "ek stock dekho" },
+  saathi: { route: "/chat", cta: ["Ask Saathi", "Saathi se poocho"], en: "ask Saathi a question", hi: "Saathi se ek sawaal poocho" },
+  lessons: { route: "/learn", cta: ["Open lessons", "Lessons kholo"], en: "read a lesson", hi: "ek lesson padho" },
+  news: { route: "/news", cta: ["Read the news", "News padho"], en: "open a news story", hi: "ek khabar kholo" },
+  chart: { route: "/stocks", cta: BROWSE, en: "use the chart on a stock page", hi: "kisi stock ka chart dekho" },
+  watchlist: { route: "/stocks", cta: BROWSE, en: "add a stock to your watchlist", hi: "ek stock watchlist mein daalo" },
+  report: { route: "/report-card", cta: REPORT, en: "open your report card", hi: "apna report card kholo" },
+  replay: { route: "/crash-replay", cta: ["Open crash replays", "Crash replay kholo"], en: "finish a crash replay", hi: "ek crash replay poora karo" },
+};
 const UNITS = {
   trades: { kind: "do", buy: true, route: "/stocks", cta: BROWSE, left: () => ["Place your first trade", "Apna pehla trade karo"] },
   limit_fills: { kind: "do", buy: true, route: "/stocks", cta: BROWSE, left: (n) => [`${n} more limit order${pl(n)} to get filled at your price`, `${n} aur limit order apne daam pe fill karwao`] },
@@ -276,19 +288,34 @@ const UNITS = {
   max_hold_days: { kind: "wait", unit: (n) => [`day${pl(n)}`, "din"], held: true },
   fund_hold_days: { kind: "wait", unit: (n) => [`day${pl(n)}`, "din"], held: true },
   week_streak: { kind: "wait", unit: (n) => [`week${pl(n)}`, "hafte"] },
+  // Looked Around: the step is whichever part of the site is still untried
+  // (the server lists them, easiest first).
+  areas_tried: { pick: (facts) => {
+    const a = AREAS[facts?.ev?.areas_tried?.left?.[0]];
+    return a ? { kind: "do", session: 4, route: a.route, cta: a.cta, left: (n) => [`${n} more part${pl(n)} of StockSaathi to try. Next: ${a.en}`, `StockSaathi ke ${n} aur hisse try karo. Agla: ${a.hi}`] } : null;
+  } },
+  // First Mark Sheet: a to-do only once the report card has a grade.
+  graded_views: { pick: (facts) => (Number(facts?.m?.trades || 0) >= GRADED_TRADES
+    ? { kind: "do", session: 1, route: "/report-card", cta: REPORT, left: () => ["Open your report card: it has a grade now", "Apna report card kholo: ab uspe grade hai"] } : null) },
 };
+/** What one step toward this achievement is for this user, or null when it is not a to-do. */
+function unitOf(def, facts) {
+  const u = def ? UNITS[def.metric] : null;
+  return u?.pick ? u.pick(facts) : u || null;
+}
 // How a live number reads in the story ("Now: 94 days").
-const NOW_UNIT = { dip_pct: ["%", "%"], max_hold_days: [" days", " din"], fund_hold_days: [" days", " din"], member_days: [" days", " din"], visit_days: [" days", " din"], calm_days: [" days", " din"], week_streak: [" weeks", " hafte"], learn_streak: [" days", " din"] };
+const NOW_UNIT = { green_days: [" market days", " market din"], dip_pct: ["%", "%"], max_hold_days: [" days", " din"], fund_hold_days: [" days", " din"], member_days: [" days", " din"], visit_days: [" days", " din"], calm_days: [" days", " din"], week_streak: [" weeks", " hafte"], learn_streak: [" days", " din"] };
 
 // What a calendar pin asks for, in plain words ("Open your report card"),
 // from the rule's `need`. Core families carry it in core.js; an AI-drafted
 // one brings its own.
-const CORE_NEED = new Map(FAMILIES.filter((f) => f.rule?.need).map((f) => [f.family, f.rule.need]));
+const CORE_NEED = new Map(FAMILIES.filter((f) => f.rule?.need || f.calNeed).map((f) => [f.family, f.rule?.need || f.calNeed]));
 function needWords(need, hi) {
   const n = need || {};
   const parts = [];
   if (n.held_through) parts.push(hi ? "ek stock hold karte raho" : "keep holding a stock");
-  if (n.report_views || n.review_views) parts.push(hi ? "apna report card kholo" : "open your report card");
+  if (n.report_views) parts.push(hi ? "apna report card kholo" : "open your report card");
+  else if (n.review_views) parts.push(hi ? "apna portfolio ya report card kholo" : "open your portfolio or report card");
   if (n.stock_views) parts.push(hi ? `${n.stock_views} stocks dekho` : `look up ${n.stock_views} stock${pl(n.stock_views)}`);
   if (n.replays) parts.push(hi ? "ek crash replay poora karo" : "finish a crash replay");
   if (n.questions) parts.push(hi ? "Saathi se sawaal poocho" : "ask Saathi a question");
@@ -304,13 +331,14 @@ function needWords(need, hi) {
 // (?ach_debug=typical) sees it. Built from the owner's own answer with the
 // earned list and the numbers cut down. Nothing is saved or marked seen.
 function previewAs(data, mode) {
-  const keep = mode === "typical" ? new Set(["first_steps", "researcher_bronze"]) : new Set();
+  const keep = mode === "typical" ? new Set(["day_one", "first_steps", "first_week", "researcher_bronze"]) : new Set(["day_one"]);
   const small = mode === "typical"
-    ? { trades: 3, stocks_viewed: 12, visit_days: 4, week_streak: 1, member_days: 12, max_hold_days: 19, max_sectors: 2, slept_on: 1, watchlist_adds: 2, chart_stocks: 1, sectors_viewed: 3, dip_pct: 2.1 }
-    : { stocks_viewed: 2, visit_days: 1, week_streak: 1, member_days: 1 };
+    ? { trades: 3, stocks_viewed: 12, visit_days: 4, week_streak: 1, member_days: 12, max_hold_days: 19, max_sectors: 2, slept_on: 1, watchlist_adds: 2, chart_stocks: 1, sectors_viewed: 3, dip_pct: 2.1, onboarded: 1, areas_tried: 3 }
+    : { stocks_viewed: 2, visit_days: 1, week_streak: 1, member_days: 1, onboarded: 1, areas_tried: 1 };
+  const left = mode === "typical" ? ["saathi", "lessons", "news", "report", "replay"] : ["saathi", "lessons", "news", "chart", "watchlist", "report", "replay"];
   const m = {};
   for (const k of Object.keys(data.facts?.m || {})) m[k] = small[k] ?? 0;
-  return { ...data, preview: mode, earned: (data.earned || []).filter((e) => keep.has(e.code)).map((e) => ({ ...e, seeded: false, seen: true })), facts: { ...data.facts, m, ev: {}, season: {} } };
+  return { ...data, preview: mode, earned: (data.earned || []).filter((e) => keep.has(e.code)).map((e) => ({ ...e, seeded: false, seen: true })), facts: { ...data.facts, m, ev: { areas_tried: { left } }, season: {} } };
 }
 
 // One entry per family: best tier earned, the next one, progress to it, and
@@ -343,10 +371,10 @@ function familiesOf(data) {
 
 // Up to three things worth doing next: one to finish today, the closest one,
 // and a calendar pin that is open or opens within a week.
-function chooseNext(all) {
+function chooseNext(all, facts) {
   const acts = [];
   for (const f of all) {
-    const u = f.next && UNITS[f.next.metric];
+    const u = unitOf(f.next, facts);
     if (!u || u.kind !== "do" || !f.pr) continue;
     const left = Math.ceil(f.pr.target - f.pr.value - 1e-9);
     if (left <= 0) continue;
@@ -365,11 +393,15 @@ function chooseNext(all) {
   for (const a of closest) push(a);
   return out;
 }
-function chooseWaiting(all) {
-  return all.map((f) => ({ f, u: f.next && UNITS[f.next.metric] }))
+function chooseWaiting(all, facts) {
+  // One row per clock: One Week In and Long Termer count the same days held,
+  // so only the nearer of the two is shown.
+  const seen = new Set();
+  return all.map((f) => ({ f, u: unitOf(f.next, facts) }))
     .filter((x) => x.u?.kind === "wait" && x.f.pr && x.f.pr.value > 0 && x.f.pr.value < x.f.pr.target)
     .map((x) => ({ ...x, left: Math.ceil(x.f.pr.target - x.f.pr.value) }))
-    .sort((a, b) => a.left - b.left).slice(0, 3);
+    .sort((a, b) => a.left - b.left)
+    .filter((x) => !seen.has(x.f.next.metric) && seen.add(x.f.next.metric)).slice(0, 3);
 }
 
 export async function openAchievements({ focus = null } = {}) {
@@ -393,7 +425,23 @@ export async function openAchievements({ focus = null } = {}) {
   const draw = (raw) => {
     const hi = lang;
     if (!raw) {
-      overlay.innerHTML = `<div class="modal ach-sheet" role="dialog" aria-modal="true" aria-label="Achievements"><p class="muted" style="padding: var(--sp-6);">${hi ? "Load ho raha hai…" : "Loading…"}</p></div>`;
+      // The same sheet element the data is drawn into a moment later, so the
+      // sheet comes in once and its contents are swapped in place.
+      overlay.innerHTML = `
+      <div class="modal ach-sheet" role="dialog" aria-modal="true" aria-labelledby="ach-title" tabindex="-1">
+        <header class="ach-head">
+          <div class="ach-head-row">
+            <h2 id="ach-title">Achievements</h2>
+            <div class="ach-head-tools">
+              <button type="button" class="ach-x ach-close" aria-label="${hi ? "Band karo" : "Close"}">
+                <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+          </div>
+        </header>
+        <div class="ach-body"><p class="ach-empty">${hi ? "Load ho raha hai…" : "Loading…"}</p></div>
+      </div>`;
+      overlay.querySelector(".ach-close").addEventListener("click", close);
       return;
     }
     const data = preview ? previewAs(raw, preview) : raw;
@@ -411,7 +459,8 @@ export async function openAchievements({ focus = null } = {}) {
 
     // "Open your report card between 28 Nov and 30 Nov."
     const calLine = (f) => {
-      const words = needWords(f.ai ? f.next.need : CORE_NEED.get(f.key), hi);
+      // A new listing is named: "Look up Acme Limited before 3 Dec ends."
+      const words = f.cal?.symbol && f.cal.name ? T(`Look up ${f.cal.name}`, `${f.cal.name} ko dekho`) : needWords(f.ai ? f.next.need : CORE_NEED.get(f.key), hi);
       if (!words || !f.cal) return "";
       const when = f.cal.from === f.cal.to ? T(`on ${dayText(f.cal.from)}`, `${dayText(f.cal.from)} ko`)
         : f.cal.state === "open" ? T(`before ${dayText(f.cal.to)} ends`, `${dayText(f.cal.to)} tak`)
@@ -429,13 +478,14 @@ export async function openAchievements({ focus = null } = {}) {
         : `<span class="ach-bar"><span style="width:${Math.round(f.pr.pct * 100)}%"></span></span>`;
       return `<span class="ach-prog" role="progressbar" aria-valuemin="0" aria-valuemax="${t}" aria-valuenow="${v}" aria-label="${esc(copyOf(f.next, null, hi).name)}">${body}${end ? medal(f.next, { size: "sm" }) : ""}<span class="ach-bar-num">${of(num(v), num(t))}${unit ? " " + esc(unit) : ""}</span></span>`;
     };
+    const calBtn = (f) => (f.cal?.symbol ? `<a class="ach-go" href="/stocks/${encodeURIComponent(f.cal.symbol)}" data-go>${esc(T("Look it up", "Dekho"))}</a>` : "");
     const goBtn = (u) => (u?.route ? `<a class="ach-go" href="${u.route}" data-go>${esc(T(u.cta[0], u.cta[1]))}</a>` : "");
 
     const inCat = all.filter((f) => cat === "all" || f.cat === cat);
     const pins = all.length, pinsOn = all.filter((f) => f.best).length;
 
     // ---- next up
-    const nextRows = chooseNext(inCat).map((row) => {
+    const nextRows = chooseNext(inCat, data.facts).map((row) => {
       const f = row.f, nc = copyOf(f.next, null, hi);
       const line = row.cal ? esc(calLine(f) || nc.desc) : esc(T(...row.u.left(row.left)));
       const chip = row.cal ? ` <span class="ach-when">${esc(calText(f.cal))}</span>` : tierChip(f.next);
@@ -446,14 +496,14 @@ export async function openAchievements({ focus = null } = {}) {
             <p class="ach-next-name">${esc(nc.name)}${chip}</p>
             <p class="ach-next-desc">${line}</p>
             ${row.cal ? "" : trackHtml(f)}
-            ${row.cal ? "" : goBtn(row.u)}
+            ${row.cal ? calBtn(f) : goBtn(row.u)}
           </div>
         </li>`;
     }).join("");
 
     // ---- on the way (time only)
     const ev = data.facts?.ev || {};
-    const waitRows = chooseWaiting(inCat).map(({ f, u, left }) => {
+    const waitRows = chooseWaiting(inCat, data.facts).map(({ f, u, left }) => {
       const nc = copyOf(f.next, null, hi);
       const unit = T(...u.unit(left));
       const sym = u.held ? ev[f.next.metric]?.symbol : null;
@@ -475,7 +525,7 @@ export async function openAchievements({ focus = null } = {}) {
       const c = f.best ? copyOf(f.best, evOf.get(f.best.code)?.evidence, hi) : copyOf(d, null, hi);
       const nc = f.next ? copyOf(f.next, null, hi) : null;
       const seeded = f.best && evOf.get(f.best.code)?.seeded;
-      const u = f.next && UNITS[f.next.metric];
+      const u = unitOf(f.next, data.facts);
       const live = (() => {
         const md = f.best || f.next;
         if (!md || md.metric === "season" || md.metric === "balanced_level") return "";
@@ -500,7 +550,7 @@ export async function openAchievements({ focus = null } = {}) {
             ${f.best && nc ? `<p class="ach-next">${T("Next", "Agla")}, ${esc(nc.tier)}: ${esc(nc.desc)}</p>` : ""}
             ${f.best && !nc ? `<p class="ach-next is-done">${f.list.length > 1 ? T("Every tier earned.", "Saare tiers ho gaye.") : T("Earned.", "Kama liya.")}</p>` : ""}
             ${f.next && f.pr ? trackHtml(f) : ""}
-            ${u?.kind === "do" ? goBtn(u) : ""}
+            ${u?.kind === "do" ? goBtn(u) : f.next && f.cal?.state === "open" ? calBtn(f) : ""}
             ${tiers}
           </div>
         </div>`;
@@ -624,7 +674,35 @@ export async function openAchievements({ focus = null } = {}) {
     wireStory(li);
     if (reduced()) li.classList.add("is-open");
     else requestAnimationFrame(() => requestAnimationFrame(() => li.classList.add("is-open")));
-    setTimeout(() => li.scrollIntoView({ block: "nearest", behavior: reduced() ? "auto" : "smooth" }), reduced() ? 0 : 240);
+    follow(li);
+  }
+  // Keep an opening story inside the sheet. A story near the bottom grows
+  // past the edge, and the sheet cannot be scrolled there until it has grown,
+  // so the list is moved up by exactly what sticks out, frame by frame, for
+  // the length of the slide (one measurement a frame, then it stops). The
+  // story's own top never leaves the sheet (it repeats the pin and its name,
+  // so on a small phone the tapped pin may scroll away to make room). And
+  // when a story that was open higher up closes and pulls the tapped pin
+  // above the top edge, the list comes back down as far as the story allows.
+  function follow(li) {
+    const body = overlay.querySelector(".ach-body");
+    const slot = li.previousElementSibling;
+    if (!body) return;
+    const until = performance.now() + (reduced() ? 60 : 380);
+    const step = () => {
+      if (!li.isConnected || picked == null) return;
+      const b = body.getBoundingClientRect(), r = li.getBoundingClientRect();
+      const over = r.bottom - (b.bottom - 12);
+      if (over > 0.5) {
+        const room = r.top - (b.top + 8);
+        if (room > 0.5) body.scrollTop += Math.min(over, room);
+      } else if (slot) {
+        const hidden = (b.top + 8) - slot.getBoundingClientRect().top;
+        if (hidden > 0.5) body.scrollTop -= Math.min(hidden, -over);
+      }
+      if (performance.now() < until) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   }
 
   const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };

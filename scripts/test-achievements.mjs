@@ -268,7 +268,7 @@ const INST = {
   ok("ladder: curious mind 1/5/10", t("curious_mind") === "1/5/10", t("curious_mind"));
   ok("copy: curious mind bronze reads right for one day", byCode.get("curious_mind_bronze").desc_en === "Ask Saathi a question on 1 day.");
   ok("groups: old friend and regular are about coming back", byCode.get("old_friend_bronze").category === "streak" && byCode.get("regular_bronze").category === "streak");
-  ok("catalogue: 40 pin designs, 107 tiers", new Set(DEFS.map((d) => d.family)).size === 40 && DEFS.length === 107, [new Set(DEFS.map((d) => d.family)).size, DEFS.length]);
+  ok("catalogue: 56 pin designs, 131 tiers", new Set(DEFS.map((d) => d.family)).size === 56 && DEFS.length === 131, [new Set(DEFS.map((d) => d.family)).size, DEFS.length]);
   const one = A.deriveFacts({ now: NOW, trades: [], instruments: INST, events: [{ kind: "chat_user", at: at(0) }] });
   ok("curious mind: a first question earns bronze on day one", earned(one).has("curious_mind_bronze"));
 }
@@ -304,6 +304,109 @@ const INST = {
   for (const fam of ["on_my_radar", "chart_reader", "sector_scholar", "asked_why", "weekend_scholar", "set_and_wait", "red_day_calm"]) {
     ok(`new family ${fam}: three tiers`, DEFS.filter((d) => d.family === fam).length === 3);
   }
+}
+
+// ---------------------------------------------------------------- more milestones (27 Nov 2026)
+{
+  const pv = (daysAgo, subject, hourUtc = 5) => ({ kind: "page_view", at: at(daysAgo, hourUtc), subject });
+  // Day one
+  const fresh = A.deriveFacts({ now: NOW, createdAt: at(0), onboarded: true, trades: [], instruments: INST, events: [] });
+  ok("day one: a set-up account earns it with nothing else", earned(fresh).has("day_one") && earned(fresh).size === 1, [...earned(fresh)]);
+  ok("day one: not before the account is set up", !earned(A.deriveFacts({ now: NOW, createdAt: at(0), trades: [], instruments: INST, events: [] })).has("day_one"));
+
+  // One week in: the same clock as Long Termer, a first step at 7 days
+  const wk = (d) => A.deriveFacts({ now: NOW, trades: [buy("TCS", 1, 3000, d)], instruments: INST, events: [pv(0, "/portfolio")] });
+  ok("one week in: 6 days is not a week", !earned(wk(6)).has("first_week"));
+  ok("one week in: 7 days is", earned(wk(7)).has("first_week") && !earned(wk(7)).has("long_termer_bronze"));
+  ok("one week in: not for an account that left", !earned(A.deriveFacts({ now: NOW, trades: [buy("TCS", 1, 3000, 40)], instruments: INST, events: [] })).has("first_week"));
+
+  // Looked around
+  const tour = A.deriveFacts({ now: NOW, trades: [], instruments: INST, events: [
+    { kind: "stock_view", at: at(2), subject: "TCS" }, { kind: "chart_interact", at: at(2), subject: "TCS" },
+    { kind: "chat_user", at: at(1) }, pv(1, "/report-card"), pv(1, "/portfolio"),
+  ] });
+  ok("looked around: four parts used is bronze (3), not silver (5)", tour.m.areas_tried === 4 && earned(tour).has("campus_tour_bronze") && !earned(tour).has("campus_tour_silver"), tour.m.areas_tried);
+  ok("looked around: ladder 3/5/8", DEFS.filter((d) => d.family === "campus_tour").map((d) => d.threshold).join("/") === "3/5/8");
+  ok("looked around: what is left, easiest first", tour.ev.areas_tried.left.join() === "lessons,news,watchlist,replay", tour.ev.areas_tried.left);
+  ok("looked around: using one part ten times is still one part", A.deriveFacts({ now: NOW, trades: [], instruments: INST, events: Array.from({ length: 10 }, (_, i) => ({ kind: "stock_view", at: at(i), subject: "TCS" + i })) }).m.areas_tried === 1);
+  ok("looked around: copy for all eight", byCode.get("campus_tour_gold").desc_en.startsWith("Try all 8") && byCode.get("campus_tour_silver").desc_en.startsWith("Try 5 of these 8"));
+
+  // First mark sheet: the report card opened once it has a grade (5 trades)
+  const five = [4, 3, 2, 1, 0].map((d, i) => buy(["TCS", "INFY", "ITC", "RELIANCE", "HDFCBANK"][i], 1, 1000, d + 2));
+  const early = A.deriveFacts({ now: NOW, trades: five, instruments: INST, events: [pv(5, "/report-card")] });
+  ok("first mark sheet: a look before the grade does not count", early.m.graded_views === 0 && !earned(early).has("first_report_card"));
+  const late = A.deriveFacts({ now: NOW, trades: five, instruments: INST, events: [pv(5, "/report-card"), pv(1, "/report-card")] });
+  ok("first mark sheet: a look after the fifth trade does", late.m.graded_views === 1 && earned(late).has("first_report_card"));
+  ok("first mark sheet: four trades is no grade", A.deriveFacts({ now: NOW, trades: five.slice(0, 4), instruments: INST, events: [pv(0, "/report-card")] }).m.graded_views === 0);
+
+  // In the green: saved account values against the starting money
+  const START = 10_000_000;
+  const val = (daysAgo, rupeesOver, hourUtc = 11) => ({ at: at(daysAgo, hourUtc), total_paise: START + rupeesOver * 100 });
+  const green = (vals, events = [pv(0, "/portfolio")]) => A.deriveFacts({ now: NOW, trades: [buy("TCS", 1, 3000, 30)], instruments: INST, events, accountValues: vals, startingCash: START });
+  // 13 Nov 2026 is a Friday: days-ago 0..4 are Fri..Mon, 7..11 are the week before.
+  const twoWeeks = [11, 10, 9, 8, 7, 4, 3, 2, 1, 0].map((d) => val(d, 50));
+  ok("in the green: a weekend does not break the run", green(twoWeeks).m.green_days === 10 && earned(green(twoWeeks)).has("in_the_green_bronze") && !earned(green(twoWeeks)).has("in_the_green_silver"), green(twoWeeks).m.green_days);
+  const dipped = twoWeeks.map((v, i) => (i === 4 ? val(7, -10) : v));
+  ok("in the green: one day below starts the count again", green(dipped).m.green_days === 5 && !earned(green(dipped)).has("in_the_green_bronze"), green(dipped).m.green_days);
+  ok("in the green: exactly the starting money is not above it", green([3, 2, 1, 0].map((d) => val(d, 0))).m.green_days === 0);
+  ok("in the green: the day's last value decides", green([val(1, 80, 4), val(1, -20, 11), val(0, 30)]).m.green_days === 1);
+  ok("in the green: a long gap is two runs", green([val(20, 5), val(19, 5), val(18, 5), val(2, 5), val(1, 5), val(0, 5)]).m.green_days === 3);
+  // No visit and no trade in the last 14 days: the run is remembered (ev) but earns nothing.
+  ok("in the green: not for an account that left", green(twoWeeks, []).m.green_days === 0 && green(twoWeeks, []).ev.green_days.days === 10 && !earned(green(twoWeeks, [])).has("in_the_green_bronze"));
+  ok("in the green: no trade counts here", byCode.get("in_the_green_bronze").metric === "green_days" && byCode.get("in_the_green_silver").threshold === 14 && byCode.get("in_the_green_gold").threshold === 21);
+}
+
+// ---------------------------------------------------------------- festivals and the pins that follow the user
+{
+  const FEST = [
+    { id: 101, kind: "other", tag: "holi", name: "Holi 2027", starts_on: ymd(3), ends_on: ymd(3) },
+    { id: 102, kind: "other", tag: "dussehra", name: "Dussehra 2026", starts_on: ymd(10), ends_on: ymd(10) },
+    { id: 103, kind: "other", tag: "christmas", name: "Christmas 2026", starts_on: ymd(-20), ends_on: ymd(-20) },
+    { id: 104, kind: "other", tag: "new_year", name: "New Year 2027", starts_on: ymd(40), ends_on: ymd(34) },
+    { id: 105, kind: "other", name: "An untagged date", starts_on: ymd(3), ends_on: ymd(3) },
+    { id: 9, kind: "diwali", name: "Diwali 2026", starts_on: ymd(5), ends_on: ymd(5) },
+  ];
+  const sv = (daysAgo, s) => ({ kind: "stock_view", at: at(daysAgo), subject: s });
+  const input = { now: NOW, trades: [], instruments: INST, events: [
+    sv(3, "TCS"), sv(3, "INFY"), sv(3, "ITC"), sv(2, "RELIANCE"), sv(2, "HDFCBANK"),       // Holi and the day after: 5 stocks
+    { kind: "page_view", at: at(9), subject: "/report-card" },                               // the day after Dussehra
+    { kind: "page_view", at: at(36), subject: "/portfolio" }, { kind: "news_click", at: at(35), subject: "n" }, // first week of January
+  ] };
+  const season = A.deriveSeason(input, DEFS, FEST);
+  ok("festival: Holi needs 5 stocks over the day and the day after", season.holi?.n === 1 && season.holi.event === "Holi 2027", season.holi);
+  ok("festival: Dussehra counts the report card the day after", season.dussehra?.n === 1);
+  ok("festival: a date that has not come is not counted", !season.christmas);
+  ok("festival: New Year needs a look back and something learned", season.new_year?.n === 1, season.new_year);
+  ok("festival: a tag never matches another festival", !season.eid && !season.dhanteras && !season.republic_day);
+  ok("festival: the Diwali pins still match by kind only", !season.muhurat && Object.keys(season).every((c) => ["holi", "dussehra", "new_year"].includes(c)), Object.keys(season));
+  const four = A.deriveSeason({ ...input, events: input.events.slice(0, 4) }, DEFS, FEST);
+  ok("festival: 4 stocks is not 5", !four.holi);
+  for (const tag of ["new_year", "republic_day", "eid", "holi", "independence_day", "ganesh_chaturthi", "dussehra", "dhanteras", "christmas"]) {
+    const d = byCode.get(tag);
+    ok(`festival ${tag}: one pin, matched by its tag`, d && d.tiers === 1 && d.rule.event_kind === "other" && d.rule.event_tag === tag && d.category === "season", d?.rule);
+    ok(`festival ${tag}: never asks for a trade or a holding`, d && !("held_through" in d.rule.need));
+  }
+
+  // IPO watcher: a new listing looked up in its first week
+  const IPOS = [{ symbol: "NEWCO", company: "Newco Limited", listing_on: ymd(10) }, { symbol: "LATER", company: "Later Limited", listing_on: ymd(2) }, { symbol: "SOON", company: "Soon Limited", listing_on: null }];
+  const ipo = (events) => A.deriveFacts({ now: NOW, trades: [], instruments: INST, events, ipos: IPOS });
+  const seen = ipo([sv(10, "NEWCO"), sv(4, "NEWCO"), sv(3, "NEWCO"), sv(2, "LATER"), sv(1, "SOON"), sv(1, "TCS")]);
+  ok("ipo watcher: each new listing once", seen.m.ipo_looks === 2 && seen.ev.ipo_looks.company === "Later Limited", seen.ev.ipo_looks);
+  ok("ipo watcher: day 7 after listing is too late", ipo([sv(3, "NEWCO")]).m.ipo_looks === 0);
+  ok("ipo watcher: day 6 is in time", ipo([sv(4, "NEWCO")]).m.ipo_looks === 1 && earned(ipo([sv(4, "NEWCO")])).has("ipo_watcher_bronze"));
+  ok("ipo watcher: a look before it lists does not count", ipo([sv(11, "NEWCO")]).m.ipo_looks === 0);
+  ok("ipo watcher: looking only, no trade asked", byCode.get("ipo_watcher_bronze").metric === "ipo_looks" && /Looking is enough/.test(byCode.get("ipo_watcher_bronze").desc_en));
+
+  // Market birthday: the anniversary of the first trade, that day or the 6 after
+  const bd = (visitDaysAgo, firstDaysAgo = 365) => A.deriveFacts({ now: NOW, trades: [buy("TCS", 1, 3000, firstDaysAgo)], instruments: INST, events: visitDaysAgo.map((d) => ({ kind: "page_view", at: at(d), subject: "/" })) });
+  ok("market birthday: a visit on the day", bd([0]).m.trade_birthdays === 1 && earned(bd([0])).has("market_birthday_bronze"), bd([0]).ev.trade_birthdays);
+  ok("market birthday: a visit the day before is early", bd([1]).m.trade_birthdays === 0);
+  ok("market birthday: six days after still counts", bd([0], 371).m.trade_birthdays === 1);
+  ok("market birthday: seven days after is late", bd([0], 372).m.trade_birthdays === 0);
+  ok("market birthday: two years, two visits", bd([365, 0], 730).m.trade_birthdays === 2 && earned(bd([365, 0], 730)).has("market_birthday_silver"));
+  ok("market birthday: remembers the first trade's day", bd([]).ev.trade_birthdays.date === ymd(365));
+  ok("addYears: 29 Feb lands on 28 Feb in a common year", A.addYears("2028-02-29", 1) === "2029-02-28" && A.addYears("2028-02-29", 4) === "2032-02-29" && A.addYears("2026-04-19", 1) === "2027-04-19");
+  ok("market birthday: copy reads right for each year", byCode.get("market_birthday_bronze").desc_en.includes("first anniversary") && byCode.get("market_birthday_gold").desc_en.includes("three"));
 }
 
 console.log(`achievements: ${pass}/${pass + fail} passing`);
