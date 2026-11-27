@@ -65,7 +65,9 @@ import { scoreReportCard, benchmarkPl } from "../js/coach/reportCardCore.js";
 import { tradesWithFlags } from "../js/coach/biasLedger.js";
 import { factText, unlockText, pillarName, overallSummary } from "../js/coach/reportCardCopy.js";
 import { computeTradeStats, returnSummary } from "../js/data/tradeStats.js";
-import { PART_KEYS, partsOf, partPlating, stickyGrade, smoothedPl, weekStartIso } from "../js/coach/reportCardWeek.js";
+import { PART_KEYS, partsOf, partPlating, stickyGrade, smoothedPl, weekStartIso, cardPlating, bestPart } from "../js/coach/reportCardWeek.js";
+import { cardSvg, ogSvg, artDefs } from "../js/coach/reportCardArt.js";
+import { pinDefs } from "../js/achievements/pins.js";
 
 export const config = { runtime: "edge" };
 
@@ -1713,6 +1715,9 @@ async function route(req) {
       case "market-search":       if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opMarketSearch(req, origin);
       case "report-card":         if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opReportCard(req, origin);
       case "report-card-week":    if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opReportCardWeek(req, origin);
+      case "report-card-share":   if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opReportCardShare(req, origin);
+      case "card-page":           return await opCardPage(url);
+      case "card-og-svg":         return await opCardOgSvg(url);
       case "crash-suggestions":   return await opCrashSuggestions(req, origin);
       case "command":             if (req.method !== "POST") return j(405, { error: "method_not_allowed" }, origin); return await opCommand(req, origin);
       case "history":             return await opHistory(req, origin, url);
@@ -2627,6 +2632,137 @@ async function opReportCardWeek(req, origin) {
     }
   }
   return j(200, { week: wk, state, weeks: rows.map((r) => ({ week: r.week_start, score: r.score, grade: r.grade, parts: r.parts || {} })) }, origin);
+}
+
+// ---- Public links to a card (table report_card_shares, migration 2026-11-28b) ----
+// "Send my card" asks for a link; the server copies this week's saved card
+// (scored here, see opReportCardWeek) under a short token. /c/<token> is
+// rewritten to op=card-page; handlers/card-og.py turns op=card-og-svg into the
+// PNG a link preview shows. Name, grade and marks only. Nothing is public
+// until the student asks for a link, and action "off" switches it off.
+const SITE_ORIGIN = "https://stocksaathi.co.in";
+const SHARE_TOKEN_RE = /^[a-z0-9]{12}$/;
+const SHARE_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+function newShareToken() {
+  const a = new Uint8Array(12);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => SHARE_ALPHABET[b % SHARE_ALPHABET.length]).join("");
+}
+const PART_WORD = { discipline: "Discipline", results: "Results", research: "Research", diversification: "Diversification", learning: "Learning", market: "vs Nifty" };
+const hx = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const weekDay = (iso) => { try { return new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }); } catch { return ""; } };
+
+async function opReportCardShare(req, origin) {
+  const userId = await supabaseUserId(req);
+  if (!userId) return j(401, { error: "unauthorized" }, origin);
+  let body; try { body = await req.json(); } catch { body = {}; }
+  const uid = encodeURIComponent(userId), wk = weekStartIso();
+  const mine = `user_id=eq.${uid}&week_start=eq.${wk}`;
+  if (body?.action === "off") {
+    const r = await sbAdminFetch(`/rest/v1/report_card_shares?${mine}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ active: false, updated_at: new Date().toISOString() }) });
+    return r.ok ? j(200, { ok: true }, origin) : j(502, { error: "share_unavailable" }, origin);
+  }
+  const [wr, pr, sr] = await Promise.all([
+    sbAdminFetch(`/rest/v1/report_card_weeks?select=score,grade,parts,platings&${mine}&limit=1`),
+    sbAdminFetch(`/rest/v1/profiles?select=display_name,username&id=eq.${uid}&limit=1`),
+    sbAdminFetch(`/rest/v1/report_card_shares?select=token&${mine}&limit=1`),
+  ]);
+  if (!wr.ok || !sr.ok) return j(502, { error: "share_unavailable" }, origin);
+  const week = (await wr.json())[0];
+  if (!week || !Number.isFinite(week.score) || !week.grade) return j(409, { error: "no_card" }, origin);
+  const prof = pr.ok ? (await pr.json())[0] : null;
+  const had = (await sr.json())[0]?.token;
+  const token = had || newShareToken();
+  const row = {
+    token, user_id: userId, week_start: wk,
+    name: String(prof?.display_name || prof?.username || "").trim().slice(0, 22),
+    score: week.score, grade: week.grade, parts: week.parts || {}, platings: week.platings || {},
+    active: true, updated_at: new Date().toISOString(),
+  };
+  const up = await sbAdminFetch(`/rest/v1/report_card_shares?on_conflict=user_id,week_start`, {
+    method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row),
+  });
+  if (!up.ok) return j(502, { error: "share_unavailable" }, origin);
+  return j(200, { token, url: `${SITE_ORIGIN}/c/${token}`, score: row.score, grade: row.grade }, origin);
+}
+
+/** The saved card behind a token: the row, null (no such link, or switched off), or undefined (could not look). */
+async function shareRow(token) {
+  if (!SHARE_TOKEN_RE.test(token || "")) return null;
+  const r = await sbAdminFetch(`/rest/v1/report_card_shares?select=token,week_start,name,score,grade,parts,platings,active&token=eq.${token}&limit=1`);
+  if (!r.ok) return undefined;
+  const row = (await r.json())[0];
+  return row && row.active ? row : null;
+}
+function shareCard(row, w) {
+  const best = bestPart(row.parts);
+  return {
+    w, score: row.score, grade: row.grade, name: row.name, plating: cardPlating(row.grade),
+    stats: PART_KEYS.map((k) => ({ key: k, score: Number.isFinite(row.parts?.[k]) ? row.parts[k] : null, dir: "flat" })),
+    art: best ? { key: best, tier: row.platings?.[best] || "bronze" } : null,
+    label: `Report card: ${row.score} marks, grade ${row.grade}`,
+  };
+}
+const pageRes = (status, html, cache) => new Response(html, { status, headers: {
+  "Content-Type": "text/html; charset=utf-8", "Cache-Control": cache, "X-Robots-Tag": "noindex, nofollow",
+  "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin",
+} });
+const CARD_PAGE_CSS = `@font-face{font-family:Inter;src:url(/fonts/inter-latin.woff2) format("woff2");font-weight:100 900;font-display:swap}
+*{box-sizing:border-box;margin:0}html{background:#0B0F1C}
+body{min-height:100vh;display:grid;place-items:center;padding:28px 20px;color:#EEF1FA;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:min(680px,100%);background:#141A30;border-radius:24px;box-shadow:0 6px 0 #05070F;padding:34px;display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:center}
+.brand{grid-column:1/-1;display:flex;justify-content:space-between;align-items:baseline;font-weight:800;font-size:17px}
+.brand span{font-weight:500;font-size:14px;color:#9AA3C2}
+h1{font-size:30px;line-height:1.12;letter-spacing:-.02em;font-weight:800}
+p{color:#B7BEDA;font-size:15.5px;line-height:1.55;margin:12px 0 0}
+.cta{display:inline-block;margin-top:22px;background:#1FD1A1;color:#06281F;font-weight:800;font-size:16px;text-decoration:none;border-radius:13px;padding:14px 22px;box-shadow:0 4px 0 #0F5A46}
+.cta:active{transform:translateY(3px);box-shadow:0 1px 0 #0F5A46}
+.cta:focus-visible,a:focus-visible{outline:3px solid #FFC93C;outline-offset:3px}
+small{grid-column:1/-1;color:#7F88A8;font-size:13px;line-height:1.5}
+small a{color:#AEB6D9}
+.gone{grid-template-columns:1fr;text-align:left}
+@media (max-width:600px){main{grid-template-columns:1fr;justify-items:center;text-align:center;padding:26px 22px;gap:22px}.brand{width:100%}h1{font-size:25px}small{text-align:center}}`;
+const cardPageHtml = ({ title, desc, image, url, body }) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>${hx(title)}</title><meta name="description" content="${hx(desc)}">
+<meta property="og:type" content="website"><meta property="og:site_name" content="StockSaathi">
+<meta property="og:title" content="${hx(title)}"><meta property="og:description" content="${hx(desc)}"><meta property="og:url" content="${hx(url)}">
+${image ? `<meta property="og:image" content="${hx(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${hx(image)}">` : `<meta name="twitter:card" content="summary">`}
+<meta name="theme-color" content="#0B0F1C"><link rel="icon" href="/favicon.ico"><style>${CARD_PAGE_CSS}</style></head><body>${body}</body></html>`;
+
+async function opCardPage(url) {
+  const token = url.searchParams.get("t") || "";
+  const row = await shareRow(token);
+  if (!row) {
+    const html = cardPageHtml({
+      title: "This card link is switched off | StockSaathi", desc: "StockSaathi is a free stock market simulator for Indian teens.", image: "", url: `${SITE_ORIGIN}/c/${token.slice(0, 12)}`,
+      body: `<main class="gone"><div class="brand">StockSaathi</div><div><h1>${row === undefined ? "This card could not be loaded" : "This card link is switched off"}</h1><p>${row === undefined ? "Try again in a minute." : "The student who made it has turned it off, or the address is wrong."}</p><a class="cta" href="/?utm_source=card&utm_medium=share">See what StockSaathi is</a></div></main>`,
+    });
+    return pageRes(row === undefined ? 503 : 404, html, "no-store");
+  }
+  const best = bestPart(row.parts), day = weekDay(row.week_start);
+  const who = row.name || "A StockSaathi student";
+  const title = `${who} got ${/^A/.test(row.grade) ? "an" : "a"} ${row.grade} this week | StockSaathi`;
+  const desc = `${row.score} marks of 100 for the week of ${day}.${best ? ` Best part: ${PART_WORD[best]}, ${row.parts[best]}.` : ""} StockSaathi grades how you invest with pretend money, not how much you made.`;
+  const html = cardPageHtml({
+    title, desc, url: `${SITE_ORIGIN}/c/${row.token}`,
+    image: `${SITE_ORIGIN}/api/card-og?t=${row.token}&v=${row.score}${encodeURIComponent(row.grade)}`,
+    body: `${pinDefs()}${artDefs()}<main><div class="brand">StockSaathi<span>Week of ${hx(day)}</span></div>
+      ${cardSvg(shareCard(row, 230))}
+      <div><h1>${hx(who)} got ${/^A/.test(row.grade) ? "an" : "a"} ${hx(row.grade)} this week</h1>
+      <p>${row.score} marks of 100.${best ? ` Best part: ${PART_WORD[best]}, ${row.parts[best]}.` : ""} The grade is for how they invest, not how much they made.</p>
+      <a class="cta" href="/register?utm_source=card&utm_medium=share&utm_campaign=report_card">Get my own card</a></div>
+      <small>StockSaathi is a free stock market simulator for Indian teens: pretend money, real prices. <a href="/?utm_source=card&utm_medium=share">What is it?</a></small></main>`,
+  });
+  return pageRes(200, html, "public, max-age=0, s-maxage=60");
+}
+
+async function opCardOgSvg(url) {
+  const row = await shareRow(url.searchParams.get("t") || "");
+  if (!row) return new Response("", { status: row === undefined ? 503 : 404, headers: { "Cache-Control": "no-store" } });
+  const svg = ogSvg({ card: shareCard(row, 372), name: row.name, score: row.score, grade: row.grade, week: `Week of ${weekDay(row.week_start)}` });
+  return new Response(svg, { status: 200, headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "public, max-age=0, s-maxage=60", "X-Content-Type-Options": "nosniff" } });
 }
 
 // Mirrors js/pages/reportCard.js:analyzeBehavior — keeps admin aggregation

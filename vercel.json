@@ -30,7 +30,8 @@
   ],
   "rewrites": [
     {
-      "source": "/sb/:path*",
+      "source": "/c/:token([a-z0-9]{12})", "destination": "/api/ai?op=card-page&t=:token" },
+    { "source": "/sb/:path*",
       "destination": "https://hwlmwraowcylxzdpumca.supabase.co/:path*"
     },
     {

@@ -133,6 +133,15 @@ export function weekRow(saved, live, thisWeek = weekStartIso(), keep = 3) {
   if (live && Number.isFinite(live.score) && live.grade) past.push({ week: thisWeek, score: live.score, grade: live.grade, plating: cardPlating(live.grade), now: true });
   return past;
 }
+/** The best part of a saved card (vs Nifty left out), from its saved marks; null when none is scored. */
+export function bestPart(parts) {
+  let best = null;
+  for (const k of PART_KEYS) {
+    if (k === "market" || !Number.isFinite(parts?.[k])) continue;
+    if (best == null || parts[k] > parts[best]) best = k;
+  }
+  return best;
+}
 /** The last saved card before this week, or null. */
 export const lastWeek = (saved, thisWeek = weekStartIso()) => (saved || []).filter((w) => w && w.week < thisWeek && Number.isFinite(w.score)).slice(-1)[0] || null;
 

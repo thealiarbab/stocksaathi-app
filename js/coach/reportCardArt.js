@@ -142,3 +142,23 @@ export function shareSvg({ card, week = "", nums = [], fontCss = "" } = {}) {
     ${nums.slice(0, 4).map(cell).join("")}
     <text x="270" y="918" text-anchor="middle" ${F} font-size="22" fill="${C.cream}" fill-opacity=".7">stocksaathi.co.in</text></svg>`;
 }
+
+/**
+ * The wide picture a link preview shows (1200 x 630): the card on the star,
+ * the marks and the letter beside it. Drawn on the server (handlers/card-og.py
+ * turns it into a PNG), so it stands alone and names no web font.
+ */
+export function ogSvg({ card, name = "", score = "", grade = "", week = "" } = {}) {
+  const nm = String(name || "").trim().slice(0, 22);
+  const whose = nm ? `${nm}${/s$/i.test(nm) ? "'" : "'s"} report card` : "Report card";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">${pinDefs()}${artDefs()}
+    <rect width="1200" height="630" fill="${C.navy}"/>
+    <path d="${burst(300, 315, 292, 244, 12)}" fill="#242C52"/>
+    ${cardSvg({ ...card, w: 372, x: 114, y: 78 })}
+    <text x="640" y="132" ${F} font-size="34" font-weight="800" fill="${C.cream}">StockSaathi</text>
+    <text x="632" y="336" ${F} font-size="200" font-weight="900" letter-spacing="-8" fill="${C.cream}">${esc(score)}</text>
+    <text x="640" y="412" ${F} font-size="54" font-weight="800" fill="${C.mari}">${esc(grade)} this week</text>
+    <text x="640" y="500" ${F} font-size="32" font-weight="700" fill="${C.cream}">${esc(whose)}</text>
+    <text x="640" y="546" ${F} font-size="27" fill="${C.lilac}">${esc(week)}</text>
+  </svg>`;
+}

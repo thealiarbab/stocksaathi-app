@@ -590,11 +590,10 @@ effort for A/B runs; unset to restore the per-op settings.
 - Admin user view (/a, section 11): `adminReportCardV2()` in api/ai.js
   scores the same card server-side with the same modules (prices from
   quote_cache / mf_master, real Nifty via opHistory).
-- **The card page (28 Nov 2026; owner accounts only until the owner flips
-  it).** `reportCard.js` hands over to `js/pages/reportCardV4.js` when
-  `isOwner()` (`?rc_old=1` shows an owner the mark sheet); everyone else
-  still gets the mark sheet above. To roll out: drop the `isOwner()` test
-  at the top of `renderReportCard`. The page is one object, the card
+- **The card page (28 Nov 2026; for everyone since 86348d82, together with
+  achievements: `achievement_settings.rollout = 'all'`).** `reportCard.js`
+  hands over to `js/pages/reportCardV4.js` (`?rc_old=1` shows the old mark
+  sheet). The page is one object, the card
   (`js/coach/reportCardArt.js`: `cardSvg`, `miniSvg`, `sealSvg`, `shareSvg`),
   built like an achievement pin (side wall, plating, flat enamel), and
   around it: What changed this week, Your card week by week, Six parts
@@ -608,6 +607,26 @@ effort for A/B runs; unset to restore the per-op settings.
   art for them. The page never rebuilds on a state change: `morphHtml` and
   ONE click listener on `<main>` (`data-rc="pillar:research"`, `story`,
   `send`, `how`). Styles are injected by the page (`rc4-` classes).
+- **Send my card (popup + public link, 28 Nov 2026).** `openSend` in
+  reportCardV4.js: the card on a flat indigo stage, a row of places to send
+  it drawn like pins (WhatsApp, X, Telegram with their real logos from
+  Simple Icons; Email; Copy picture; Save picture; More = the device's own
+  share popup where the browser can share a file), and a link box. WhatsApp,
+  X and Telegram only take text and a link, so the link is the feature:
+  `/api/ai?op=report-card-share` (`action: "on" | "off"`) copies this week's
+  row from `report_card_weeks` into `report_card_shares` (migration
+  2026-11-28b; service role only, no policies) under a 12-letter token, made
+  only when the student taps something that needs it. `/c/<token>`
+  (vercel.json rewrite to `op=card-page`) is a public page with the name,
+  grade and marks only, `noindex`, and a "Get my own card" button.
+  Its preview picture: `op=card-og-svg` draws `ogSvg()` (1200 x 630) and
+  `handlers/card-og.py` (`/api/card-og?t=`) turns it into a PNG with
+  `resvg-py` and the static Inter cuts in `handlers/fonts/` (the renderer
+  cannot read the variable woff2). The server draws it from the saved row,
+  so a preview cannot be faked from the browser. A tab for WhatsApp/X/
+  Telegram is opened inside the tap and pointed at the link afterwards,
+  or the browser blocks it. Tests: `design-compare/src/test_share_op.mjs`
+  (17), `shoot_send.py` (taps at 1280, 360, 320).
 - **Week rules (`js/coach/reportCardWeek.js`, pure, tested in Node):**
   - Plating per part: `PLATING_CUTS` holds each part's own cut points
     (silver, gold, platinum), set from the marks of the 1,372 accounts with

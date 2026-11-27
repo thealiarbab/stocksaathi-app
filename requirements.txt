@@ -4,3 +4,5 @@
 # functions and one-file-per-handler put us at 21.
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
+# handlers/card-og.py: turns the report card link picture (SVG) into a PNG.
+resvg-py==0.5.0

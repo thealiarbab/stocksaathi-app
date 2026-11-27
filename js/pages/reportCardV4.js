@@ -452,48 +452,169 @@ async function cardPng(vm) {
   return await new Promise((ok, bad) => cv.toBlob((b) => (b ? ok(b) : bad(new Error("no_blob"))), "image/png"));
 }
 
+// ---- Send my card ---------------------------------------------------------------
+// One popup on every screen: the card on its star, a row of places to send it
+// (built like the pins: flat enamel, a metal ring, a solid side wall), and a
+// link to a public page for this one card (/c/<token>, made by the server only
+// when the student asks: see opReportCardShare in api/ai.js). WhatsApp, X and
+// Telegram take text and a link, never a picture; the link's own page gives
+// them the picture preview. The brand marks are the companies' own logos
+// (shapes from Simple Icons, CC0).
+const LOGO = {
+  wa: "M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z",
+  x: "M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z",
+  tg: "M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z",
+};
+const brand = (k) => `<path transform="translate(11.2 11.2) scale(.733)" fill="#fff" d="${LOGO[k]}"/>`;
+const GLYPH = {
+  wa: brand("wa"), x: brand("x"), tg: brand("tg"),
+  mail: `<rect x="11.5" y="14" width="17" height="12.5" rx="2" fill="#fff"/><path d="M12.5 15.5l7.5 5.5 7.5-5.5" stroke="#A33A6C" stroke-width="1.8" fill="none"/>`,
+  pic: `<rect x="12" y="13.5" width="16" height="13" rx="2" fill="#fff"/><path d="M14 24l4-4.5 3 3 2-2 3 3.5Z" fill="#4B2A7A"/><circle cx="24" cy="17.5" r="1.5" fill="#4B2A7A"/>`,
+  save: `<path d="M20 12v10m-4.5-4l4.5 4.5 4.5-4.5M13 27.5h14" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
+  more: `<circle cx="13.5" cy="20" r="2.2" fill="#1C2340"/><circle cx="20" cy="20" r="2.2" fill="#1C2340"/><circle cx="26.5" cy="20" r="2.2" fill="#1C2340"/>`,
+  link: `<path d="M17.5 22.5l5-5M16 19l-2 2a3.5 3.5 0 0 0 5 5l2-2M24 21l2-2a3.5 3.5 0 0 0-5-5l-2 2" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/>`,
+};
+// enamel colour, side wall colour
+const PIN_INK = { wa: ["#25D366", "#0E6B36"], x: ["#000000", "#3A4257"], tg: ["#26A5E4", "#12608C"], mail: ["#FF7EB6", "#A33A6C"], pic: ["#4B2A7A", "#24113F"], save: ["#5367FF", "#2A36A8"], more: ["#FFC93C", "#8A6110"], link: ["#1C2340", "#05070F"] };
+const sendPin = (k, size = 50) => `<svg width="${size}" height="${Math.round((size * 44) / 40)}" viewBox="0 0 40 44" aria-hidden="true" focusable="false"><circle cx="20" cy="23" r="18" fill="${PIN_INK[k][1]}"/><circle cx="20" cy="20" r="18" fill="url(#achm-silver)"/><circle cx="20" cy="20" r="15.3" fill="${PIN_INK[k][0]}"/>${GLYPH[k]}</svg>`;
+
+let _share = null; // { wk, url } once the server has made this week's link
+async function shareCall(action) {
+  const tk = await token();
+  if (!tk) throw new Error("signed_out");
+  const post = (op, body) => fetch(`/api/ai?op=${op}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${tk}` }, body: JSON.stringify(body) });
+  let res = await post("report-card-share", { action });
+  // No saved card for this week yet (the page showed a cached one): have the server score it, then ask again.
+  if (res.status === 409 && action === "on") { await post("report-card-week", {}); res = await post("report-card-share", { action }); }
+  if (!res.ok) throw new Error("http_" + res.status);
+  return res.json();
+}
+
 function openSend(vm) {
   ev("send:open");
+  const text = T(`My StockSaathi report card: ${vm.grade} this week, ${vm.score} marks. Can you beat it?`, `Mera StockSaathi report card: is hafte ${vm.grade}, ${vm.score} marks. Isse zyada la sakte ho?`);
+  const pinBtn = (k, label, extra = "") => `<button type="button" class="rc4-pin" data-act="${k}"${extra}>${sendPin(k)}<span>${label}</span></button>`;
   K.openDialog(`
     <div class="modal rc-dlg rc4-send" role="dialog" aria-modal="true" aria-labelledby="rc4-send-t">
-      <div class="rc-dlg-top"><span class="rc-kicker">${T("Report card", "Report card")}</span>${K.closeBtn()}</div>
-      <h2 id="rc4-send-t">${T("Send my card", "Card bhejo")}</h2>
-      <div class="rc4-send-pic" aria-busy="true"><div class="skeleton"></div></div>
-      <p class="rc-note">${T("The picture has your name, grade and marks. No rupee amounts and no stock names.", "Picture me tumhara naam, grade aur marks hain. Rupaye ya stock ke naam nahi.")}</p>
-      <div class="modal-foot">
-        <button type="button" class="btn btn-ghost" data-act="save" disabled>${T("Save picture", "Picture save karo")}</button>
-        <button type="button" class="btn btn-primary" data-act="share" disabled>${T("Share", "Share karo")}</button>
+      <div class="rc-dlg-top"><h2 id="rc4-send-t">${T("Send my card", "Card bhejo")}</h2>${K.closeBtn()}</div>
+      <div class="rc4-stage">${starSvg("#4355E0", 330)}<span class="rc4-stage-card">${cardSvg(cardOf(vm, 150))}</span></div>
+      <h3 class="rc4-sh">${T("Send it to", "Yahan bhejo")}</h3>
+      <div class="rc4-pins">
+        ${pinBtn("wa", "WhatsApp")}${pinBtn("x", "X")}${pinBtn("tg", "Telegram")}${pinBtn("mail", "Email")}
+        ${pinBtn("pic", T("Copy picture", "Picture copy"), " disabled hidden")}${pinBtn("save", T("Save picture", "Picture save"), " disabled")}${pinBtn("more", T("More", "Aur"), " disabled hidden")}
       </div>
+      <h3 class="rc4-sh">${T("Or share a link to it", "Ya iska link bhejo")}</h3>
+      <div class="rc4-sl">${sendPin("link", 30)}<span class="rc4-sl-url" data-empty="1">${T("A page anyone can open", "Ek page jo koi bhi khol sakta hai")}</span><button type="button" class="btn btn-primary" data-act="link">${T("Copy link", "Link copy karo")}</button></div>
+      <p class="rc4-send-st" role="status" aria-live="polite"></p>
+      <p class="rc-note">${T("The picture and the link show your name, grade and marks. No rupee amounts, no stock names.", "Picture aur link me tumhara naam, grade aur marks hain. Rupaye ya stock ke naam nahi.")} <button type="button" class="rc4-off" data-act="off" hidden>${T("Switch the link off", "Link band karo")}</button></p>
     </div>`, (overlay) => {
-    const pic = overlay.querySelector(".rc4-send-pic"), save = overlay.querySelector("[data-act=save]"), share = overlay.querySelector("[data-act=share]");
+    const q = (act) => overlay.querySelector(`[data-act=${act}]`);
+    const urlEl = overlay.querySelector(".rc4-sl-url"), st = overlay.querySelector(".rc4-send-st"), linkBtn = q("link"), off = q("off");
+    const emptyText = urlEl.textContent, linkLabel = linkBtn.textContent;
+    const say = (msg) => { st.textContent = msg || ""; };
+    const flash = (btn, label, was) => { const el = btn.querySelector("span") || btn; el.textContent = label; setTimeout(() => { if (overlay.isConnected) el.textContent = was; }, 1600); };
+    const showLink = (url) => { urlEl.textContent = url.replace(/^https?:\/\//, ""); urlEl.removeAttribute("data-empty"); off.hidden = false; };
+
+    // The link: made on the first tap that needs it, then kept for the week.
+    let linking = null;
+    const getLink = () => {
+      if (_share?.wk === vm.wk) return Promise.resolve(_share.url);
+      if (!linking) {
+        linking = shareCall("on").then((d) => {
+          if (!d?.url) throw new Error("no_url");
+          _share = { wk: vm.wk, url: d.url };
+          if (overlay.isConnected) showLink(d.url);
+          ev("send:link_made");
+          return d.url;
+        }).finally(() => { linking = null; });
+      }
+      return linking;
+    };
+    if (_share?.wk === vm.wk) showLink(_share.url);
+    const linkFailed = () => say(T("The link could not be made. Check your connection and try again.", "Link nahi ban paaya. Connection dekho aur phir try karo."));
+
+    const DEST = {
+      wa: (u) => `https://wa.me/?text=${encodeURIComponent(`${text} ${u}`)}`,
+      x: (u) => `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(u)}`,
+      tg: (u) => `https://t.me/share/url?url=${encodeURIComponent(u)}&text=${encodeURIComponent(text)}`,
+      mail: (u) => `mailto:?subject=${encodeURIComponent(T("My StockSaathi report card", "Mera StockSaathi report card"))}&body=${encodeURIComponent(`${text}\n\n${u}`)}`,
+    };
+    for (const k of ["wa", "x", "tg", "mail"]) {
+      q(k).addEventListener("click", async () => {
+        say("");
+        // Open the tab inside the tap itself: after waiting for the link the browser would block it.
+        let win = null;
+        if (k !== "mail") { try { win = window.open("", "_blank"); if (win) win.opener = null; } catch {} }
+        try {
+          const dest = DEST[k](await getLink());
+          if (win && !win.closed) win.location.href = dest; else location.href = dest;
+          ev("send:" + k);
+        } catch { try { win?.close(); } catch {} linkFailed(); }
+      });
+    }
+    linkBtn.addEventListener("click", async () => {
+      say("");
+      try {
+        const url = await getLink();
+        await navigator.clipboard.writeText(url);
+        flash(linkBtn, T("Copied", "Copy ho gaya"), linkLabel);
+        ev("send:link");
+      } catch (e) {
+        if (_share?.wk === vm.wk) say(T("Could not copy. Press and hold the link to copy it.", "Copy nahi hua. Link ko dabaa kar copy karo."));
+        else linkFailed();
+      }
+    });
+    off.addEventListener("click", async () => {
+      off.disabled = true;
+      try {
+        await shareCall("off");
+        _share = null;
+        urlEl.textContent = emptyText; urlEl.setAttribute("data-empty", "1"); off.hidden = true;
+        say(T("The link is off. Nobody can open it now.", "Link band hai. Ab koi nahi khol sakta."));
+        ev("send:link_off");
+      } catch { say(T("Could not switch it off. Try again.", "Band nahi hua. Phir try karo.")); }
+      off.disabled = false;
+    });
+
+    // The picture (1080 x 1920): made once here, used by Copy picture, Save picture and More.
     const fileName = `stocksaathi-report-card-${vm.wk}.png`;
-    cardPng(vm).then((blob) => {
+    const png = cardPng(vm);
+    const pic = q("pic"), save = q("save"), more = q("more");
+    const canCopyPic = typeof window.ClipboardItem === "function" && !!navigator.clipboard?.write;
+    if (canCopyPic) pic.hidden = false;
+    png.then((blob) => {
       if (!overlay.isConnected) return;
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.alt = T(`Your report card: ${vm.score} marks, grade ${vm.grade}`, `Tumhara report card: ${vm.score} marks, grade ${vm.grade}`);
-      img.src = url;
-      pic.replaceChildren(img);
-      pic.removeAttribute("aria-busy");
       const file = new File([blob], fileName, { type: "image/png" });
-      save.disabled = false;
+      save.disabled = false; pic.disabled = false;
       save.addEventListener("click", () => {
-        const a = document.createElement("a");
+        const url = URL.createObjectURL(blob), a = document.createElement("a");
         a.href = url; a.download = fileName;
         document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        flash(save, T("Saved", "Save ho gaya"), T("Save picture", "Picture save"));
         ev("send:save");
+      });
+      pic.addEventListener("click", async () => {
+        say("");
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          flash(pic, T("Copied", "Copy ho gaya"), T("Copy picture", "Picture copy"));
+          say(T("Picture copied. Paste it into a chat or a story.", "Picture copy ho gayi. Chat ya story me paste karo."));
+          ev("send:copy_pic");
+        } catch { say(T("This browser could not copy the picture. Use Save picture.", "Is browser me picture copy nahi hui. Picture save karo.")); }
       });
       let canShare = false;
       try { canShare = !!navigator.canShare?.({ files: [file] }); } catch {}
-      if (!canShare) { share.hidden = true; save.classList.replace("btn-ghost", "btn-primary"); return; }
-      share.disabled = false;
-      share.addEventListener("click", async () => {
-        try { await navigator.share({ files: [file], title: "StockSaathi", text: T(`My StockSaathi report card: ${vm.grade} this week.`, `Mera StockSaathi report card: is hafte ${vm.grade}.`) }); ev("send:share"); } catch {}
-      });
+      if (canShare) {
+        more.hidden = false; more.disabled = false;
+        more.addEventListener("click", async () => {
+          try { await navigator.share({ files: [file], title: "StockSaathi", text }); ev("send:share"); } catch {}
+        });
+      }
     }).catch(() => {
       if (!overlay.isConnected) return;
-      pic.removeAttribute("aria-busy");
-      pic.innerHTML = `<p class="rc4-send-err">${T("The picture could not be made on this browser.", "Is browser par picture nahi ban paayi.")}</p>`;
+      pic.hidden = true; save.hidden = true;
+      say(T("The picture could not be made on this browser. The link still works.", "Is browser par picture nahi ban paayi. Link kaam karega."));
     });
   });
 }
@@ -600,8 +721,27 @@ button.rc4-obj:focus-visible{outline:2px solid var(--brand);outline-offset:6px}
 .rc4-zone{position:absolute;top:52px;bottom:0;border:0;background:none;padding:0;z-index:1;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .rc4-zone.back{left:0;width:30%}.rc4-zone.next{right:0;width:70%}
 .rc4-zone,.rc4-st-box{outline:none}
-.rc4-send-pic{width:min(230px,58vw);aspect-ratio:9/16;margin:4px auto 12px;border-radius:14px;overflow:hidden;background:#1C2340;display:grid;place-items:center}
-.rc4-send-pic img,.rc4-send-pic .skeleton{width:100%;height:100%;display:block}
-.rc4-send-err{color:#FFF4DC;font-size:13px;padding:16px;text-align:center;line-height:1.4;margin:0}
+.rc-dlg.rc4-send{max-width:470px}
+.rc4-send .rc-dlg-top{margin-bottom:14px}.rc4-send .rc-dlg-top h2{margin:0}
+.rc4-stage{position:relative;height:250px;border-radius:18px;background:#5367FF;overflow:hidden;display:grid;place-items:center}
+.rc4-stage .rc-st-star{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+.rc4-stage-card{position:relative;display:block;transform:rotate(-5deg);line-height:0}
+.rc4-sh{font-size:13px;font-weight:700;color:var(--text-muted);margin:18px 0 10px;letter-spacing:0}
+.rc4-pins{display:flex;flex-wrap:wrap;gap:6px 4px}
+.rc4-pin{width:62px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:4px 0;border:0;background:none;color:inherit;font:inherit;font-size:11.5px;font-weight:600;line-height:1.2;text-align:center;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.rc4-pin svg{display:block}
+.rc4-pin:active:not(:disabled) svg{transform:translateY(2px)}
+.rc4-pin:disabled{opacity:.45;cursor:default}
+.rc4-pin:focus-visible,.rc4-off:focus-visible{outline:2px solid var(--rc4-mint,#0E9F7A);outline-offset:2px}
+.rc4-pin[hidden],.rc4-off[hidden]{display:none}
+.rc4-sl{display:flex;align-items:center;gap:10px;padding:8px 8px 8px 12px;border-radius:14px;background:rgba(127,137,170,.16)}
+.rc4-sl svg{flex:none}
+.rc4-sl-url{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:all}
+.rc4-sl-url[data-empty]{font-weight:500;color:var(--text-muted);user-select:none}
+.rc4-sl .btn{flex:none;min-width:104px}
+.rc4-send-st{min-height:18px;margin:10px 0 0;font-size:13px;line-height:1.4;color:var(--text)}
+.rc4-send .rc-note{margin-top:6px}
+.rc4-off{border:0;background:none;padding:0;font:inherit;font-weight:700;color:inherit;text-decoration:underline;cursor:pointer}
+@media (max-width:480px){.rc4-stage{height:170px}.rc4-stage .rc-st-star{width:250px;height:250px}.rc4-stage-card svg{width:104px;height:auto}.rc4-sh{margin:14px 0 8px}.rc4-pins{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 0}.rc4-pin{width:auto}}
 @media (prefers-reduced-motion:no-preference){.rc4-seg i{transition:background-color .15s}}
 `;
