@@ -142,19 +142,20 @@ function buildInput(state, extras) {
 
 // ---- Page -----------------------------------------------------------------------
 export function renderReportCard(main) {
-  // Owner accounts get the card page (reportCardV4.js) until it is switched on
-  // for everyone; ?rc_old=1 shows them this page.
-  if (isOwner() && !/[?&]rc_old=1/.test(location.search)) {
-    let gone = false;
-    window.addEventListener("ss:navigate", () => { gone = true; }, { once: true });
+  const wantOld = /[?&]rc_old=1/.test(location.search);
+  let gone = false;
+  window.addEventListener("ss:navigate", () => { gone = true; }, { once: true });
+  const card = () => {
     import("./reportCardV4.js").then((m) => { if (!gone) m.renderReportCardV4(main); })
       .catch((e) => { console.error("[report-card] card page failed to load", e); if (!gone) renderMarkSheet(main); });
-    return;
-  }
+  };
+  // The card page is for everyone since 28 Nov 2026 (the owner's go-ahead).
+  // ?rc_old=1 still shows the mark sheet below.
+  if (!wantOld) return card();
   renderMarkSheet(main);
 }
 
-function renderMarkSheet(main) {
+function renderMarkSheet(main, onOwner = null) {
   let alive = true;
   let ready = false;
   shapeShown = false;
@@ -182,7 +183,12 @@ function renderMarkSheet(main) {
   setTimeout(() => { show(); askAi(); }, 8000);
 
   render();
-  const unsub = subscribe(() => { if (alive) render(); });
+  const stop = () => { alive = false; unsub?.(); main.removeEventListener("click", onClick); };
+  const unsub = subscribe(() => {
+    if (!alive) return;
+    if (onOwner && isOwner()) { stop(); onOwner(); return; }
+    render();
+  });
   const onClick = (e) => {
     const el = e.target.closest("[data-rc]");
     if (!alive || !el || !last || !main.contains(el)) return;
@@ -192,7 +198,7 @@ function renderMarkSheet(main) {
     else if (act === "ai") openAiMore();
   };
   main.addEventListener("click", onClick);
-  window.addEventListener("ss:navigate", () => { alive = false; unsub?.(); main.removeEventListener("click", onClick); }, { once: true });
+  window.addEventListener("ss:navigate", stop, { once: true });
 
   function askAi() {
     if (!alive || asked || !last) return;

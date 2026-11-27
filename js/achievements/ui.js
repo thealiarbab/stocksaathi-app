@@ -207,7 +207,7 @@ function showSummary({ items }) {
 
 /** Show whatever the server awarded that this user has not seen yet. */
 export async function showNew() {
-  if (!isOwner()) return;
+  if (!signedIn()) return;
   // ach_unseen() reads only the rows not shown yet. my_achievements() works
   // out every number the sheet needs, so it is kept for opening the sheet.
   let fresh = null;
@@ -779,9 +779,11 @@ export function mountAchievementsCard(root) {
 // Boot: returning users see what they earned while away; new awards show
 // as they arrive (bell Realtime row, or a check right after a trade).
 // ---------------------------------------------------------------------------
+// Everyone since 28 Nov 2026 (rollout = 'all'); the server still decides who is in scope.
+const signedIn = () => { try { return !!getState()?.user?.id; } catch { return false; } };
 let _started = false;
 export function startAchievements() {
-  if (_started || !isOwner()) return;
+  if (_started || !signedIn()) return;
   _started = true;
   showNew();
   document.addEventListener("ss:notification", (e) => {

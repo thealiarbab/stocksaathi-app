@@ -177,7 +177,7 @@ setTimeout(() => { showPendingNotices(); }, 1200);
 // accounts; starts once the signed-in owner is known.
 setTimeout(() => {
   const go = () => {
-    if (!getState()?.user?.isAdmin) return false;
+    if (!getState()?.user?.id) return false;
     import("./achievements/ui.js").then((m) => m.startAchievements()).catch(() => {});
     return true;
   };
