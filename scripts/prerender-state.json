@@ -240,8 +240,8 @@
   "lastmod": "2026-10-24"
  },
  "/stocks": {
-  "hash": "939d7b10670077b9",
-  "lastmod": "2026-10-28"
+  "hash": "77acdb812df7728b",
+  "lastmod": "2026-11-27"
  },
  "/stocks/20MICRONS": {
   "hash": "09bd2794eda92229",
@@ -2910,6 +2910,10 @@
  "/stocks/HEGAM": {
   "hash": "aa5f8f592c084a69",
   "lastmod": "2026-10-24"
+ },
+ "/stocks/HEGRAPHITE": {
+  "hash": "5ad8f93054fac6eb",
+  "lastmod": "2026-11-27"
  },
  "/stocks/HEIDELBERG": {
   "hash": "c6db9f00c4e5fb51",
@@ -7288,8 +7292,8 @@
   "lastmod": "2026-11-02"
  },
  "/stocks/VGL": {
-  "hash": "8fb6d6d4ac18b0b2",
-  "lastmod": "2026-11-02"
+  "hash": "d0e5fedac2fb0d4c",
+  "lastmod": "2026-11-27"
  },
  "/stocks/VGUARD": {
   "hash": "4395e9df5bb982c9",
