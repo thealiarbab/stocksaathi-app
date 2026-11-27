@@ -66,8 +66,9 @@ class handler(BaseHTTPRequestHandler):
             return self._send(502, b"unavailable")
         try:
             png = render_png(svg)
-        except Exception:
-            return self._send(500, b"render failed")
+        except Exception as e:
+            # Says why (no fonts shipped, the renderer missing): there is nothing secret in it.
+            return self._send(500, ("render failed: %s: %s; fonts=%d" % (type(e).__name__, str(e)[:160], len(_FONTS))).encode("utf-8"))
         # The address carries the marks and grade (&v=), so a changed card is a new address.
         self._send(200, png, "image/png", "public, max-age=3600, s-maxage=86400")
 
