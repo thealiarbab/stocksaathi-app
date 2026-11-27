@@ -633,17 +633,41 @@ function scoreMarket(input) {
 // p30 56, p50 62, p80 69, p95 76), aiming near 6% A+, 15% A, 27% B+, 25% B,
 // 20% C, 7% D. AGENTS.md says how to re-measure. Fixed numbers, not a curve:
 // a user's grade never moves because other users changed.
+//
+// The marks a student sees (28 Nov 2026, the owner's call). The weighted mean
+// of the six parts is hard to push up: a card with four parts at 100 still
+// lands near 78, so the cut for A+ sat at 75 and read like a B1 next to
+// school marks (CBSE gives A1 from 91). Who gets which letter did not change.
+// The overall mark is now stretched so the same cuts land on school numbers:
+// 75 -> 90, 69 -> 80, 62 -> 70, 55 -> 60, 47 -> 50, straight lines between.
+// `overall.score` is the stretched mark (shown, saved and shared everywhere);
+// `overall.raw` is the weighted mean. Part marks are not stretched.
+const RAW_CUTS = [0, 47, 55, 62, 69, 75, 100];
+const SHOWN_CUTS = [0, 50, 60, 70, 80, 90, 100];
+/** The mark shown for a raw overall mark (whole numbers in, whole numbers out; never crosses a cut). */
+export function stretchMark(raw) {
+  if (!Number.isFinite(raw)) return raw;
+  const x = clamp(raw, 0, 100);
+  let i = 1;
+  while (i < RAW_CUTS.length - 1 && x >= RAW_CUTS[i]) i++;
+  const a = RAW_CUTS[i - 1], b = RAW_CUTS[i], c = SHOWN_CUTS[i - 1], d = SHOWN_CUTS[i];
+  return round(c + ((x - a) / (b - a)) * (d - c));
+}
+/** Letters by the mark shown. */
 export const GRADES = [
-  { grade: "A+", min: 75 },
-  { grade: "A",  min: 69 },
-  { grade: "B+", min: 62 },
-  { grade: "B",  min: 55 },
-  { grade: "C",  min: 47 },
+  { grade: "A+", min: 90 },
+  { grade: "A",  min: 80 },
+  { grade: "B+", min: 70 },
+  { grade: "B",  min: 60 },
+  { grade: "C",  min: 50 },
   { grade: "D",  min: 0 },
 ];
+/** The letter for a mark as shown (an overall mark). */
 export function gradeFor(score) {
   return (GRADES.find((g) => score >= g.min) || GRADES[GRADES.length - 1]).grade;
 }
+/** The letter for an unstretched mark (a part's mark, or the raw overall). */
+export const rawGradeFor = (raw) => gradeFor(stretchMark(raw));
 
 export function scoreReportCard(input) {
   const inp = { ...input, now: Number.isFinite(input?.now) ? input.now : Date.now() };
@@ -665,7 +689,8 @@ export function scoreReportCard(input) {
   for (const p of Object.values(pillars)) p.share = p.state === "scored" && wSum > 0 ? Math.round((p.weight / wSum) * 100) : 0;
 
   const graded = pillars.discipline.state === "scored";
-  const score = graded && wSum > 0 ? Math.round(sSum / wSum) : null;
+  const raw = graded && wSum > 0 ? Math.round(sSum / wSum) : null;
+  const score = raw == null ? null : stretchMark(raw);
   const scored = Object.values(pillars).filter((p) => p.state === "scored" && p.key !== "market");
   const best = scored.slice().sort((a, b) => b.score - a.score)[0] || null;
   const worst = scored.slice().sort((a, b) => a.score - b.score)[0] || null;
@@ -674,6 +699,7 @@ export function scoreReportCard(input) {
     overall: {
       state: graded ? "graded" : "building",
       score,
+      raw,
       grade: graded ? gradeFor(score) : null,
       best: best && worst && best.key !== worst.key ? best.key : null,
       worst: best && worst && best.key !== worst.key ? worst.key : null,

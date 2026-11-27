@@ -9,7 +9,7 @@
 //                      Discipline read A+ for 82% of students and Learning D
 //                      for 70%, because the parts do not spread alike.
 //   a letter that holds  going up happens at the cut point; going down only
-//                      once the score is 2 marks under it. Measured: 34% of
+//                      once the score is 3 marks under it. Measured: 34% of
 //                      students saw more than one letter inside 5 days from
 //                      prices alone.
 //   profit, smoothed   Results is scored on the middle value of the last five
@@ -63,7 +63,7 @@ export const CARD_PLATING = { "A+": "platinum", A: "gold", "B+": "silver", B: "b
 export const cardPlating = (grade) => CARD_PLATING[grade] || "plain";
 
 // ---- A letter that holds ------------------------------------------------------
-export const HOLD_MARKS = 2;
+export const HOLD_MARKS = 3; // on the marks shown (was 2 on the unstretched mark: about the same distance)
 const gi = (g) => GRADES.findIndex((x) => x.grade === g);
 
 /** The letter to show for `score`, given the letter on the last saved card. */

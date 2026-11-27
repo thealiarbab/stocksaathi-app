@@ -556,8 +556,16 @@ effort for A/B runs; unset to restore the per-op settings.
   - Against the Nifty 50 10: same rupees on the same days in the index,
     FIFO; hidden before 28 days and 10 trades.
   A part without enough data is locked and says what unlocks it; its weight
-  goes to the others. No grade before 5 trades. Fixed cut points A+ 75, A 69,
-  B+ 62, B 55, C 47.
+  goes to the others. No grade before 5 trades. The overall mark is
+  STRETCHED before it is shown, saved or shared (28 Nov 2026, the owner's
+  call: A+ at 75 read like a B1 next to school marks). `stretchMark()` maps
+  the weighted mean so the old cuts 75 / 69 / 62 / 55 / 47 land on
+  90 / 80 / 70 / 60 / 50 (`GRADES`); nobody's letter changed.
+  `overall.score` = the stretched mark, `overall.raw` = the weighted mean.
+  Part marks are not stretched (`rawGradeFor` gives a part's letter). The
+  letter holds until 3 shown marks under its cut (`HOLD_MARKS`). Rows in
+  `report_card_weeks` / `report_card_shares` hold stretched marks (the rows
+  saved before this were converted in SQL on 28 Nov).
 - Server inputs: `report_card_signals()` (migration `2026-11-13d`) returns
   learning weeks, per-buy research and the daily account value in one call;
   `js/features/learning.js` caches it.

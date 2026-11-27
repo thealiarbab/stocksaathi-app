@@ -159,13 +159,13 @@ function clean(x, pathName = "rc") {
   const full = score(base({ trades, activity, portfolio }));
   const p = full.pillars;
   const mean = (keys) => Math.round(keys.reduce((s, k) => s + p[k].score * p[k].weight, 0) / keys.reduce((s, k) => s + p[k].weight, 0));
-  ok("overall is the weighted mean of the scored parts", full.overall.score === mean(["discipline", "diversification", "learning"]));
+  ok("overall is the weighted mean of the scored parts", full.overall.raw === mean(["discipline", "diversification", "learning"]) && full.overall.score === core.stretchMark(full.overall.raw));
   const shares = Object.values(p).reduce((s, x) => s + x.share, 0);
   ok("shares of scored parts add up to 100", near(shares, 100, 1), String(shares));
 
   const noLearn = score(base({ trades, activity: null, portfolio }));
   const q = noLearn.pillars;
-  ok("learning data missing: left out, not scored as zero", q.learning.state === "pending" && noLearn.overall.score === Math.round((q.discipline.score * 45 + q.diversification.score * 25) / 70));
+  ok("learning data missing: left out, not scored as zero", q.learning.state === "pending" && noLearn.overall.raw === Math.round((q.discipline.score * 45 + q.diversification.score * 25) / 70));
 }
 
 // ---- 8. Discipline: flags against how much you trade --------------------------------------
@@ -329,7 +329,7 @@ function clean(x, pathName = "rc") {
   const lo = full(-900_000), hi = full(900_000);
   const scoredW = Object.values(lo.pillars).filter((x) => x.state === "scored").reduce((s, x) => s + x.weight, 0);
   const share = Math.round((core.WEIGHTS.market / scoredW) * 100);
-  ok("Nifty part carries only its weight of the grade", lo.pillars.market.share === share && near(hi.overall.score - lo.overall.score, share, 1), `${share} ${lo.overall.score}..${hi.overall.score}`);
+  ok("Nifty part carries only its weight of the grade", lo.pillars.market.share === share && near(hi.overall.raw - lo.overall.raw, share, 1), `${share} ${lo.overall.raw}..${hi.overall.raw}`);
 
   // benchmarkPl: the same rupees on the same days.
   const closes = [["2026-10-05", 100], ["2026-10-06", 102], ["2026-10-20", 105], ["2026-11-12", 110]];
@@ -441,8 +441,13 @@ function clean(x, pathName = "rc") {
 // ---- 14. Grades -----------------------------------------------------------------------------
 {
   const g = core.gradeFor;
-  ok("grade cut points", g(100) === "A+" && g(75) === "A+" && g(74) === "A" && g(69) === "A" && g(68) === "B+" && g(62) === "B+"
-    && g(61) === "B" && g(55) === "B" && g(54) === "C" && g(47) === "C" && g(46) === "D" && g(0) === "D");
+  ok("grade cut points (on the marks shown)", g(100) === "A+" && g(90) === "A+" && g(89) === "A" && g(80) === "A" && g(79) === "B+" && g(70) === "B+"
+    && g(69) === "B" && g(60) === "B" && g(59) === "C" && g(50) === "C" && g(49) === "D" && g(0) === "D");
+  const st = core.stretchMark, rg = core.rawGradeFor;
+  ok("the stretch puts the old cuts on school numbers", st(75) === 90 && st(69) === 80 && st(62) === 70 && st(55) === 60 && st(47) === 50 && st(0) === 0 && st(100) === 100);
+  ok("the stretch never moves anyone to another letter", rg(75) === "A+" && rg(74) === "A" && rg(69) === "A" && rg(68) === "B+" && rg(62) === "B+" && rg(61) === "B"
+    && rg(55) === "B" && rg(54) === "C" && rg(47) === "C" && rg(46) === "D");
+  ok("the stretch never goes down as the raw mark goes up, and stays 0 to 100", Array.from({ length: 101 }, (_, r) => st(r)).every((v, r, a) => Number.isInteger(v) && v >= 0 && v <= 100 && (r === 0 || v >= a[r - 1])));
   ok("cut points go down and end at 0", core.GRADES.every((x, i, arr) => i === 0 || x.min < arr[i - 1].min) && core.GRADES[core.GRADES.length - 1].min === 0);
   ok("weights add up to 100, discipline largest, Nifty smallest", Object.values(core.WEIGHTS).reduce((s, x) => s + x, 0) === 100
     && core.WEIGHTS.discipline === Math.max(...Object.values(core.WEIGHTS)) && core.WEIGHTS.market === Math.min(...Object.values(core.WEIGHTS)));
@@ -555,10 +560,10 @@ function clean(x, pathName = "rc") {
   ok("discipline at 100 with few trades: the next plating waits for trades, not marks", W.nextPlating("discipline", 100, { trades: 8 })?.needsTrades === true);
 
   // the letter that holds
-  ok("no saved card: the plain letter", W.stickyGrade(68, null) === "B+" && W.stickyGrade(69, undefined) === "A");
-  ok("going up happens at the cut point", W.stickyGrade(69, "B+") === "A" && W.stickyGrade(75, "B") === "A+");
-  ok("going down waits for 2 marks under the cut", W.stickyGrade(68, "A") === "A" && W.stickyGrade(67, "A") === "A" && W.stickyGrade(66, "A") === "B+");
-  ok("a big fall is not held", W.stickyGrade(56, "A") === "B" && W.stickyGrade(30, "A+") === "D");
+  ok("no saved card: the plain letter", W.stickyGrade(79, null) === "B+" && W.stickyGrade(80, undefined) === "A");
+  ok("going up happens at the cut point", W.stickyGrade(80, "B+") === "A" && W.stickyGrade(90, "B") === "A+");
+  ok("going down waits for 3 marks under the cut", W.stickyGrade(79, "A") === "A" && W.stickyGrade(77, "A") === "A" && W.stickyGrade(76, "A") === "B+");
+  ok("a big fall is not held", W.stickyGrade(62, "A") === "B" && W.stickyGrade(30, "A+") === "D");
   ok("a held letter needs the cut point again once lost", W.stickyGrade(68, "B+") === "B+");
   ok("an unknown saved letter is ignored", W.stickyGrade(60, "Z") === "B");
   ok("no score, no letter", W.stickyGrade(null, "A") === null);
@@ -593,11 +598,11 @@ function clean(x, pathName = "rc") {
   const row = W.weekRow(saved, { score: 64, grade: "B+" }, "2026-11-16");
   ok("week row: three past cards then this week, live", row.length === 4 && row[0].week === "2026-10-26" && row[3].now && row[3].score === 64 && row[2].plating === "silver");
   ok("this week's saved row is not 'last week'", W.lastWeek(saved, "2026-11-16").week === "2026-11-09" && W.lastWeek([], "2026-11-16") === null);
-  const rd = W.road(64, "B+", saved);
-  ok("the road: far, next, here, done, done", rd.map((r) => r.state).join() === "far,next,here,done,done" && rd[1].left === 5 && rd[3].since === "2026-10-26" && rd[2].since === "2026-11-09");
+  const rd = W.road(74, "B+", saved);
+  ok("the road: far, next, here, done, done", rd.map((r) => r.state).join() === "far,next,here,done,done" && rd[1].left === 6 && rd[3].since === "2026-10-26" && rd[2].since === "2026-11-09");
   ok("the road at D ends on D", W.road(30, "D", []).slice(-1)[0].grade === "D" && W.road(30, "D", []).filter((r) => r.state === "here").length === 1);
   ok("the road at A+ has no next", W.road(80, "A+", []).every((r) => r.state !== "next") && W.nextGrade(80, "A+") === null);
-  ok("marks to the next letter", W.nextGrade(64, "B+").grade === "A" && W.nextGrade(64, "B+").left === 5 && W.nextGrade(67, "A").grade === "A+");
+  ok("marks to the next letter", W.nextGrade(74, "B+").grade === "A" && W.nextGrade(74, "B+").left === 6 && W.nextGrade(87, "A").grade === "A+");
   const rcLike = { pillars: { discipline: { state: "scored", score: 80, key: "discipline" }, results: { state: "scored", score: 58, key: "results" }, research: { state: "locked", key: "research" }, diversification: { state: "scored", score: 62, key: "diversification" }, learning: { state: "scored", score: 53, key: "learning" }, market: { state: "scored", score: 99, key: "market" } } };
   ok("parts of a card: locked is null", W.partsOf(rcLike).research === null && W.partsOf(rcLike).discipline === 80);
   ok("standouts leave vs Nifty out", W.standouts(rcLike).best.key === "discipline" && W.standouts(rcLike).low.key === "learning");

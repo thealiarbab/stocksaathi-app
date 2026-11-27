@@ -21,7 +21,7 @@ import { getInstrument, ensureUniverseLoaded } from "../data/universe.js";
 import { getQuoteBatch } from "../data/marketData.js";
 import { computeTradeStats } from "../data/tradeStats.js";
 import { aiLang } from "../features/aiLang.js";
-import { scoreReportCard, benchmarkPl, GRADES, WEIGHTS, gradeFor } from "../coach/reportCardCore.js";
+import { scoreReportCard, benchmarkPl, GRADES, WEIGHTS, gradeFor, rawGradeFor } from "../coach/reportCardCore.js";
 import { isOwner } from "../features/preview.js";
 import { tradesWithFlags } from "../coach/biasLedger.js";
 import { factText, unlockText, pillarName, pillarCopy, gradeTitle, overallSummary, promptLines } from "../coach/reportCardCopy.js";
@@ -287,7 +287,7 @@ function shapeSvg(rc, hi) {
     const [x, y] = at(i, R + 20);
     const anchor = Math.abs(x - cx) < 4 ? "middle" : x > cx ? "start" : "end";
     const dy = y < cy - R * 0.6 ? -4 : y > cy + R * 0.6 ? 14 : 4;
-    const g = p.state === "scored" ? gradeFor(p.score) : "–";
+    const g = p.state === "scored" ? rawGradeFor(p.score) : "–";
     return `<text x="${x.toFixed(1)}" y="${(y + dy).toFixed(1)}" text-anchor="${anchor}" class="rc-shape-label ${p.state === "scored" ? "" : "is-off"}"><tspan class="rc-shape-name">${esc(SHORT[p.key]?.[hi ? 1 : 0] || pillarName(p.key, hi))}</tspan><tspan class="rc-shape-grade" dx="5">${esc(g)}</tspan></text>`;
   }).join("");
   const spokes = ps.map((p, i) => {
@@ -351,7 +351,7 @@ function topCard(rc, state, hi) {
 }
 
 // Colour follows the grade, so the same letter is always the same colour.
-const toneOf = (score) => { const g = gradeFor(score); return g === "A+" || g === "A" ? "good" : g === "D" ? "bad" : "warn"; };
+const toneOf = (score) => { const g = rawGradeFor(score); return g === "A+" || g === "A" ? "good" : g === "D" ? "bad" : "warn"; };
 const chevron = `<svg class="rc-row-go" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>`;
 
 // ---- The mark sheet: one row per part, like a school report card ---------------
@@ -376,7 +376,7 @@ function markRow(p, hi) {
       <button type="button" class="rc-row tone-${tone}" data-rc="pillar:${p.key}">
         <span class="rc-row-name">${name}<small>${T(`Counts for ${p.share}%`, `${p.share}% ginta hai`)}</small></span>
         <span class="rc-row-marks"><b class="tabular">${p.score}</b><i class="rc-meter"><i style="width:${p.score}%"></i></i></span>
-        <span class="rc-row-grade">${esc(gradeFor(p.score))}</span>
+        <span class="rc-row-grade">${esc(rawGradeFor(p.score))}</span>
         <span class="rc-row-remark">${esc(factText(fact, hi))}</span>
         ${chevron}
       </button>`;
@@ -514,9 +514,11 @@ function openHow(rc, { card = false } = {}) {
       <div class="rc-scale">${scale}</div>
       <p>${T("These cut points come from how StockSaathi students really score: about half sit at B or B+, and an A+ is roughly 1 in 20.",
         "Yeh cut points StockSaathi ke students ke asli score se liye gaye hain: lagbhag aadhe B ya B+ par hain, aur A+ lagbhag 20 me se 1 ko milta hai.")}</p>
+      <p>${T("Your overall mark is put on a school scale, so an A+ starts at 90. That is why it can sit a little above or below the plain average of your six parts.",
+        "Tumhara overall mark school jaise scale par rakha jaata hai, isliye A+ 90 se shuru hota hai. Isi liye woh chhe hisson ke seedhe average se thoda upar ya neeche ho sakta hai.")}</p>
       <p>${T("Results reads the middle value of your last five days, so one sharp day in the market does not move your grade.",
-        "Results pichhle paanch din ka beech ka value padhta hai, isliye market ka ek tez din tumhara grade nahi hilaata.")}${card ? " " + T("A letter is reached at its cut point and kept until you are 2 marks under it, so it does not flip back and forth.",
-        "Letter apne cut point par milta hai aur tab tak rehta hai jab tak tum usse 2 marks neeche na ho, isliye woh aage peeche nahi hota.") : ""}</p>
+        "Results pichhle paanch din ka beech ka value padhta hai, isliye market ka ek tez din tumhara grade nahi hilaata.")}${card ? " " + T("A letter is reached at its cut point and kept until you are 3 marks under it, so it does not flip back and forth.",
+        "Letter apne cut point par milta hai aur tab tak rehta hai jab tak tum usse 3 marks neeche na ho, isliye woh aage peeche nahi hota.") : ""}</p>
       ${card ? `<p>${T("Each of the six parts has its own plating (bronze, silver, gold, platinum), with cut points set for that part: the parts do not spread alike, so one rule for all six would mislead.",
         "Chhe hisson me har ek ki apni plating hai (bronze, silver, gold, platinum), aur cut points us hisse ke hisaab se hain: saare hisse ek jaise nahi phailte.")}</p>` : ""}
       <p class="rc-note">${T("Only real exchange prices are used. A holding with no live price is counted at what you paid for it.",

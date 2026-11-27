@@ -55,7 +55,7 @@ const UP = ic("M12 19V5M5 12l7-7 7 7"), DOWN = ic("M12 5v14M5 12l7 7 7-7"), SAME
 const mark = (d) => `<span class="rc4-mk ${d}">${d === "up" ? UP : d === "down" ? DOWN : SAME}</span>`;
 
 // ---- Saved weeks (server) -------------------------------------------------------
-const WK_KEY = "ss.rcWeeks.v1", WK_FRESH_MS = 10 * 60_000, WK_PAINT_MS = 7 * 24 * 3_600_000;
+const WK_KEY = "ss.rcWeeks.v2" /* v2: marks are the stretched ones */, WK_FRESH_MS = 10 * 60_000, WK_PAINT_MS = 7 * 24 * 3_600_000;
 function savedWeeks(uid, maxAge) {
   try {
     const o = JSON.parse(localStorage.getItem(WK_KEY) || "null");
