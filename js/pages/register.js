@@ -12,6 +12,7 @@ import { wirePasswordToggle, finishSignIn } from "./login.js";
 import { suggestEmail, checkEmailDomain, inboxLinkFor } from "../auth/emailCheck.js";
 import { googleButtonHtml, wireGoogleButton } from "../components/googleButton.js";
 import { triesBarHtml, runLockCountdown } from "../components/triesBar.js";
+import { logEvent } from "../features/telemetry.js";
 
 export function renderRegister(main) {
   let stage = "form";    // "form" → "otp" → done
@@ -308,6 +309,10 @@ export function renderRegister(main) {
       stage = "otp";
       startResendTimer();
       render();
+      // Every check passed and the request goes out now. The outside watcher
+      // counts these, not presses of the button (a press the checks stop is
+      // not a sign-up attempt). Counted in api/_ops.js opsSignupFlow.
+      logEvent("form_submit", "reg-sent");
       const signupPromise = registerAccount({ username, email, password: pw, displayName: name });
       sendPromise = signupPromise.then(() => {}, () => {});
       // Slow is not failed: past 15 s the email usually still arrives, so

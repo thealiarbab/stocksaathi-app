@@ -179,7 +179,10 @@ export async function opsSignupFlow(rows) {
   for (const r of rows) {
     if (r.kind === "page" && (r.path === "/register" || r.path === "/register/")) add("view");
     else if (r.kind === "form_start" && r.target === "reg-form") add("start");
-    else if (r.kind === "form_submit" && r.target === "reg-form") add("submit");
+    // "submit" = a sign-up request really sent (register.js logs reg-sent
+    // after the form checks pass). Presses of the button the checks stop
+    // (reg-form) once raised a stuck alarm: 8 presses, 1 request.
+    else if (r.kind === "form_submit" && r.target === "reg-sent") add("submit");
     else if (r.kind === "form_submit" && r.target === "otp-form") add("otp");
     else if (r.kind === "form_error" && (r.target === "reg-form" || r.target === "otp-form")) add("error");
   }
